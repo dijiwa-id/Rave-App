@@ -4,7 +4,7 @@ import type { OrgType } from '@gema/domain';
 import { config } from './config.js';
 import { forbidden, unauthorized } from './errors.js';
 
-export type PlatformRole = 'fan' | 'artist' | 'manager' | 'label' | 'promotor' | 'creator' | 'admin' | 'service';
+export type PlatformRole = 'fan' | 'artist' | 'manager' | 'label' | 'promotor' | 'creator' | 'admin' | 'superadmin' | 'service';
 export type OrgRole = 'OWNER' | 'ADMIN' | 'FINANCE' | 'MEMBER' | 'VIEWER';
 
 export interface OrgClaim {
@@ -24,6 +24,8 @@ export interface AuthUser {
   city?: string | null;
   kyc?: boolean;
   premium?: boolean;
+  /** Peran internal back office (REQ-ADM-01): SUPER_ADMIN | OPS | CONTENT_QC | FINANCE | LEGAL | SUPPORT | EDITORIAL */
+  admin_role?: string | null;
 }
 
 declare module 'fastify' {
@@ -36,7 +38,7 @@ const key = () => new TextEncoder().encode(config.jwtSecret);
 export const ACCESS_TOKEN_TTL_SEC = 15 * 60; // REQ-IAM-01: ≤ 15 menit
 
 export async function signAccessToken(u: AuthUser, ttlSec = ACCESS_TOKEN_TTL_SEC): Promise<string> {
-  return new SignJWT({ email: u.email, name: u.name, roles: u.roles, orgs: u.orgs, city: u.city, kyc: u.kyc, premium: u.premium })
+  return new SignJWT({ email: u.email, name: u.name, roles: u.roles, orgs: u.orgs, city: u.city, kyc: u.kyc, premium: u.premium, admin_role: u.admin_role ?? null })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(u.sub)
     .setIssuer('gema-iam')
@@ -58,6 +60,7 @@ export async function verifyAccessToken(token: string): Promise<AuthUser> {
     city: (payload.city as string | null) ?? null,
     kyc: Boolean(payload.kyc),
     premium: Boolean(payload.premium),
+    admin_role: (payload.admin_role as string | null) ?? null,
   };
 }
 
@@ -93,6 +96,22 @@ export function requireRole(...roles: PlatformRole[]) {
     if (req.user.roles.includes('admin') || req.user.roles.includes('service')) return;
     if (!roles.some((r) => req.user!.roles.includes(r))) throw forbidden(`Memerlukan peran: ${roles.join(', ')}`);
   };
+}
+
+export function isSuperAdmin(u: AuthUser | null): boolean {
+  return !!u && u.roles.includes('superadmin');
+}
+
+/** Hanya Super Admin (admin biasa TIDAK lolos — beda dengan requireRole). */
+export async function requireSuperAdmin(req: FastifyRequest) {
+  if (!req.user) throw unauthorized();
+  if (!isSuperAdmin(req.user)) throw forbidden('Hanya Super Admin');
+}
+
+/** Endpoint /internal/*: hanya token service (atau superadmin untuk diagnosis). */
+export async function requireService(req: FastifyRequest) {
+  if (!req.user) throw unauthorized();
+  if (!req.user.roles.includes('service') && !isSuperAdmin(req.user)) throw forbidden('Khusus antar-service');
 }
 
 export function isAdmin(u: AuthUser | null): boolean {

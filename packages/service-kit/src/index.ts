@@ -6,4 +6,5 @@ export * from './bus.js';
 export * from './helpers.js';
 export * from './ids.js';
 export * from './service.js';
+export * from './settings.js';
 export { z } from 'zod';

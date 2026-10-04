@@ -53,6 +53,9 @@ export interface DomainEvents {
   'finance.escrow.refunded': { referenceId: string; amount: number };
   'finance.payout.completed': { payoutId: string; partyId: string; amount: number };
 
+  // Platform (Super Admin)
+  'platform.settings.updated': { changes: Record<string, unknown>; version: number; byUserId: string };
+
   // Ticketing
   'ticketing.event.published': { eventId: string; title: string; city: string; startsAt: string; artistIds: string[]; slug: string };
   'ticketing.order.paid': { orderId: string; eventId: string; userId: string; quantity: number; amount: number };

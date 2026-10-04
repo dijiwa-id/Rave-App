@@ -42,6 +42,7 @@ export const config = {
     finance: Number(env('FINANCE_PORT', '4006')),
     ticketing: Number(env('TICKETING_PORT', '4007')),
     notification: Number(env('NOTIFICATION_PORT', '4008')),
+    platform: Number(env('PLATFORM_PORT', '4009')),
   },
 };
 

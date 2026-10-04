@@ -56,6 +56,38 @@ function pgDriver(db: Db, log: (o: object, m: string) => void): Driver {
       }
       let running = false;
       let again = false;
+      /** Proses ulang dead letter yang diminta retry (panel Super Admin). Sukses → dihapus; gagal → attempts+1. */
+      const retryDeadLetters = async () => {
+        const due = await db.query(
+          `SELECT d.event_id FROM bus.dead_letters d WHERE d.group_id=$1 AND d.retry_requested_at IS NOT NULL AND d.topic = ANY($2) LIMIT 20`,
+          [group, topics],
+        );
+        for (const { event_id } of due) {
+          await db.tx(async (c) => {
+            const row = (await c.query(`SELECT * FROM bus.events WHERE id=$1`, [event_id])).rows[0];
+            const lock = await c.query(`SELECT 1 FROM bus.dead_letters WHERE group_id=$1 AND event_id=$2 AND retry_requested_at IS NOT NULL FOR UPDATE SKIP LOCKED`, [group, event_id]);
+            if (!lock.rows[0]) return;
+            if (!row) {
+              await c.query(`DELETE FROM bus.dead_letters WHERE group_id=$1 AND event_id=$2`, [group, event_id]);
+              return;
+            }
+            const env: EventEnvelope = { id: row.id, topic: row.topic, key: row.key, payload: row.payload, occurredAt: new Date(row.occurred_at).toISOString(), producer: row.producer };
+            await c.query('SAVEPOINT r');
+            try {
+              await (onEvent as any)(env, c);
+              await c.query('RELEASE SAVEPOINT r');
+              await c.query(`DELETE FROM bus.dead_letters WHERE group_id=$1 AND event_id=$2`, [group, event_id]);
+              log({ topic: row.topic, eventId: event_id }, 'dead letter berhasil diproses ulang');
+            } catch (err: any) {
+              await c.query('ROLLBACK TO SAVEPOINT r');
+              await c.query(
+                `UPDATE bus.dead_letters SET retry_requested_at=NULL, attempts=attempts+1, error=$3, failed_at=now() WHERE group_id=$1 AND event_id=$2`,
+                [group, event_id, String(err?.stack ?? err)],
+              );
+            }
+          });
+        }
+      };
       const drain = async () => {
         if (closed) return;
         if (running) {
@@ -102,6 +134,7 @@ function pgDriver(db: Db, log: (o: object, m: string) => void): Driver {
               }
             }
           } while (again && !closed);
+          await retryDeadLetters();
         } catch (e: any) {
           log({ err: e?.message }, 'consumer drain error');
         } finally {

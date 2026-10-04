@@ -12,7 +12,8 @@ export const SEED = {
     artist: '01900000-0000-7000-8000-000000000002', // pemilik org artis "Senja Kolektif"
     manager: '01900000-0000-7000-8000-000000000003',
     promotor: '01900000-0000-7000-8000-000000000004',
-    admin: '01900000-0000-7000-8000-000000000005',
+    admin: '01900000-0000-7000-8000-000000000005', // admin_role OPS
+    superadmin: '01900000-0000-7000-8000-000000000006', // admin_role SUPER_ADMIN
   },
   emails: {
     fan: 'fan@gema.id',
@@ -20,6 +21,7 @@ export const SEED = {
     manager: 'manajer@gema.id',
     promotor: 'promotor@gema.id',
     admin: 'admin@gema.id',
+    superadmin: 'superadmin@gema.id',
   },
   orgs: {
     senjaArtist: '01900000-0000-7000-8000-000000000101',

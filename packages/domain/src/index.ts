@@ -6,3 +6,4 @@ export * from './ticket.js';
 export * from './events.js';
 export * from './analytics.js';
 export * from './seed-ids.js';
+export * from './settings.js';

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Urutan seed penting: IAM (user/org) → katalog → turunan. */
-export const SERVICES = ['iam', 'catalog', 'library', 'playback', 'booking', 'finance', 'ticketing', 'notification'] as const;
+export const SERVICES = ['platform', 'iam', 'catalog', 'library', 'playback', 'booking', 'finance', 'ticketing', 'notification'] as const;
 
 const COLORS = [36, 35, 33, 32, 34, 91, 92, 93, 94, 95];
 
