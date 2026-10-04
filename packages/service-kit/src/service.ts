@@ -1,6 +1,7 @@
 import cors from '@fastify/cors';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { attachUser } from './auth.js';
+import { attachUser, requireService } from './auth.js';
+import { refreshSettings, settings } from './settings.js';
 import { createBus, type Consumers } from './bus.js';
 import { config } from './config.js';
 import { createDb, migrate, type Db } from './db.js';
@@ -28,6 +29,8 @@ export interface ServiceDefinition {
   routes: (app: FastifyInstance, ctx: ServiceContext) => Promise<void> | void;
   consumers?: (ctx: ServiceContext) => Consumers;
   jobs?: Job[];
+  /** Metrik ringkas untuk dasbor Super Admin → `GET /internal/stats` (token service). */
+  stats?: (ctx: ServiceContext) => Promise<Record<string, unknown>>;
   /** Seed data demo (idempoten). Dijalankan dengan argumen CLI `seed`. */
   seed?: (ctx: ServiceContext) => Promise<void>;
 }
@@ -62,6 +65,17 @@ export function createService(def: ServiceDefinition) {
     await db.query('SELECT 1');
     return { status: 'ready', service: def.name };
   });
+  const startedAt = Date.now();
+  app.get('/internal/stats', { preHandler: requireService }, async () => {
+    const mem = process.memoryUsage();
+    return {
+      service: def.name,
+      uptime_s: Math.round((Date.now() - startedAt) / 1000),
+      memory_mb: Math.round(mem.rss / 1048576),
+      settings_loaded_at: settings.loadedAt() ? new Date(settings.loadedAt()!).toISOString() : null,
+      metrics: def.stats ? await def.stats(ctx) : {},
+    };
+  });
 
   async function start() {
     const cmd = process.argv[2];
@@ -78,7 +92,19 @@ export function createService(def: ServiceDefinition) {
     });
     await app.listen({ port: def.port, host: process.env.HOST ?? '0.0.0.0' });
     bus.startRelay();
-    if (def.consumers) await bus.consume(def.consumers(ctx));
+    // Pengaturan platform: snapshot awal + pembaruan real-time lewat event bus (+ refresh berkala).
+    if (def.name !== 'platform') {
+      await refreshSettings(def.name);
+      setInterval(() => void refreshSettings(def.name), 60_000);
+    }
+    const own = def.consumers ? def.consumers(ctx) : {};
+    await bus.consume({
+      ...own,
+      'platform.settings.updated': async (e, tx) => {
+        settings.apply(e.payload.changes);
+        if (own['platform.settings.updated']) await own['platform.settings.updated'](e, tx);
+      },
+    });
     for (const j of def.jobs ?? []) {
       setInterval(() => {
         j.run(ctx).catch((e) => log.error({ err: e?.message, job: j.name }, 'job gagal'));

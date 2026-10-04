@@ -305,3 +305,69 @@ Ticket = { id, event: EventSummary, type_name, status: "VALID"|"CHECKED_IN"|"REF
 | `admin@gema.id` | admin | back office |
 
 Login: `POST /v1/auth/otp` → pakai `dev_code` dari respons → `POST /v1/auth/token`.
+
+## 9. Platform — Super Admin (REQ-ADM-01, BRD §12.3 "Konfigurasi Kebijakan", §9 durabilitas)
+
+Service `platform` (port **4009**, schema `platform`). Gateway: `/v1/platform` dan `/v1/admin/platform` → platform.
+Peran: klaim JWT `roles` memuat `superadmin` (dan `admin`) untuk Super Admin; `admin_role` ∈ `SUPER_ADMIN|OPS|CONTENT_QC|FINANCE|LEGAL|SUPPORT|EDITORIAL`.
+**R** = admin mana pun boleh membaca; **W** = hanya Super Admin (`requireSuperAdmin`). Semua W tercatat di audit log.
+
+Registri pengaturan = `packages/domain/src/settings.ts` (`SETTINGS`, `coerceSetting`). Perubahan dipublikasikan sebagai event `platform.settings.updated { changes, version, byUserId }`; setiap service menerapkannya otomatis (`settings.get()` dari service-kit). Gateway mem-polling `/internal/settings`.
+
+| Method & Path | Akses | Body / Query | Respons |
+|---|---|---|---|
+| `GET /v1/platform/config` | publik | | `{ version, settings: { <kunci public>: nilai } }` (banner, maintenance, modul, preview, upload maks) |
+| `GET /v1/admin/platform/settings` | R | | `{ version, values: Record<key, value>, meta: Record<key, { updated_by, updated_at }> }` (registri diambil klien dari `@gema/domain/settings`) |
+| `PUT /v1/admin/platform/settings` | W | `{ changes: Record<key, value>, reason: string (min 5) }` | sama seperti GET; `400` bila validasi registri gagal (`errors[{path:key,message}]`) |
+| `POST /v1/admin/platform/settings/reset` | W | `{ keys: string[], reason }` | kembali ke default |
+| `GET /v1/admin/platform/settings/history` | R | `key?` | `{ data: { id, key, old_value, new_value, reason, by_user_id, by_name, created_at }[] }` |
+| `GET /v1/admin/platform/overview` | R | | `PlatformOverview` |
+| `GET /v1/admin/platform/storage` | R | | `StorageOverview` |
+| `GET /v1/admin/platform/storage/buckets/:bucket/files` | R | `q?, sort=date\|size\|name, order=desc\|asc, cursor?, limit?` | `{ data: StoredFile[], next_cursor, total_files, total_bytes }` |
+| `GET /v1/admin/platform/storage/buckets/:bucket/files/:key/download` | R | | biner (attachment) |
+| `DELETE /v1/admin/platform/storage/buckets/:bucket/files/:key` | W | `?force=true` untuk file yang masih direferensikan | `{ deleted: true }` / `409` bila direferensikan |
+| `POST /v1/admin/platform/storage/buckets/uploads/orphans/scan` | R | | `{ orphans: StoredFile[], bytes }` (file tak direferensikan katalog) |
+| `POST /v1/admin/platform/storage/buckets/uploads/orphans/cleanup` | W **Idempotency-Key** | `{ keys?: string[] }` (kosong = semua orphan) | `{ deleted, bytes_freed }` |
+| `POST /v1/admin/platform/storage/maintenance` | W | `{ action: "prune_bus"\|"prune_idempotency"\|"vacuum_analyze"\|"snapshot", schema? }` | `{ action, result: object, duration_ms }` |
+| `GET /v1/admin/platform/backups` | R | | `{ data: Backup[], schedule: { enabled, interval_hours, keep, next_run_at } }` |
+| `POST /v1/admin/platform/backups` | W **Idempotency-Key** | `{ note? }` | `Backup` (status RUNNING → COMPLETED/FAILED, async) |
+| `GET /v1/admin/platform/backups/:id/download` | W | | `application/gzip` |
+| `DELETE /v1/admin/platform/backups/:id` | W | | `{ deleted: true }` |
+| `GET /v1/admin/platform/bus` | R | | `{ topics: { topic, events, last_at }[], consumers: { group, topic, last_seq, head_seq, lag }[], dead_letters: DeadLetter[] }` |
+| `POST /v1/admin/platform/bus/dead-letters/retry` | W | `{ group, event_id }` atau `{ all: true }` | `{ requested: n }` (diproses ulang oleh service pemilik group) |
+| `DELETE /v1/admin/platform/bus/dead-letters` | W | `{ group, event_id }` | `{ deleted: n }` |
+
+```ts
+PlatformOverview = {
+  generated_at,
+  services: { name, ok, latency_ms, uptime_s, memory_mb, settings_loaded_at, metrics: Record<string, number|string> }[],
+  kpis: { users_total, users_7d, artists, orgs, tracks_live, releases_in_review, streams_today, streams_28d,
+          bookings_active, bookings_settled, gmv_offair, escrow_held, tickets_sold, ticket_gmv, kyc_pending, disputes_open },
+  bus: { events_total, max_lag, dead_letters },
+  storage: { disk_used_pct, disk_free_bytes, db_bytes, uploads_bytes, backups_bytes, last_backup_at, warning: boolean },
+  alerts: { level: "info"|"warning"|"critical", message, href }[],
+  settings_version, maintenance: boolean }
+StorageOverview = {
+  disk: { path, total_bytes, used_bytes, free_bytes, used_pct, warn_pct },
+  buckets: { name: "uploads"|"backups", description, path, files, bytes, quota_bytes, used_pct, by_type: { type, files, bytes }[] }[],
+  database: { total_bytes, schemas: { schema, service, bytes, tables, rows_est }[], largest_tables: { schema, table, bytes, rows_est }[] },
+  bus: { events, bytes, oldest_at, prunable },
+  retention: { bus_days, idempotency_days },
+  trend: { at, disk_used_bytes, db_bytes, uploads_bytes, backups_bytes }[] }
+StoredFile = { bucket, key, size, content_type, modified_at, url: string|null, referenced: boolean|null }
+Backup = { id, filename, status: "RUNNING"|"COMPLETED"|"FAILED", size_bytes, sha256, trigger: "manual"|"schedule", note, error, started_at, finished_at, created_by }
+DeadLetter = { group, event_id, topic, error, attempts, failed_at, retry_requested_at }
+```
+
+Internal: `GET /internal/settings` (platform, token service) → `{ version, values }`; `GET /internal/stats` (semua service, otomatis dari service-kit) → `{ service, uptime_s, memory_mb, settings_loaded_at, metrics }`; `GET /internal/media/references` (catalog) → `{ files: string[] }` nama file di bucket uploads yang masih dipakai.
+
+IAM tambahan (Super Admin):
+
+| Method & Path | Akses | Body | Respons |
+|---|---|---|---|
+| `GET /v1/admin/iam/admins` | R | | `{ data: (Me & { admin_role, suspended_at })[] }` |
+| `PATCH /v1/admin/iam/users/:id` | W | `{ admin_role?: AdminRole\|null, suspended?: boolean, reason }` | `Me & { admin_role, suspended_at }` (tidak bisa mencabut SUPER_ADMIN terakhir / menangguhkan diri sendiri) |
+
+Pengguna yang ditangguhkan: OTP & refresh ditolak `403`. `Me` kini memuat `admin_role`.
+
+Penegakan di gateway: `maintenance.enabled` → semua non-GET selain `/v1/auth`, `/v1/admin`, `/v1/platform` (dan token admin) dijawab `503 { type: "https://gema.id/problems/maintenance", detail: maintenance.message }`; `modules.booking=false` / `modules.ticketing=false` / `modules.waitlist=false` → non-GET ke prefix terkait `503 { type: ".../module-disabled" }`; rate limit membaca `security.rate_limit_*`.
