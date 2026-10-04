@@ -1,0 +1,17 @@
+{
+  "name": "@gema/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@fastify/http-proxy": "^11.0.1",
+    "@fastify/rate-limit": "^10.2.1",
+    "@gema/service-kit": "*",
+    "fastify": "^5.2.0"
+  }
+}
