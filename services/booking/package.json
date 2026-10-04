@@ -1,0 +1,16 @@
+{
+  "name": "@gema/booking",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "migrate": "tsx src/index.ts migrate",
+    "seed": "tsx src/index.ts seed"
+  },
+  "dependencies": {
+    "@gema/domain": "*",
+    "@gema/service-kit": "*"
+  }
+}

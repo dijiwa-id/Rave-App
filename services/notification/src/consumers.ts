@@ -7,6 +7,7 @@ export function consumers(_ctx: ServiceContext): Consumers {
     // ---- Read model ----
     'iam.org.created': async (e, tx) => {
       const p = e.payload;
+      if (!p.ownerUserId) return; // org belum diklaim
       await tx.query(
         `INSERT INTO org_members (org_id, user_id, org_type, artist_id) VALUES ($1,$2,$3,$4) ON CONFLICT (org_id, user_id) DO UPDATE SET artist_id = EXCLUDED.artist_id`,
         [p.orgId, p.ownerUserId, p.type, p.artistId ?? null],

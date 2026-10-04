@@ -99,6 +99,8 @@ Artist Studio (role artist/manager/label; ABAC: `artist_id ∈ token.orgs[].arti
 | `POST /v1/studio/splits/:splitId/approve` | | `Split` |
 
 Admin QC: `GET /v1/admin/qc/releases?status=IN_REVIEW` → `{ data: Release[] }`; `POST /v1/admin/qc/releases/:id/decision` `{ approve, reason? }` → LIVE + event `catalog.release.published`.
+Tambahan (aditif, catalog): `GET /v1/catalog/browse/:id` → `{ category, artists: ArtistSummary[], releases: ReleaseSummary[], tracks: Track[] }` (href kategori = `/app/genre/:id`) · `GET /v1/catalog/media/:file` (file hasil upload, publik) · `POST /v1/studio/releases/:id/tracks` (tambah lagu) · `PATCH|DELETE /v1/studio/tracks/:id` (`{ title?, audio_url?, duration_ms?, isrc?, explicit?, track_number? }`) · `GET /v1/studio/splits/pending` (split menunggu persetujuan untuk email user) · `POST /v1/admin/qc/releases/:id/takedown` `{ reason }`. `PUT /v1/studio/uploads/:id` mengembalikan `{ public_url, meta, warnings[] }` (artwork < 3000 px & master < 24-bit = peringatan; < 16-bit/44,1 kHz = 422). Respons QC queue menyertakan `qc_signals[]` (duplikasi ISRC/judul). Split tanpa `email` = pihak pengelola sendiri → otomatis disetujui; split ber-email menunggu `approve` oleh user dengan email itu.
+Internal catalog: `GET /internal/tracks/:id/media` → `{ id, status, audio_url, duration_ms, artist_id, loudness_gain_db, title, release_id }` · `GET /internal/episodes/:id/media` → `{ id, is_premium, audio_url, duration_ms, show_id, title }` · `GET /internal/artists/:id`.
 
 ```ts
 MediaItem = { id, kind: "release"|"artist"|"playlist"|"show"|"episode", title, subtitle, image_url, href }
@@ -159,6 +161,7 @@ ArtistAnalytics = { artist_id, days, streams, listeners, followers_gained, save_
 ```
 
 Internal: `GET /internal/analytics/artists/:artistId/epk` → `{ monthly_listeners, growth_90d_pct, top_cities, age_groups, engagement_rate }`; `GET /internal/analytics/city-listeners?city=` → `{ data: { artist_id, listeners }[] }`.
+Catatan playback: body sesi boleh menyertakan `source: "editorial"|"search"|"profile"|"library"|"playlist"|"radio"|"other"` (atribusi sumber stream). `listeners` di `ArtistAnalytics` = pendengar unik 28 hari terakhir (bukan jumlah window `days`). Respons EPK internal juga memuat `streams_28d`. `city-listeners` mengembalikan angka mentah — pemanggil wajib `kSafe()` saat menampilkan. Stream ditandai fraud (`RATE_LIMIT` >120 qualified/jam, `LOOP_31S` 5 sesi beruntun berhenti < 35 dtk) tidak dihitung & tidak dipublikasikan.
 
 ## 5. Booking / Off-Air (REQ-B2B-01..13)
 
@@ -218,6 +221,16 @@ Contract = { id, booking_id, template_version, body_markdown, sha256, status: "S
 Dispute = { id, booking_id, by_party, reason, status: "OPEN"|"RESOLVED", outcome, note, created_at }
 ```
 
+**Catatan implementasi booking (v1):**
+- Tambahan endpoint: `GET /v1/booking/artists/:artistId/fee-splits` (manajemen).
+- `Booking` juga memuat `cancellation` (hasil matriks §7.3 bila dibatalkan) dan `payment: { dp_paid, settlement_paid }`.
+- `Epk.stats.*` bernilai `null`/`[]` bila metrik tidak ada di `public_metrics` dan viewer bukan manajemen/promotor terverifikasi/link share. `top_cities` hanya segmen ≥ k=50.
+- Share link: `url` = `/epk/<slug>?token=<token>`; FE memanggil `GET /v1/booking/artists/<slug>/epk?token=`.
+- Discovery dengan `date` hanya mengembalikan artis yang available. Tanpa data playback, Audience Match memakai heuristik kota asal artis.
+- `cancel` sebelum SIGNED → `DECLINED` (kontrak SENT di-VOID). Setelah SIGNED → `CANCELLED_BY_*`/`FORCE_MAJEURE` + event `booking.cancelled` berisi jumlah refund/forfeit.
+- `show-done`: normalnya hanya saat `SHOW_DAY` (job memajukan BOOKED_AND_SECURED → SHOW_DAY pada hari-H). **Dev fast clock** (`GEMA_FAST_CLOCK=1`, default aktif bila NODE_ENV≠production): show-done boleh kapan saja setelah BOOKED_AND_SECURED, auto-complete 60 dtk, jendela dispute finance 30 dtk.
+- Admin resolve dispute: `RELEASE_TO_ARTIST` → SETTLED + pencairan; `REFUND_PROMOTOR` → CANCELLED_BY_ARTIST + refund penuh (event `booking.dispute.resolved`).
+
 ## 6. Finance (REQ-B2B-04, REQ-PAY-01..05)
 
 | Method & Path | Aktor | Body / Query | Respons |
@@ -242,6 +255,15 @@ Payout = { id, party_id, amount, status: "REQUESTED"|"PROCESSING"|"COMPLETED"|"F
 ```
 
 Internal: `POST /internal/invoices` `{ purpose, reference_id, amount, payer_user_id, payer_org_id?, description, due_at }` → `Invoice` (dipakai ticketing).
+
+**Catatan implementasi finance (v1):**
+- `Invoice` juga memuat `escrow_amount`, `fee_amount` (service fee platform; DP = DP fee + service fee promotor), `depends_on` (pelunasan menunggu DP → simulate-pay 422 bila DP belum lunas).
+- `EscrowStatus` juga memuat `fee`, `release_at` (jadwal pencairan setelah jendela dispute). Status `HELD` = dibekukan (dispute/force majeure).
+- `Wallet` juga memuat `payouts[]` dan `bank_account { bank, number_masked, holder }`. Party = org id atau user id; payout min Rp 50.000, sumber didebit berurutan offair → royalty → ticket → merch → tip.
+- Webhook PG: header `x-pg-signature: t=<unix>,v1=<hex HMAC-SHA256(PG_WEBHOOK_SECRET, "<t>.<raw body>")>`, toleransi 300 dtk; idempoten per `event_id`. `simulate-pay` hanya di non-produksi.
+- `POST /internal/invoices` menerima `metadata: { event_id, promotor_org_id?, service_fee? }` → saat PAID dicatat ke `liability:escrow:event:<event_id>` (+ `revenue:service_fee:ticket`); escrow event `reference_id = "event:<event_id>"`. Unik per `(purpose, reference_id)` → panggilan ulang mengembalikan invoice yang sama.
+- Pencairan: komisi artis 7% → `revenue:commission:offair`; sisa dialokasikan per split (largest remainder), PPh dipotong per baris → `liability:tax_withholding:pph`, neto → `liability:payable:<party>:offair`.
+
 
 ## 7. Ticketing (REQ-EVT-01, REQ-TIX-01..05)
 

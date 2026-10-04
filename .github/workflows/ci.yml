@@ -1,0 +1,30 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: gema, POSTGRES_PASSWORD: gema, POSTGRES_DB: gema }
+        ports: ['55432:5432']
+        options: --health-cmd "pg_isready -U gema" --health-interval 5s --health-retries 20
+    env:
+      DATABASE_URL: postgres://gema:gema@127.0.0.1:55432/gema
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Typecheck backend
+        run: npm run typecheck
+      - name: Unit test (domain & services)
+        run: npm test
+      - name: Migrasi + seed semua service
+        run: npm run seed
+      - name: Typecheck & build web
+        run: npm run build -w @gema/web

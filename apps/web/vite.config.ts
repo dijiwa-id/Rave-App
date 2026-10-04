@@ -15,9 +15,11 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom'],
-          anim: ['motion', 'gsap', '@gsap/react'],
+        // Vite 8 (rolldown) hanya menerima bentuk fungsi.
+        manualChunks(id: string) {
+          if (/node_modules\/(react|react-dom|react-router|react-router-dom|scheduler)\//.test(id)) return 'react';
+          if (/node_modules\/(motion|framer-motion|motion-dom|motion-utils|gsap|@gsap)\//.test(id)) return 'anim';
+          return undefined;
         },
       },
     },

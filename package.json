@@ -19,6 +19,7 @@
     "dev:web": "npm run dev -w @gema/web",
     "dev": "node --import tsx scripts/dev-all.ts",
     "test": "vitest run",
+    "e2e": "node --import tsx scripts/e2e.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
