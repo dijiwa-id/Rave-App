@@ -1,0 +1,33 @@
+{
+  "name": "gema",
+  "private": true,
+  "version": "0.1.0",
+  "description": "GEMA — Platform Ekosistem Musik Indie & Off-Air (microservices monorepo)",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "services/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "db:start": "bash scripts/dev-db.sh start",
+    "db:stop": "bash scripts/dev-db.sh stop",
+    "db:reset": "bash scripts/dev-db.sh reset",
+    "migrate": "node --import tsx scripts/migrate-all.ts",
+    "seed": "node --import tsx scripts/seed-all.ts",
+    "dev:services": "node --import tsx scripts/dev-services.ts",
+    "dev:web": "npm run dev -w @gema/web",
+    "dev": "node --import tsx scripts/dev-all.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

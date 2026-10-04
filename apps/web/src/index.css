@@ -1,0 +1,89 @@
+@import 'tailwindcss';
+
+/*
+ * GEMA design tokens (BRD §12.1: satu design system; mode gelap default di player, terang di dasbor B2B).
+ * Palet fan app mengikuti mockup UI UX (sidebar hitam, kanvas #121212, aksen hijau tombol play).
+ */
+@theme {
+  --font-sans: 'Figtree', ui-sans-serif, system-ui, sans-serif;
+
+  --color-gema-black: #000000;
+  --color-gema-base: #121212;
+  --color-gema-elevated: #181818;
+  --color-gema-highlight: #282828;
+  --color-gema-line: #2a2a2a;
+  --color-gema-muted: #b3b3b3;
+  --color-gema-subtle: #727272;
+  --color-gema-green: #1ed760;
+  --color-gema-green-dark: #1db954;
+  --color-gema-blue: #1e70e0;
+  --color-gema-purple: #7c3aed;
+  --color-gema-pink: #e8115b;
+  --color-gema-orange: #f59b23;
+
+  /* B2B (light) */
+  --color-b2b-bg: #f6f6f4;
+  --color-b2b-card: #ffffff;
+  --color-b2b-line: #e7e5e4;
+  --color-b2b-ink: #111111;
+  --color-b2b-muted: #6b6b6b;
+
+  --radius-card: 8px;
+  --shadow-card: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  @apply bg-gema-black text-white antialiased font-sans;
+}
+
+/* Scrollbar ala player */
+.gema-scroll::-webkit-scrollbar {
+  width: 12px;
+}
+.gema-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+.gema-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Kartu media (mockup Spotify 1/3/8) */
+.media-card {
+  @apply relative rounded-[var(--radius-card)] bg-gema-elevated p-4 transition-colors duration-300 hover:bg-gema-highlight;
+}
+.media-card .play-fab {
+  @apply absolute right-6 bottom-[96px] grid size-12 translate-y-2 place-items-center rounded-full bg-gema-green text-black opacity-0 shadow-[var(--shadow-card)] transition-all duration-300;
+}
+.media-card:hover .play-fab {
+  @apply translate-y-0 opacity-100;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Fokus terlihat (WCAG 2.2 AA) */
+:focus-visible {
+  outline: 2px solid var(--color-gema-green);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
