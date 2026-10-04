@@ -1,0 +1,261 @@
+// Konten demo orisinal (fiktif). Lirik ditulis khusus untuk demo, bukan lirik lagu nyata.
+
+/** Baseline pendengar bulanan per slug (dipakai juga oleh seed playback agar konsisten). */
+export const MONTHLY_LISTENERS: Record<string, number> = {
+  'senja-kolektif': 128_400,
+  arunika: 64_200,
+  'kota-mati': 211_900,
+  'lalu-lintas': 38_700,
+  'dara-laut': 97_300,
+  'gelombang-pagi': 12_800,
+  'mc-rantau': 45_600,
+  nirmala: 246_100,
+};
+
+export const VERIFIED = new Set(['senja-kolektif', 'kota-mati', 'dara-laut', 'nirmala', 'arunika']);
+
+export const BIOS: Record<string, string> = {
+  'senja-kolektif':
+    'Kolektif indie-pop asal Bandung yang lahir dari sesi akustik di kedai kopi Dago. Lagu-lagu mereka bercerita tentang pulang, hujan, dan kota yang terus berubah.',
+  arunika: 'Duo folk Yogyakarta dengan petikan gitar hangat dan harmoni vokal yang tenang. Sering tampil di pensi kampus dan festival kecil se-Jawa.',
+  'kota-mati': 'Band post-punk Jakarta dengan bas tebal dan lirik tentang beton, macet, dan kelelahan kota besar. Energi panggungnya menjadi buah bibir skena.',
+  'lalu-lintas': 'Unit indie-rock Surabaya yang menulis lagu dari jalanan kota pahlawan. Riff cepat, chorus untuk dinyanyikan bersama.',
+  'dara-laut': 'Penyanyi R&B/soul dari Bali. Vokal lembut di atas groove hangat, terinspirasi pasang surut laut selatan.',
+  'gelombang-pagi': 'Shoegaze dari dataran tinggi Malang — dinding gitar berkabut dan vokal yang tenggelam pelan.',
+  'mc-rantau': 'Rapper Medan yang bercerita tentang merantau, logat, dan rindu kampung halaman dengan beat boom-bap modern.',
+  nirmala: 'Produser dan penyanyi pop-elektronik Jakarta. Synth berkilau, beat untuk lantai dansa, dan cerita tentang hidup di balik layar ponsel.',
+};
+
+// Lirik LRC: [detik, baris]
+export const LYRICS: Record<string, [number, string][]> = {
+  'Pulang ke Utara': [
+    [12, 'Kereta terakhir melaju pelan'],
+    [17, 'Lampu stasiun tinggal bayangan'],
+    [22, 'Kusimpan kota di saku jaket'],
+    [27, 'Bersama tiket yang mulai lusuh'],
+    [33, 'Pulang ke utara, pulang ke rumah'],
+    [38, 'Di mana jalan tak pernah tergesa'],
+    [43, 'Pulang ke utara, pelan saja'],
+    [48, 'Biar rindu sampai lebih dulu'],
+    [56, 'Ibu menunggu di beranda'],
+    [61, 'Teh hangat dan cerita lama'],
+    [66, 'Aku pulang membawa lelah'],
+    [71, 'Tapi juga segenggam lagu'],
+    [77, 'Pulang ke utara, pulang ke rumah'],
+    [82, 'Di mana malam tak pernah bising'],
+    [87, 'Pulang ke utara, pelan saja'],
+    [92, 'Biar rindu sampai lebih dulu'],
+  ],
+  'Hujan di Dago': [
+    [10, 'Gerimis turun di tikungan Dago'],
+    [15, 'Payung kita terlalu kecil berdua'],
+    [20, 'Kau tertawa, sepatumu basah'],
+    [25, 'Aku pura-pura tak kedinginan'],
+    [31, 'Hujan di Dago, jangan cepat reda'],
+    [36, 'Masih banyak yang ingin kubicarakan'],
+    [41, 'Hujan di Dago, tahan sebentar'],
+    [46, 'Sampai berani aku mengatakan'],
+    [54, 'Lampu jalan berkedip jingga'],
+    [59, 'Angkot lewat membawa sisa senja'],
+    [64, 'Kita berteduh di depan toko buku'],
+    [69, 'Dan waktu lupa berjalan'],
+    [75, 'Hujan di Dago, jangan cepat reda'],
+    [80, 'Biar kota ini milik kita berdua'],
+  ],
+  'Embun Pertama': [
+    [9, 'Sebelum ayam jantan bersuara'],
+    [14, 'Embun menulis namamu di kaca'],
+    [19, 'Sawah masih tidur berselimut kabut'],
+    [24, 'Dan aku terjaga menunggu terang'],
+    [30, 'Embun pertama, jatuh perlahan'],
+    [35, 'Seperti doa yang tak bersuara'],
+    [40, 'Embun pertama, sebentar saja'],
+    [45, 'Lalu hilang dipeluk cahaya'],
+    [52, 'Kupetik gitar tua milik bapak'],
+    [57, 'Senarnya berkarat, nadanya jujur'],
+    [62, 'Kunyanyikan pagi untukmu'],
+    [67, 'Yang jauh di seberang pulau'],
+    [73, 'Embun pertama, jatuh perlahan'],
+    [78, 'Bawa salamku sampai ke sana'],
+  ],
+  'Beton & Debu': [
+    [8, 'Bangun pukul lima, kopi sachet dingin'],
+    [12, 'Klakson jadi alarm yang tak pernah mati'],
+    [16, 'Kota menelan kita satu per satu'],
+    [20, 'Kita tersenyum di layar, remuk di dalam'],
+    [25, 'Beton dan debu!'],
+    [28, 'Langit abu-abu!'],
+    [31, 'Kita berlari tapi tak ke mana-mana'],
+    [36, 'Beton dan debu!'],
+    [39, 'Paru-paru lelah!'],
+    [42, 'Tapi malam ini kita berdansa'],
+    [50, 'Gedung tinggi mencakar mimpi'],
+    [54, 'Gaji habis sebelum tanggal tua'],
+    [58, 'Teriakkan saja sekeras-kerasnya'],
+    [62, 'Selagi suara masih milik kita'],
+  ],
+  'Pasang Surut': [
+    [11, 'Kau datang seperti ombak pagi'],
+    [16, 'Hangat, pelan, lalu pergi'],
+    [21, 'Kutulis namamu di pasir Kuta'],
+    [26, 'Laut menghapusnya tanpa permisi'],
+    [32, 'Pasang surut, hatiku ikut'],
+    [37, 'Naik turun mengikuti rindu'],
+    [42, 'Pasang surut, biar saja'],
+    [47, 'Laut tahu jalan pulangmu'],
+    [55, 'Senja oranye di bahu kananmu'],
+    [60, 'Garam tertinggal di ujung rambutmu'],
+    [65, 'Kalau besok kau tak kembali'],
+    [70, 'Aku tetap di sini, menunggu pasang'],
+  ],
+  'Neon Jakarta': [
+    [7, 'Lampu neon memantul di genangan'],
+    [11, 'Sudirman tak pernah benar-benar tidur'],
+    [15, 'Notifikasi berdenting tanpa henti'],
+    [19, 'Tapi malam ini aku ingin hilang'],
+    [24, 'Neon Jakarta, nyalakan aku'],
+    [28, 'Bawa aku jauh dari layar ponsel'],
+    [32, 'Neon Jakarta, putar lagu itu'],
+    [36, 'Satu lagu lagi sebelum pagi'],
+    [44, 'Ojek menunggu di ujung gang'],
+    [48, 'Bass bergetar di lantai tiga'],
+    [52, 'Semua orang asing jadi teman'],
+    [56, 'Sampai matahari mengusir kita'],
+    [61, 'Neon Jakarta, nyalakan aku'],
+    [65, 'Sekali ini saja, jangan padam'],
+  ],
+};
+
+export const CATEGORIES: { id: string; name: string; color: string; href: string; genres: string[] }[] = [
+  { id: 'podcast', name: 'Podcast', color: '#27856a', href: '/app/podcasts', genres: [] },
+  { id: 'cerita', name: 'Cerita & Fiksi Audio', color: '#1e3264', href: '/app/podcasts?kind=FICTION', genres: [] },
+  { id: 'untukmu', name: 'Dibuat Untukmu', color: '#1e3264', href: '/app', genres: [] },
+  { id: 'chart', name: 'Chart Kota', color: '#8d67ab', href: '/app/genre/chart', genres: [] },
+  { id: 'rilis-baru', name: 'Rilis Baru', color: '#e8115b', href: '/app/genre/rilis-baru', genres: [] },
+  { id: 'discover', name: 'Discover Indie', color: '#8d67ab', href: '/app/genre/discover', genres: ['indie-pop', 'indie-rock', 'shoegaze', 'dream-pop'] },
+  { id: 'event', name: 'Event Live', color: '#7358ff', href: '/app/events', genres: [] },
+  { id: 'hip-hop', name: 'Hip-Hop', color: '#bc5900', href: '/app/genre/hip-hop', genres: ['hip-hop'] },
+  { id: 'pop', name: 'Pop', color: '#148a08', href: '/app/genre/pop', genres: ['pop', 'indie-pop', 'electronic'] },
+  { id: 'indie', name: 'Indie', color: '#e91429', href: '/app/genre/indie', genres: ['indie-pop', 'indie-rock'] },
+  { id: 'rock', name: 'Rock', color: '#e8115b', href: '/app/genre/rock', genres: ['rock', 'post-punk', 'indie-rock'] },
+  { id: 'rnb', name: 'R&B', color: '#dc148c', href: '/app/genre/rnb', genres: ['r-n-b', 'soul'] },
+  { id: 'akustik', name: 'Akustik', color: '#477d95', href: '/app/genre/akustik', genres: ['folk', 'akustik'] },
+  { id: 'fokus', name: 'Fokus', color: '#503750', href: '/app/genre/fokus', genres: ['shoegaze', 'dream-pop', 'folk'] },
+  { id: 'elektronik', name: 'Elektronik', color: '#0d73ec', href: '/app/genre/elektronik', genres: ['electronic'] },
+];
+
+export const GENRES: [string, string][] = [
+  ['indie-pop', 'Indie Pop'],
+  ['indie-rock', 'Indie Rock'],
+  ['folk', 'Folk'],
+  ['akustik', 'Akustik'],
+  ['rock', 'Rock'],
+  ['post-punk', 'Post-Punk'],
+  ['r-n-b', 'R&B'],
+  ['soul', 'Soul'],
+  ['shoegaze', 'Shoegaze'],
+  ['dream-pop', 'Dream Pop'],
+  ['hip-hop', 'Hip-Hop'],
+  ['pop', 'Pop'],
+  ['electronic', 'Elektronik'],
+];
+
+interface SeedShow {
+  kind: 'PODCAST' | 'FICTION';
+  title: string;
+  publisher: string;
+  category: string;
+  description: string;
+  age_rating?: string;
+  content_warning?: string;
+  episodes: { title: string; description: string; minutes: number; premium?: boolean; season?: number; ep?: number }[];
+}
+
+export const SHOWS: SeedShow[] = [
+  {
+    kind: 'PODCAST',
+    title: 'Ruang Dengar',
+    publisher: 'GEMA Originals',
+    category: 'musik',
+    description: 'Obrolan santai di balik lagu: proses kreatif, rekaman rumahan, dan cerita panggung musisi indie Indonesia.',
+    episodes: [
+      { title: 'Merekam Album di Kamar Kos', description: 'Bagaimana Senja Kolektif merekam EP pertama dengan satu mikrofon.', minutes: 42 },
+      { title: 'Rider Teknis untuk Pemula', description: 'Apa saja yang perlu ditulis di technical rider supaya soundcheck lancar.', minutes: 38 },
+      { title: 'Dari Pensi ke Festival', description: 'Perjalanan band kampus menembus panggung festival nasional.', minutes: 51, premium: true },
+      { title: 'Royalti Itu Apa Sih?', description: 'Master vs publishing, LMK, dan cara membaca laporan royalti.', minutes: 47 },
+      { title: 'Tur Lima Kota dengan Mobil Sewaan', description: 'Logistik, bensin, dan cerita lucu di jalan.', minutes: 55, premium: true },
+    ],
+  },
+  {
+    kind: 'PODCAST',
+    title: 'Kreatif Cuan',
+    publisher: 'Studio Rantai',
+    category: 'bisnis',
+    description: 'Bisnis kreatif tanpa jargon: harga jasa, kontrak, pajak, dan cara bertahan sebagai pekerja seni.',
+    episodes: [
+      { title: 'Menentukan Rate Card Pertamamu', description: 'Cara menghitung fee manggung yang adil untuk semua personel.', minutes: 36 },
+      { title: 'Kontrak Bukan Musuh', description: 'Klausul penting yang wajib ada sebelum tanda tangan.', minutes: 44, premium: true },
+      { title: 'Pajak untuk Musisi Freelance', description: 'PPh 21, bukti potong, dan cara menyimpannya dengan rapi.', minutes: 40, premium: true },
+      { title: 'Merch yang Laku', description: 'Dari kaos sampai kaset: apa yang benar-benar dibeli fans.', minutes: 33 },
+    ],
+  },
+  {
+    kind: 'PODCAST',
+    title: 'Ngakak Bareng',
+    publisher: 'Tiga Sekawan',
+    category: 'komedi',
+    description: 'Tiga sahabat membahas hal-hal remeh yang ternyata penting. Rekaman di warung kopi, tawa sungguhan.',
+    episodes: [
+      { title: 'Salah Kirim Voice Note ke Grup Keluarga', description: 'Kisah memalukan yang tak akan pernah dilupakan.', minutes: 29 },
+      { title: 'Ojek Online dan Filosofi Hidup', description: 'Pelajaran hidup dari obrolan dengan abang ojol.', minutes: 31 },
+      { title: 'Nonton Konser Tapi Tingginya Pas-Pasan', description: 'Strategi bertahan di barisan belakang.', minutes: 27 },
+      { title: 'Spesial Malam Minggu', description: 'Episode panjang khusus pendengar setia.', minutes: 62, premium: true },
+    ],
+  },
+  {
+    kind: 'PODCAST',
+    title: 'Malam Jumat',
+    publisher: 'Kisah Kelam',
+    category: 'horor',
+    description: 'Cerita seram kiriman pendengar dari seluruh Nusantara. Dengarkan dengan lampu menyala.',
+    content_warning: 'Mengandung tema horor dan suasana mencekam.',
+    age_rating: '13+',
+    episodes: [
+      { title: 'Pos Ronda Nomor Tujuh', description: 'Penjaga malam yang selalu datang lebih awal.', minutes: 35 },
+      { title: 'Kos Putri Lantai Tiga', description: 'Ketukan pintu pukul dua pagi.', minutes: 41 },
+      { title: 'Jalan Pintas Lewat Kebun Tebu', description: 'Seharusnya mereka lewat jalan biasa.', minutes: 38, premium: true },
+      { title: 'Studio Rekaman Tua', description: 'Ada suara tambahan di setiap take.', minutes: 44, premium: true },
+      { title: 'Bus Malam Terakhir', description: 'Penumpang yang tak pernah turun.', minutes: 39 },
+    ],
+  },
+  {
+    kind: 'FICTION',
+    title: 'Rumah di Ujung Gang',
+    publisher: 'GEMA Originals',
+    category: 'misteri',
+    description: 'Serial misteri audio: seorang jurnalis muda menyelidiki rumah kosong yang lampunya menyala setiap malam.',
+    age_rating: '13+',
+    episodes: [
+      { title: 'Lampu yang Menyala', description: 'Raka pindah ke kampung baru dan melihat cahaya di rumah kosong.', minutes: 24, season: 1, ep: 1 },
+      { title: 'Surat Tanpa Nama', description: 'Sebuah amplop muncul di bawah pintu kontrakan.', minutes: 26, season: 1, ep: 2 },
+      { title: 'Penghuni Lama', description: 'Warga mulai bercerita tentang keluarga yang hilang.', minutes: 28, season: 1, ep: 3, premium: true },
+      { title: 'Ruang Bawah Tanah', description: 'Akhir musim pertama.', minutes: 31, season: 1, ep: 4, premium: true },
+      { title: 'Kembali ke Gang', description: 'Musim kedua dimulai satu tahun kemudian.', minutes: 27, season: 2, ep: 1, premium: true },
+    ],
+  },
+  {
+    kind: 'FICTION',
+    title: 'Penunggu Kos Melati',
+    publisher: 'Kisah Kelam',
+    category: 'horor',
+    description: 'Serial horor audio tentang lima mahasiswa dan sebuah kos murah yang terlalu murah.',
+    age_rating: '17+',
+    content_warning: 'Mengandung adegan menegangkan, kekerasan ringan, dan tema supranatural.',
+    episodes: [
+      { title: 'Harga Sewa Rp 300 Ribu', description: 'Terlalu murah untuk dilewatkan.', minutes: 22, season: 1, ep: 1 },
+      { title: 'Kamar Nomor Empat', description: 'Kamar yang selalu terkunci.', minutes: 25, season: 1, ep: 2 },
+      { title: 'Ibu Kos', description: 'Tak ada yang pernah melihatnya siang hari.', minutes: 27, season: 1, ep: 3, premium: true },
+      { title: 'Malam Ketujuh', description: 'Finale musim pertama.', minutes: 33, season: 1, ep: 4, premium: true },
+    ],
+  },
+];

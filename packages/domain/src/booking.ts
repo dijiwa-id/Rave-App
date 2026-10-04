@@ -40,6 +40,7 @@ export const BOOKING_TRANSITIONS: Transition[] = [
   { from: ['INQUIRY', 'NEGOTIATING'], to: 'NEGOTIATING', actors: ['management', 'promotor'], description: 'Offer / counter-offer' },
   { from: 'NEGOTIATING', to: 'AGREED', actors: ['management', 'promotor', 'both'], description: 'Fee, termin, rider disepakati' },
   { from: ['INQUIRY', 'NEGOTIATING'], to: 'DECLINED', actors: ['management', 'promotor'], description: 'Ditolak' },
+  { from: ['AGREED', 'CONTRACT_SENT'], to: 'DECLINED', actors: ['management', 'promotor'], description: 'Batal sebelum kontrak ditandatangani (tanpa dana)' },
   { from: ['INQUIRY', 'NEGOTIATING'], to: 'EXPIRED', actors: ['system'], description: 'Melewati batas waktu respons/hold' },
   { from: 'AGREED', to: 'CONTRACT_SENT', actors: ['system'], description: 'Kontrak digenerate & dikirim' },
   { from: 'CONTRACT_SENT', to: 'SIGNED', actors: ['system', 'both'], description: 'Semua pihak menandatangani' },

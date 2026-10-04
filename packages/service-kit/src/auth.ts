@@ -12,6 +12,7 @@ export interface OrgClaim {
   type: OrgType;
   role: OrgRole;
   artistId?: string | null; // untuk org ARTIST: id artis di katalog
+  artist_id?: string | null; // alias sesuai kontrak API
 }
 
 export interface AuthUser {
@@ -52,7 +53,8 @@ export async function verifyAccessToken(token: string): Promise<AuthUser> {
     email: payload.email as string | undefined,
     name: payload.name as string | undefined,
     roles: (payload.roles as PlatformRole[]) ?? [],
-    orgs: (payload.orgs as OrgClaim[]) ?? [],
+    // Kontrak API memakai `artist_id`; kode internal memakai `artistId` — terima keduanya.
+    orgs: ((payload.orgs as any[]) ?? []).map((o) => ({ ...o, artistId: o.artistId ?? o.artist_id ?? null, artist_id: o.artist_id ?? o.artistId ?? null })),
     city: (payload.city as string | null) ?? null,
     kyc: Boolean(payload.kyc),
     premium: Boolean(payload.premium),

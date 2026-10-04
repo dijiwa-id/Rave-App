@@ -5,7 +5,7 @@ export interface DomainEvents {
   // IAM
   'iam.user.registered': { userId: string; email: string; displayName: string; city?: string | null };
   'iam.user.onboarded': { userId: string; city: string; genres: string[]; artistIds: string[] };
-  'iam.org.created': { orgId: string; type: OrgType; name: string; ownerUserId: string; artistId?: string | null };
+  'iam.org.created': { orgId: string; type: OrgType; name: string; ownerUserId: string | null; artistId?: string | null };
   'iam.org.member_added': { orgId: string; type: OrgType; userId: string; role: string; artistId?: string | null };
   'iam.kyc.verified': { userId: string; orgId?: string | null; level: 'INDIVIDUAL' | 'BUSINESS' };
   'iam.waitlist.joined': { email: string; segment: string; city?: string | null };
@@ -27,10 +27,24 @@ export interface DomainEvents {
   'booking.inquiry.created': { bookingId: string; artistId: string; promotorOrgId: string; eventDate: string; city: string; budget: number };
   'booking.offer.sent': { bookingId: string; artistId: string; promotorOrgId: string; byParty: 'promotor' | 'management'; fee: number };
   'booking.status.changed': { bookingId: string; artistId: string; promotorOrgId: string; from: string; to: string; fee: number; eventDate: string };
-  'booking.contract.signed': { bookingId: string; contractId: string; fee: number; dpAmount: number; settlementAmount: number; serviceFee: number; promotorOrgId: string; artistId: string; managementOrgId: string | null };
+  'booking.contract.signed': {
+    bookingId: string; contractId: string; fee: number; dpAmount: number; settlementAmount: number; serviceFee: number;
+    promotorOrgId: string; artistId: string; managementOrgId: string | null;
+    // aditif (finance butuh untuk invoice & otorisasi escrow)
+    artistOrgId?: string | null; promotorUserId?: string; eventDate?: string; settlementDaysBefore?: number; eventName?: string;
+  };
   'booking.completed': { bookingId: string; artistId: string; fee: number; splits: { partyId: string; pct: number }[]; payeeType: 'individual' | 'company' };
-  'booking.cancelled': { bookingId: string; party: 'promotor' | 'artist' | 'force_majeure'; daysBeforeEvent: number };
+  'booking.cancelled': {
+    bookingId: string; party: 'promotor' | 'artist' | 'force_majeure'; daysBeforeEvent: number;
+    // aditif: hasil computeCancellation (§7.3) agar finance mengeksekusi tanpa menghitung ulang
+    toArtist?: number; refundToPromotor?: number; artistPenalty?: number; holdForReschedule?: boolean;
+    artistId?: string; artistOrgId?: string | null; promotorOrgId?: string;
+  };
   'booking.dispute.opened': { bookingId: string; disputeId: string; byParty: string };
+  'booking.dispute.resolved': {
+    bookingId: string; disputeId: string; outcome: 'RELEASE_TO_ARTIST' | 'REFUND_PROMOTOR';
+    fee: number; splits: { partyId: string; pct: number }[]; payeeType: 'individual' | 'company'; promotorOrgId: string;
+  };
 
   // Finance
   'finance.payment.succeeded': { intentId: string; purpose: PaymentPurpose; referenceId: string; amount: number; payerUserId: string };
