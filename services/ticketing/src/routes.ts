@@ -1,18 +1,20 @@
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { QR_STEP_SECONDS, RESERVATION_MINUTES, rotatingCode, verifyRotatingCode } from '@gema/domain';
+import { QR_STEP_SECONDS, quoteTicketRefund, RESERVATION_MINUTES, rotatingCode, verifyRotatingCode, type TicketRefundReason } from '@gema/domain';
 import {
   assertOrg,
   audit,
   badRequest,
-  callService,
   conflict,
   forbidden,
-  idempotent,
+  HttpError,
   isAdmin,
   notFound,
   publish,
   requireAuth,
+  requirePermission,
+  requireService,
+  settings,
   slugify,
   unprocessable,
   uuidv7,
@@ -20,7 +22,7 @@ import {
   type Client,
   type ServiceContext,
 } from '@gema/service-kit';
-import { detailOut, orderOut, summaryOut, SUMMARY_SQL, type Q } from './shared.js';
+import { detailOut, orderOut, refundCancelledOrders, refundOut, refundPolicy, releasePendingOrder, releaseReservation, requestInvoice, requestRefund, summaryOut, SUMMARY_SQL, type Q } from './shared.js';
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
@@ -84,6 +86,18 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       [q.from || null, q.city || null, q.artist_id && isUuid(q.artist_id) ? q.artist_id : null, q.q || null, limit],
     );
     return { data: rows.map(summaryOut), next_cursor: null };
+  });
+
+  // Internal: apakah user memegang tiket aktif untuk event (akses siaran live bertiket).
+  app.get('/internal/tickets/check', { preHandler: requireService }, async (req) => {
+    const q = req.query as { event_id?: string; user_id?: string };
+    if (!q.event_id || !q.user_id || !isUuid(q.event_id) || !isUuid(q.user_id)) return { valid: false };
+    // Bandingkan uuid native (tanpa ::text) agar indeks (event_id, user_id) terpakai.
+    const r = await db.one<{ ok: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM tickets WHERE event_id = $1 AND user_id = $2 AND status IN ('VALID','CHECKED_IN')) AS ok`,
+      [q.event_id, q.user_id],
+    );
+    return { valid: !!r?.ok };
   });
 
   app.get('/v1/ticketing/events/:idOrSlug', async (req) => {
@@ -151,9 +165,39 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       if (!e) throw notFound('Event');
       assertStaff(req, e);
       const b = eventBody.omit({ org_id: true, ticket_types: true }).partial().extend({ ticket_types: z.array(ticketTypeBody).max(20).optional() }).parse(req.body);
+      if (e.status === 'CANCELLED' || e.status === 'COMPLETED') throw conflict(`Event berstatus ${e.status} tidak dapat diubah`);
+      const startsAt = new Date(b.starts_at ?? e.starts_at);
+      const endsAt = new Date(b.ends_at ?? e.ends_at);
+      if (endsAt <= startsAt) throw badRequest('ends_at harus setelah starts_at');
+      // Perubahan jadwal/venue setelah publish membuka masa refund penuh bagi pemegang tiket (refund.reschedule_opt_out_days).
+      const rescheduled =
+        e.status === 'PUBLISHED' &&
+        ((b.starts_at !== undefined && startsAt.getTime() !== new Date(e.starts_at).getTime()) ||
+          (b.venue_name !== undefined && b.venue_name !== e.venue_name) ||
+          (b.city !== undefined && b.city !== e.city));
       await db.tx(async (tx) => {
         const cols = ['title', 'description', 'city', 'venue_name', 'venue_address', 'starts_at', 'ends_at', 'poster_url', 'artist_ids', 'rules', 'booking_id'] as const;
-        for (const c of cols) if (c in b) await tx.query(`UPDATE events SET ${c} = $2 WHERE id = $1`, [e.id, (b as any)[c] ?? null]);
+        // Satu UPDATE untuk semua kolom: constraint ends_at > starts_at diperiksa terhadap nilai akhir (memindah event ke tanggal lain).
+        const set = cols.filter((c) => c in b);
+        if (set.length)
+          await tx.query(`UPDATE events SET ${set.map((c, i) => `${c} = $${i + 2}`).join(', ')} WHERE id = $1`, [e.id, ...set.map((c) => (b as any)[c] ?? null)]);
+        if (rescheduled) {
+          await tx.query(`UPDATE events SET rescheduled_at = now() WHERE id = $1`, [e.id]);
+          const days = settings.num('refund.reschedule_opt_out_days');
+          const optOutUntil = days > 0 ? new Date(Math.min(Date.now() + days * 86_400_000, startsAt.getTime())).toISOString() : null;
+          const holders = (await tx.query(`SELECT DISTINCT user_id FROM orders WHERE event_id = $1 AND status = 'PAID'`, [e.id])).rows.map((r) => r.user_id);
+          for (let i = 0; i < holders.length; i += 1000)
+            await publish(tx, 'ticketing.event.rescheduled', e.id, {
+              eventId: e.id,
+              title: b.title ?? e.title,
+              startsAt: startsAt.toISOString(),
+              venueName: b.venue_name ?? e.venue_name,
+              city: b.city ?? e.city,
+              optOutUntil,
+              userIds: holders.slice(i, i + 1000),
+            });
+          await audit(tx, { actorId: req.user!.sub, action: 'event.reschedule', entity: 'event', entityId: e.id, data: { starts_at: b.starts_at, venue_name: b.venue_name, city: b.city, holders: holders.length } });
+        }
         if (b.ticket_types) {
           if (e.status !== 'DRAFT') throw conflict('Kategori tiket hanya dapat diganti saat DRAFT');
           await tx.query(`DELETE FROM ticket_types WHERE event_id = $1`, [e.id]);
@@ -185,7 +229,33 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       return detailOut(pool, await findEvent(e.id));
     });
 
+    // ---- Pembatalan event (REQ-TIX-05): semua pembeli direfund penuh, termasuk biaya layanan ----
+    a.post('/v1/ticketing/events/:id/cancel', async (req) => {
+      const e = await findEvent((req.params as any).id);
+      if (!e) throw notFound('Event');
+      if (!isAdmin(req.user)) assertOrg(req.user, e.org_id, ['OWNER', 'ADMIN']);
+      const b = z.object({ reason: z.string().trim().min(10, 'Jelaskan alasan pembatalan (min. 10 karakter)').max(1000) }).parse(req.body);
+      if (e.status === 'CANCELLED') throw conflict('Event sudah dibatalkan');
+      if (e.status === 'COMPLETED') throw conflict('Event sudah selesai — gunakan mediasi untuk sengketa');
+      const result = await db.tx(async (tx) => {
+        const locked = (await tx.query(`SELECT status FROM events WHERE id = $1 FOR UPDATE`, [e.id])).rows[0];
+        if (locked.status === 'CANCELLED' || locked.status === 'COMPLETED') throw conflict(`Event berstatus ${locked.status}`);
+        await tx.query(`UPDATE events SET status = 'CANCELLED', cancelled_at = now(), cancel_reason = $2 WHERE id = $1`, [e.id, b.reason]);
+        // Reservasi berjalan dihentikan; bila pembayarannya tetap masuk, consumer pembayaran me-refund otomatis.
+        const held = await tx.query(`UPDATE orders SET status = 'CANCELLED' WHERE event_id = $1 AND status = 'RESERVED' RETURNING id`, [e.id]);
+        for (const o of held.rows) await releaseReservation(tx, o.id);
+        await publish(tx, 'ticketing.event.cancelled', e.id, { eventId: e.id, orgId: e.org_id, title: e.title, reason: b.reason });
+        const refunded = await refundCancelledOrders(tx, e.id, 500); // sisanya (event besar) diteruskan job refund-cancelled-events
+        const paid = (await tx.query(`SELECT count(*)::int AS n FROM orders WHERE event_id = $1 AND status = 'PAID'`, [e.id])).rows[0].n;
+        await audit(tx, { actorId: req.user!.sub, action: 'event.cancel', entity: 'event', entityId: e.id, data: { reason: b.reason, refunded, reservations_released: held.rowCount } });
+        return { refunded, remaining: paid };
+      });
+      return { ...(await detailOut(pool, await findEvent(e.id))), refunds: { requested: result.refunded, queued: result.remaining, sla_days: settings.num('refund.event_cancel_sla_days') } };
+    });
+
     // ---- Fan: order tiket (REQ-TIX-02) ----
+    // Dua fase: (1) tx pendek reservasi kuota + order RESERVED tanpa invoice, (2) panggil finance DI LUAR tx
+    // (lock ticket_types tidak ditahan selama HTTP), (3) tx pendek tempel invoice_id + simpan respons idempoten.
     a.post('/v1/ticketing/orders', async (req, reply) => {
       const b = z
         .object({
@@ -193,14 +263,38 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
           items: z.array(z.object({ ticket_type_id: z.string().uuid(), quantity: z.number().int().min(1).max(20) })).min(1).max(10),
         })
         .parse(req.body);
-      return idempotent(db, req, reply, 'ticketing.order', async (tx) => {
+      const key = req.headers['idempotency-key'] as string | undefined;
+      if (!key) throw badRequest('Header Idempotency-Key wajib untuk operasi ini');
+      const userId = req.user!.sub;
+      // Scope sama dengan idempotent() sebelumnya → rekaman lama tetap diputar ulang.
+      const scope = `ticketing.order:${userId}`;
+      const replay = (r: { status_code: number; response: any }) => {
+        reply.header('Idempotent-Replayed', 'true').status(r.status_code);
+        return r.response;
+      };
+      const stored = async (q: Q) =>
+        (await q.query(`SELECT status_code, response FROM idempotency_keys WHERE scope = $1 AND key = $2`, [scope, key])).rows[0];
+      // Duplikat paralel dengan key sama diserialkan per fase (lock dilepas saat commit — bukan selama HTTP).
+      const lockKey = (tx: Client) => tx.query(`SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, [scope, key]);
+
+      const prev = await stored(pool);
+      if (prev) return replay(prev);
+
+      // ---- Fase 1: validasi + reservasi atomik (tanpa panggilan keluar) ----
+      const p1 = await db.tx(async (tx) => {
+        await lockKey(tx);
+        const again = await stored(tx);
+        if (again) return { replay: again };
+        // Retry setelah fase 1 sukses (fase 2/3 gagal atau masih berjalan) → lanjutkan order yang sama.
+        const existing = (await tx.query(`SELECT * FROM orders WHERE user_id = $1 AND idempotency_key = $2`, [userId, key])).rows[0];
+        if (existing) return { order: existing, fresh: false };
         const e = (await tx.query(`SELECT * FROM events WHERE id = $1`, [b.event_id])).rows[0];
         if (!e || e.status !== 'PUBLISHED') throw notFound('Event');
         if (new Date(e.starts_at) < new Date()) throw unprocessable('Penjualan tiket untuk event ini sudah ditutup');
         const orderId = uuidv7();
         const reservedUntil = new Date(Date.now() + RESERVATION_MINUTES * 60_000);
         let total = 0;
-        const lines: { id: string; quantity: number; price: number; name: string }[] = [];
+        const lines: { id: string; quantity: number; price: number }[] = [];
         // Urutkan id agar urutan lock konsisten (hindari deadlock antar order paralel)
         const merged = new Map<string, number>();
         for (const it of b.items) merged.set(it.ticket_type_id, (merged.get(it.ticket_type_id) ?? 0) + it.quantity);
@@ -213,7 +307,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
             await tx.query(
               `SELECT coalesce(sum(oi.quantity),0)::int AS n FROM order_items oi JOIN orders o ON o.id = oi.order_id
                WHERE o.user_id = $1 AND oi.ticket_type_id = $2 AND (o.status = 'PAID' OR (o.status = 'RESERVED' AND o.reserved_until > now()))`,
-              [req.user!.sub, typeId],
+              [userId, typeId],
             )
           ).rows[0].n;
           if (owned + qty > t.max_per_account) throw unprocessable(`Maksimal ${t.max_per_account} tiket ${t.name} per akun`);
@@ -221,34 +315,69 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
           const ok = await tx.query(`UPDATE ticket_types SET reserved = reserved + $2 WHERE id = $1 AND sold + reserved + $2 <= quota RETURNING id`, [typeId, qty]);
           if (!ok.rowCount) throw conflict(`Tiket ${t.name} habis atau sisa kuota tidak cukup`);
           total += Number(t.price) * qty;
-          lines.push({ id: typeId, quantity: qty, price: Number(t.price), name: t.name });
+          lines.push({ id: typeId, quantity: qty, price: Number(t.price) });
         }
-        await tx.query(`INSERT INTO orders (id, event_id, user_id, holder_name, total, reserved_until) VALUES ($1,$2,$3,$4,$5,$6)`, [
-          orderId,
-          e.id,
-          req.user!.sub,
-          req.user!.name ?? 'Pemegang tiket',
-          total,
-          reservedUntil,
-        ]);
+        const o = (
+          await tx.query(
+            `INSERT INTO orders (id, event_id, user_id, holder_name, total, reserved_until, idempotency_key) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+            [orderId, e.id, userId, req.user!.name ?? 'Pemegang tiket', total, reservedUntil, key],
+          )
+        ).rows[0];
         for (const l of lines)
           await tx.query(`INSERT INTO order_items (order_id, ticket_type_id, quantity, price) VALUES ($1,$2,$3,$4)`, [orderId, l.id, l.quantity, l.price]);
-        // Tagihan dibuat finance-service (dana tiket ditahan escrow event — §7.6). Gagal → rollback reservasi.
-        const invoice = await callService<any>('ticketing', 'finance', '/internal/invoices', {
-          method: 'POST',
-          body: {
-            purpose: 'TICKET_ORDER',
-            reference_id: orderId,
-            amount: total,
-            payer_user_id: req.user!.sub,
-            payer_org_id: null,
-            description: `Tiket ${e.title} — ${lines.map((l) => `${l.quantity}× ${l.name}`).join(', ')}`,
-            due_at: reservedUntil.toISOString(),
-          },
-        });
-        await tx.query(`UPDATE orders SET invoice_id = $2 WHERE id = $1`, [orderId, invoice.id]);
-        const o = (await tx.query(`SELECT * FROM orders WHERE id = $1`, [orderId])).rows[0];
-        return { status: 201, body: { order: await orderOut(tx, o), invoice } };
+        return { order: o, fresh: true };
+      });
+      if ('replay' in p1) return replay(p1.replay);
+      const o = p1.order;
+      // Order lama yang sudah dilepas tanpa invoice tidak boleh dibuatkan tagihan baru.
+      if (!o.invoice_id && o.status !== 'RESERVED') throw conflict('Reservasi order ini sudah tidak berlaku, silakan buat order baru');
+
+      // ---- Fase 2: invoice di finance (di luar tx; idempoten per order id) ----
+      let invoice: any;
+      try {
+        invoice = await requestInvoice(pool, o);
+      } catch (err) {
+        const status = err instanceof HttpError ? err.status : 0;
+        // Timeout (504) bersifat ambigu: finance mungkin sudah membuat invoice. Reservasi dipertahankan —
+        // klien mengulang dengan Idempotency-Key yang sama, atau job pemulihan menempelkan invoice (idempoten per order id).
+        if (status === 504) {
+          req.log.warn({ orderId: o.id }, 'invoice timeout — reservasi dipertahankan untuk pemulihan');
+          throw new HttpError(503, 'Service Unavailable', 'Layanan pembayaran lambat merespons. Reservasimu aman — coba lagi sebentar.', {
+            order_id: o.id,
+            retry_after_s: 5,
+          });
+        }
+        // Gagal pasti (tidak terjangkau / ditolak): hanya pembuat order yang melepas reservasi.
+        if (p1.fresh) await db.tx((tx) => releasePendingOrder(tx, o.id, 'CANCELLED'));
+        req.log.warn({ err: (err as Error)?.message, orderId: o.id }, 'gagal membuat invoice — reservasi dilepas');
+        const upstream4xx = status > 0 && status < 500;
+        throw new HttpError(
+          upstream4xx ? 502 : 503,
+          upstream4xx ? 'Bad Gateway' : 'Service Unavailable',
+          'Layanan pembayaran sedang tidak tersedia; reservasi tiket dibatalkan. Silakan coba lagi.',
+          { order_id: o.id },
+        );
+      }
+
+      // ---- Fase 3: tempel invoice_id + simpan respons final untuk replay ----
+      return db.tx(async (tx) => {
+        await lockKey(tx);
+        const again = await stored(tx);
+        if (again) return replay(again);
+        const cur = (await tx.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [o.id])).rows[0];
+        if (!cur.invoice_id) {
+          if (cur.status !== 'RESERVED') throw conflict('Reservasi order ini sudah tidak berlaku, silakan buat order baru');
+          await tx.query(`UPDATE orders SET invoice_id = $2 WHERE id = $1 AND status = 'RESERVED' AND invoice_id IS NULL`, [cur.id, invoice.id]);
+          cur.invoice_id = invoice.id;
+        }
+        const body = { order: await orderOut(tx, cur), invoice };
+        await tx.query(`INSERT INTO idempotency_keys (scope, key, status_code, response) VALUES ($1,$2,201,$3) ON CONFLICT DO NOTHING`, [
+          scope,
+          key,
+          JSON.stringify(body),
+        ]);
+        reply.status(201);
+        return body;
       });
     });
 
@@ -258,10 +387,90 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       return orderOut(pool, o);
     });
 
+    // ---- Refund atas permintaan pembeli (REQ-TIX-05) ----
+    async function refundQuote(q: Q, o: any) {
+      const ev = (await q.query(`SELECT status, starts_at, rescheduled_at FROM events WHERE id = $1`, [o.event_id])).rows[0];
+      const checkedIn = (await q.query(`SELECT 1 FROM tickets WHERE order_id = $1 AND status = 'CHECKED_IN' LIMIT 1`, [o.id])).rows.length > 0;
+      if (o.status !== 'PAID' || o.refund_status) return { eligible: false, escrowPct: 0, refundFee: false, message: o.refund_status ? 'Refund untuk order ini sudah diajukan.' : 'Order belum dibayar.' };
+      if (ev.status !== 'PUBLISHED') return { eligible: false, escrowPct: 0, refundFee: false, message: ev.status === 'CANCELLED' ? 'Event dibatalkan — refund diproses otomatis.' : 'Event sudah selesai.' };
+      return quoteTicketRefund({ startsAt: new Date(ev.starts_at), rescheduledAt: ev.rescheduled_at ? new Date(ev.rescheduled_at) : null, checkedIn }, refundPolicy());
+    }
+    const quoteOut = (o: any, q: Awaited<ReturnType<typeof refundQuote>>) => ({
+      eligible: q.eligible,
+      reason: 'reason' in q ? (q.reason ?? null) : null,
+      pct: q.escrowPct,
+      refund_fee: q.refundFee,
+      // Ticketing tidak memungut biaya layanan terpisah: perkiraan = porsi dari total; nominal pasti dari finance.
+      amount: q.eligible ? Math.floor((Number(o.total) * Math.round(q.escrowPct * 100)) / 10000) : 0,
+      deadline: 'deadline' in q ? (q.deadline ?? null) : null,
+      message: q.message,
+    });
+
+    a.get('/v1/ticketing/orders/:id/refund', async (req) => {
+      const o = await db.one(`SELECT * FROM orders WHERE id = $1`, [(req.params as any).id]);
+      if (!o || o.user_id !== req.user!.sub) throw notFound('Order');
+      return quoteOut(o, await refundQuote(pool, o));
+    });
+
+    a.post('/v1/ticketing/orders/:id/refund', async (req) => {
+      const id = (req.params as any).id;
+      return db.tx(async (tx) => {
+        const o = (await tx.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+        if (!o || o.user_id !== req.user!.sub) throw notFound('Order');
+        const q = await refundQuote(tx, o);
+        if (!q.eligible || !('reason' in q) || !q.reason) throw conflict(q.message);
+        await requestRefund(tx, o, { escrowPct: q.escrowPct, refundFee: q.refundFee, reason: q.reason });
+        await audit(tx, { actorId: req.user!.sub, action: 'ticket.refund.request', entity: 'order', entityId: o.id, data: { reason: q.reason, pct: q.escrowPct } });
+        return orderOut(tx, (await tx.query(`SELECT * FROM orders WHERE id = $1`, [o.id])).rows[0]);
+      });
+    });
+
+    // ---- Back office: antrean & keputusan refund ----
+    a.get('/v1/admin/ticketing/refunds', { preHandler: requirePermission('finance.view') }, async (req) => {
+      const { status } = z.object({ status: z.enum(['PENDING', 'COMPLETED', 'FAILED', 'REVIEW']).optional() }).parse(req.query);
+      const rows = await db.query(
+        `SELECT o.*, e.title AS event_title, e.starts_at AS event_starts_at, e.status AS event_status FROM orders o JOIN events e ON e.id = o.event_id
+         WHERE o.refund_status IS NOT NULL ${status ? 'AND o.refund_status = $1' : ''}
+         ORDER BY (o.refund_status IN ('REVIEW','FAILED')) DESC, o.refund_requested_at DESC LIMIT 200`,
+        status ? [status] : [],
+      );
+      const counts = await db.query(`SELECT refund_status AS status, count(*)::int AS n FROM orders WHERE refund_status IS NOT NULL GROUP BY 1`);
+      return {
+        data: rows.map((o) => ({
+          order_id: o.id,
+          user_id: o.user_id,
+          holder_name: o.holder_name,
+          total: Number(o.total),
+          order_status: o.status,
+          event: { id: o.event_id, title: o.event_title, starts_at: o.event_starts_at, status: o.event_status },
+          note: o.refund_note,
+          refund: refundOut(o),
+        })),
+        counts: Object.fromEntries(counts.map((c) => [c.status, c.n])),
+      };
+    });
+
+    a.post('/v1/admin/ticketing/orders/:id/refund', { preHandler: requirePermission('finance.refund') }, async (req) => {
+      const b = z
+        .object({ pct: z.number().min(0).max(100), refund_fee: z.boolean(), note: z.string().trim().min(5, 'Catat alasan keputusan (min. 5 karakter)').max(1000) })
+        .parse(req.body);
+      return db.tx(async (tx) => {
+        const o = (await tx.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [(req.params as any).id])).rows[0];
+        if (!o) throw notFound('Order');
+        // Order PAID biasa, atau pembayaran terlambat yang menunggu keputusan (REVIEW).
+        if (!(o.status === 'PAID' && !o.refund_status) && o.refund_status !== 'REVIEW') throw conflict('Order ini tidak dalam status yang dapat direfund');
+        const reason: TicketRefundReason = o.refund_status === 'REVIEW' ? (o.refund_reason ?? 'late_payment') : 'admin';
+        await requestRefund(tx, o, { escrowPct: b.pct, refundFee: b.refund_fee, reason, note: b.note });
+        await audit(tx, { actorId: req.user!.sub, action: 'ticket.refund.admin', entity: 'order', entityId: o.id, data: b });
+        return orderOut(tx, (await tx.query(`SELECT * FROM orders WHERE id = $1`, [o.id])).rows[0]);
+      });
+    });
+
     a.get('/v1/ticketing/tickets/mine', async (req) => {
       const rows = await db.query(
-        `SELECT tk.id, tk.status, tk.holder_name, tk.event_id, tt.name AS type_name, c.checked_in_at
-         FROM tickets tk JOIN ticket_types tt ON tt.id = tk.ticket_type_id LEFT JOIN checkins c ON c.ticket_id = tk.id
+        `SELECT tk.id, tk.status, tk.holder_name, tk.event_id, tk.order_id, tt.name AS type_name, c.checked_in_at,
+                o.refund_status, o.refund_reason, o.refund_pct, o.refund_amount, o.refund_requested_at, o.refunded_at
+         FROM tickets tk JOIN ticket_types tt ON tt.id = tk.ticket_type_id JOIN orders o ON o.id = tk.order_id LEFT JOIN checkins c ON c.ticket_id = tk.id
          WHERE tk.user_id = $1 ORDER BY tk.created_at DESC`,
         [req.user!.sub],
       );
@@ -270,7 +479,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       const em = new Map(evs.map((e) => [e.id, summaryOut(e)]));
       return {
         data: rows
-          .map((r) => ({ id: r.id, event: em.get(r.event_id), type_name: r.type_name, status: r.status, holder_name: r.holder_name, checked_in_at: r.checked_in_at }))
+          .map((r) => ({ id: r.id, order_id: r.order_id, event: em.get(r.event_id), type_name: r.type_name, status: r.status, holder_name: r.holder_name, checked_in_at: r.checked_in_at, refund: refundOut(r) }))
           .sort((x, y) => +new Date(x.event!.starts_at) - +new Date(y.event!.starts_at)),
       };
     });
@@ -291,6 +500,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       const e = await findEvent(b.event_id);
       if (!e) throw notFound('Event');
       assertStaff(req, e);
+      if (e.status !== 'PUBLISHED') throw conflict(e.status === 'COMPLETED' ? 'Event sudah selesai' : `Event berstatus ${e.status}`);
       const log = (tx: Client | null, ticketId: string | null, ok: boolean, reason?: string) =>
         (tx ?? (db.pool as any)).query(`INSERT INTO scan_attempts (event_id, ticket_id, gate, ok, reason, scanned_by) VALUES ($1,$2,$3,$4,$5,$6)`, [
           e.id,

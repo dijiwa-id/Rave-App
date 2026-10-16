@@ -24,6 +24,12 @@ x-svc: &svc
     FINANCE_URL: http://finance:4006
     TICKETING_URL: http://ticketing:4007
     NOTIFICATION_URL: http://notification:4008
+    PLATFORM_URL: http://platform:4009
+    LIVE_URL: http://live:4010
+    ADS_URL: http://ads:4011
+    LIVE_DIR: /data/live
+    UPLOAD_DIR: /data/uploads
+    BACKUP_DIR: /data/backups
 
 services:
   postgres:
@@ -44,17 +50,31 @@ services:
     healthcheck: { test: ['CMD-SHELL', "rpk cluster health | grep -E 'Healthy:.+true'"], interval: 10s, retries: 20 }
 
   iam: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: iam } } }
-  catalog: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: catalog } } }
+  catalog: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: catalog } }, volumes: [storage:/data] }
   library: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: library } } }
   playback: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: playback } } }
   booking: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: booking } } }
   finance: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: finance } } }
   ticketing: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: ticketing } } }
   notification: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: notification } } }
+  ads: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: ads } } }
+  # Super Admin: pengaturan, storage (berbagi volume dengan catalog), backup pg_dump.
+  platform: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: platform } }, volumes: [storage:/data] }
+  # Live streaming: ingest RTMP :1935 (OBS/Larix) → ffmpeg sistem → HLS di volume bersama.
+  live:
+    <<: *svc
+    build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: live } }
+    # Replika live: LIVE_DIR wajib volume bersama + LIVE_INTERNAL_URL per replika (docs/ARCHITECTURE.md §6).
+    environment: { <<: *env, FFMPEG_PATH: /usr/bin/ffmpeg, LIVE_RTMP_PUBLIC_URL: 'rtmp://localhost:1935/live', LIVE_INTERNAL_URL: 'http://live:4010' }
+    ports: ['1935:1935']
+    volumes: [storage:/data]
   gateway:
     <<: *svc
     build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: gateway } }
+    # Rate limit bersama antar-replika (tabel UNLOGGED gateway.rate_limits; fail open bila DB bermasalah).
+    environment: { <<: *env, RATE_LIMIT_STORE: pg }
     ports: ['8080:8080']
 
 volumes:
   pgdata:
+  storage:

@@ -1,4 +1,6 @@
 // Tipe respons API — cermin dari docs/API.md. Ubah dokumen kontrak dulu bila menambah field.
+import type { AdBreakOutcome, AdCategory, AdCategoryTier, AdPlacement, AdType } from '@gema/domain/ads';
+import type { AdminPermission } from '@gema/domain/settings';
 
 export type OrgType = 'ARTIST' | 'MANAGEMENT' | 'LABEL' | 'PROMOTOR' | 'VENUE' | 'CREATOR';
 export interface OrgClaim {
@@ -22,6 +24,10 @@ export interface Me {
   mfa_enabled: boolean;
   onboarded: boolean;
   premium: boolean;
+  /** Peran internal back office (ADMIN_ROLES di @gema/domain/settings); null = bukan admin. */
+  admin_role?: string | null;
+  /** Izin back office efektif ("Peran & Akses"); Super Admin = semua. */
+  admin_permissions?: AdminPermission[];
   created_at: string;
 }
 export interface TokenResponse {
@@ -364,22 +370,55 @@ export interface EventDetail extends EventSummary {
   booking_id: string | null;
   ticket_types: { id: string; name: string; price: number; quota: number; remaining: number; max_per_account: number; sale_starts_at: string | null; presale: boolean }[];
 }
+export type TicketRefundReason = 'event_cancelled' | 'rescheduled' | 'buyer_request' | 'late_payment' | 'admin';
+/** Jejak refund sebuah order tiket (null bila tidak pernah direfund). */
+export interface OrderRefund {
+  status: 'PENDING' | 'COMPLETED' | 'FAILED' | 'REVIEW';
+  reason: TicketRefundReason;
+  pct: number | null;
+  amount: number | null;
+  requested_at: string | null;
+  refunded_at: string | null;
+}
+export interface RefundQuote {
+  eligible: boolean;
+  reason: TicketRefundReason | null;
+  pct: number;
+  refund_fee: boolean;
+  amount: number;
+  deadline: string | null;
+  message: string;
+}
 export interface Order {
   id: string;
   event_id: string;
-  status: 'RESERVED' | 'PAID' | 'EXPIRED' | 'CANCELLED';
+  status: 'RESERVED' | 'PAID' | 'EXPIRED' | 'CANCELLED' | 'REFUNDED';
   total: number;
   reserved_until: string;
   invoice_id: string;
   items: { ticket_type_id: string; name: string; quantity: number; price: number }[];
+  refund: OrderRefund | null;
 }
 export interface Ticket {
   id: string;
+  order_id: string;
   event: EventSummary;
   type_name: string;
   status: 'VALID' | 'CHECKED_IN' | 'REFUNDED';
   holder_name: string;
   checked_in_at: string | null;
+  refund: OrderRefund | null;
+}
+/** Baris antrean refund di back office. */
+export interface AdminRefundRow {
+  order_id: string;
+  user_id: string;
+  holder_name: string;
+  total: number;
+  order_status: Order['status'];
+  event: { id: string; title: string; starts_at: string; status: string };
+  note: string | null;
+  refund: OrderRefund;
 }
 
 export interface Notification {
@@ -390,4 +429,318 @@ export interface Notification {
   link: string | null;
   read_at: string | null;
   created_at: string;
+}
+
+// ---- Platform (Super Admin, docs/API.md §9) ----
+export interface PlatformOverview {
+  generated_at: string;
+  services: { name: string; ok: boolean; latency_ms: number | null; uptime_s: number | null; memory_mb: number | null; settings_loaded_at: string | null; metrics: Record<string, number | string> }[];
+  kpis: {
+    users_total: number;
+    users_7d: number;
+    artists: number;
+    orgs: number;
+    tracks_live: number;
+    releases_in_review: number;
+    streams_today: number;
+    streams_28d: number;
+    bookings_active: number;
+    bookings_settled: number;
+    gmv_offair: number;
+    escrow_held: number;
+    tickets_sold: number;
+    ticket_gmv: number;
+    kyc_pending: number;
+    disputes_open: number;
+  };
+  bus: { events_total: number; max_lag: number; dead_letters: number };
+  storage: { disk_used_pct: number; disk_free_bytes: number; db_bytes: number; uploads_bytes: number; backups_bytes: number; last_backup_at: string | null; warning: boolean };
+  alerts: { level: 'info' | 'warning' | 'critical'; message: string; href: string | null }[];
+  settings_version: number;
+  maintenance: boolean;
+}
+
+export type BucketName = 'uploads' | 'backups' | 'branding';
+export interface StorageOverview {
+  disk: { path: string; total_bytes: number; used_bytes: number; free_bytes: number; used_pct: number; warn_pct: number };
+  buckets: { name: BucketName; description: string; path: string; files: number; bytes: number; quota_bytes: number | null; used_pct: number | null; by_type: { type: string; files: number; bytes: number }[] }[];
+  database: {
+    total_bytes: number;
+    schemas: { schema: string; service: string; bytes: number; tables: number; rows_est: number }[];
+    largest_tables: { schema: string; table: string; bytes: number; rows_est: number }[];
+  };
+  bus: { events: number; bytes: number; oldest_at: string | null; prunable: number };
+  retention: { bus_days: number; idempotency_days: number };
+  trend: { at: string; disk_used_bytes: number; db_bytes: number; uploads_bytes: number; backups_bytes: number }[];
+}
+export interface StoredFile {
+  bucket: BucketName;
+  key: string;
+  size: number;
+  content_type: string | null;
+  modified_at: string;
+  url: string | null;
+  /** null = tidak diperiksa (mis. bucket backups). */
+  referenced: boolean | null;
+}
+export interface StoredFilePage {
+  data: StoredFile[];
+  next_cursor: string | null;
+  total_files: number;
+  total_bytes: number;
+}
+export interface Backup {
+  id: string;
+  filename: string;
+  status: 'RUNNING' | 'COMPLETED' | 'FAILED';
+  size_bytes: number | null;
+  sha256: string | null;
+  trigger: 'manual' | 'schedule';
+  note: string | null;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+  created_by: string | null;
+}
+export interface BackupsResponse {
+  data: Backup[];
+  schedule: { enabled: boolean; interval_hours: number; keep: number; next_run_at: string | null };
+}
+export interface DeadLetter {
+  group: string;
+  event_id: string;
+  topic: string;
+  error: string;
+  attempts: number;
+  failed_at: string;
+  retry_requested_at: string | null;
+}
+export interface BusOverview {
+  topics: { topic: string; events: number; last_at: string | null }[];
+  consumers: { group: string; topic: string; last_seq: number; head_seq: number; lag: number }[];
+  dead_letters: DeadLetter[];
+}
+export interface SettingsResponse {
+  version: number;
+  values: Record<string, unknown>;
+  meta: Record<string, { updated_by: string | null; updated_at: string | null }>;
+}
+export interface SettingsHistoryItem {
+  id: string;
+  key: string;
+  old_value: unknown;
+  new_value: unknown;
+  reason: string;
+  by_user_id: string | null;
+  by_name: string | null;
+  created_at: string;
+}
+export interface PlatformConfig {
+  version: number;
+  /** Kunci publik registri (bertitik, mis. `general.announcement`) → nilai. */
+  settings: Record<string, unknown>;
+}
+export type AdminUser = Me & { admin_role: string | null; suspended_at: string | null };
+
+// ---- Live Streaming (docs/API.md §10) ----
+export type LiveStatus = 'SCHEDULED' | 'LIVE' | 'INTERRUPTED' | 'ENDED';
+export type LiveAccess = 'PUBLIC' | 'TICKET';
+export interface LiveStream {
+  id: string;
+  title: string;
+  description: string | null;
+  status: LiveStatus;
+  access: LiveAccess;
+  event: { id: string; slug: string; title: string; city: string; starts_at: string } | null;
+  artist: { id: string; name: string; slug: string; image_url: string | null } | null;
+  org: { id: string; name: string; type: OrgType };
+  cover_url: string | null;
+  scheduled_at: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  ended_reason: string | null;
+  /** Penonton aktif (heartbeat ≤ 30 dtk). */
+  viewers: number;
+  peak_viewers: number;
+  total_views: number;
+  ingest: 'rtmp' | 'browser' | 'demo' | null;
+  chat_enabled: boolean;
+  is_demo: boolean;
+  /** Hanya untuk anggota org pemilik / admin: 4 karakter terakhir stream key. */
+  key_hint?: string;
+}
+export type LiveAccessReason = null | 'login_required' | 'ticket_required' | 'not_live';
+export type LiveStreamDetail = LiveStream & { can_watch: boolean; access_reason: LiveAccessReason };
+export interface LivePlayback {
+  hls_url: string;
+  expires_at: string;
+}
+export interface LiveChatMessage {
+  id: number;
+  user_id: string;
+  display_name: string;
+  body: string;
+  created_at: string;
+  mine: boolean;
+}
+export interface LiveChatPage {
+  data: LiveChatMessage[];
+  last_id: number | null;
+  chat_enabled: boolean;
+  slowmode_s: number;
+}
+export interface StreamHealth {
+  status: LiveStatus;
+  ingest: LiveStream['ingest'];
+  uptime_s: number;
+  bitrate_kbps: number | null;
+  last_segment_at: string | null;
+  segment_age_s: number | null;
+  transcoder: 'idle' | 'starting' | 'running' | 'restarting' | 'failed';
+  restarts: number;
+  viewers: number;
+  warnings: string[];
+}
+export interface LiveKeyInfo {
+  stream_key: string;
+  rtmp_url: string;
+  rtmp_server: string;
+}
+
+// ---- Iklan — kebijakan penayangan tier Gratis (docs/API.md §11) ----
+export type { AdBreakOutcome, AdCategory, AdCategoryTier, AdPlacement, AdType } from '@gema/domain/ads';
+
+export interface AdCreative {
+  impression_id: string;
+  campaign_id: string;
+  type: AdType;
+  advertiser: string;
+  title: string;
+  body: string | null;
+  image_url: string | null;
+  audio_url: string | null;
+  click_url: string | null;
+  cta_label: string | null;
+  /** Warna latar kartu display bila tanpa gambar. */
+  theme_color: string | null;
+  duration_s: number;
+  /** null = tidak bisa dilewati. */
+  skippable_after_s: number | null;
+  label: 'Iklan' | 'Dari GEMA';
+  is_house: boolean;
+}
+export interface AdBreakRequest {
+  placement: AdPlacement;
+  content?: { kind: 'track' | 'episode'; id: string; genres?: string[]; content_warning?: boolean; premium?: boolean };
+}
+export interface AdBreakResponse {
+  break_id: string | null;
+  ads: AdCreative[];
+  outcome: AdBreakOutcome;
+  reason: string;
+}
+export type AdImpressionEvent = 'start' | 'complete' | 'skip' | 'click';
+
+export type CampaignStatus = 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'PAUSED' | 'ENDED';
+export interface CampaignStats {
+  impressions: number;
+  completes: number;
+  skips: number;
+  clicks: number;
+  ctr: number;
+  completion_rate: number;
+}
+export interface Campaign {
+  id: string;
+  advertiser: string;
+  name: string;
+  category: AdCategory;
+  license_ref: string | null;
+  type: AdType;
+  title: string;
+  body: string | null;
+  image_url: string | null;
+  audio_url: string | null;
+  click_url: string | null;
+  cta_label: string | null;
+  theme_color: string | null;
+  duration_s: number;
+  target_genres: string[];
+  target_cities: string[];
+  start_at: string;
+  end_at: string | null;
+  max_impressions: number | null;
+  /** 1..10 */
+  priority: number;
+  is_house: boolean;
+  status: CampaignStatus;
+  review_note: string | null;
+  reviewed_by_name: string | null;
+  reviewed_at: string | null;
+  created_by_name: string | null;
+  created_at: string;
+  stats: CampaignStats;
+}
+/** Field kampanye yang dapat ditulis (POST/PATCH) + `submit` untuk langsung mengajukan tinjauan. */
+export type CampaignInput = Pick<Campaign, 'advertiser' | 'name' | 'category' | 'type' | 'title' | 'duration_s'> &
+  Partial<
+    Pick<
+      Campaign,
+      | 'license_ref'
+      | 'body'
+      | 'image_url'
+      | 'audio_url'
+      | 'click_url'
+      | 'cta_label'
+      | 'theme_color'
+      | 'target_genres'
+      | 'target_cities'
+      | 'start_at'
+      | 'end_at'
+      | 'max_impressions'
+      | 'priority'
+      | 'is_house'
+    >
+  > & { submit?: boolean };
+
+export interface AdsOverview {
+  kpis: {
+    impressions: number;
+    completes: number;
+    clicks: number;
+    ctr: number;
+    completion_rate: number;
+    fill_rate: number;
+    breaks: number;
+    active_campaigns: number;
+    pending_review: number;
+  };
+  by_day: { date: string; impressions: number; clicks: number; breaks: number }[];
+  outcomes: { outcome: AdBreakOutcome | string; label: string; n: number }[];
+  top_campaigns: Campaign[];
+  policy: {
+    fixed_rules: string[];
+    categories: { key: AdCategory; label: string; tier: AdCategoryTier; license: string | null; blocked: boolean }[];
+  };
+}
+export interface AdSimulateInput {
+  premium: boolean;
+  anonymous?: boolean;
+  consent?: boolean;
+  placement: AdPlacement;
+  premium_content?: boolean;
+  content_warning?: boolean;
+  streams_today: number;
+  streams_since_break: number;
+  minutes_since_break: number | null;
+  ads_last_hour: number;
+  city?: string;
+  genres?: string[];
+}
+export interface AdSimulateResult {
+  outcome: AdBreakOutcome;
+  label: string;
+  slots: number;
+  trace: { rule: string; pass: boolean; detail: string }[];
+  eligible_campaigns: { id: string; name: string; advertiser: string; is_house: boolean; reason: string | null }[];
 }

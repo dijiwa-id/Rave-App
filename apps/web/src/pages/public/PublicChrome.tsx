@@ -14,13 +14,13 @@ export function PublicNav() {
           <GemaLogo />
         </Link>
         <nav className="flex items-center gap-1 text-sm font-bold sm:gap-6" aria-label="Navigasi utama">
-          <Link to="/premium" className="hidden px-2 hover:text-gema-green sm:inline">
+          <Link to="/premium" className="hidden px-2 hover:text-gema-primary-text sm:inline">
             Premium
           </Link>
-          <a href="/#faq" className="hidden px-2 hover:text-gema-green sm:inline">
+          <a href="/#faq" className="hidden px-2 hover:text-gema-primary-text sm:inline">
             Bantuan
           </a>
-          <a href="/#unduh" className="hidden px-2 hover:text-gema-green md:inline">
+          <a href="/#unduh" className="hidden px-2 hover:text-gema-primary-text md:inline">
             Unduh
           </a>
           <span className="hidden h-4 w-px bg-white sm:inline" />
@@ -33,7 +33,7 @@ export function PublicNav() {
               <Link to="/login?signup=1" className="px-2 text-gema-muted hover:text-white">
                 Daftar
               </Link>
-              <Link to="/login" className="px-2 hover:text-gema-green">
+              <Link to="/login" className="px-2 hover:text-gema-primary-text">
                 Masuk
               </Link>
             </>
@@ -45,8 +45,8 @@ export function PublicNav() {
 }
 
 const COLS: [string, [string, string][]][] = [
-  ['Perusahaan', [['Tentang', '#'], ['Karier', '#'], ['Untuk Media', '#']]],
-  ['Komunitas', [['Untuk Artis', '/studio'], ['Untuk Promotor', '/promotor'], ['Developer', '#'], ['Iklan', '#'], ['Investor', '#']]],
+  ['Perusahaan', [['Tentang', '/tentang'], ['Karier', '/karier'], ['Untuk Media', '/media']]],
+  ['Komunitas', [['Untuk Artis', '/untuk-artis'], ['Untuk Promotor', '/untuk-promotor'], ['Developer', '/developer'], ['Iklan', '/iklan'], ['Investor', '/investor']]],
   ['Tautan Berguna', [['Bantuan', '/#faq'], ['Web Player', '/app'], ['Aplikasi Seluler Gratis', '/#unduh'], ['Premium', '/premium']]],
 ];
 
@@ -67,11 +67,11 @@ export function PublicFooter() {
                   {links.map(([t, href]) => (
                     <li key={t}>
                       {href.startsWith('/') && !href.includes('#') ? (
-                        <Link to={href} className="hover:text-gema-green">
+                        <Link to={href} className="hover:text-gema-primary-text">
                           {t}
                         </Link>
                       ) : (
-                        <a href={href} className="hover:text-gema-green">
+                        <a href={href} className="hover:text-gema-primary-text">
                           {t}
                         </a>
                       )}
@@ -95,7 +95,7 @@ export function PublicFooter() {
             <a href="#">Kebijakan Privasi</a>
             <a href="#">Kebijakan Hak Cipta</a>
             <a href="#">Cookie</a>
-            <a href="#">Tentang Iklan</a>
+            <Link to="/iklan">Tentang Iklan</Link>
           </div>
           <div className="flex items-center gap-4">
             <span className="inline-flex items-center gap-1">

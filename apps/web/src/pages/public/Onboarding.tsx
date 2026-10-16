@@ -44,7 +44,7 @@ export default function Onboarding() {
     }
   }
 
-  const chip = (active: boolean) => cx('rounded-full border px-4 py-2 text-sm font-bold transition', active ? 'border-gema-green bg-gema-green text-black' : 'border-white/30 text-white hover:border-white');
+  const chip = (active: boolean) => cx('rounded-full border px-4 py-2 text-sm font-bold transition', active ? 'border-gema-primary bg-gema-primary text-white' : 'border-white/30 text-white hover:border-white');
 
   return (
     <div className="min-h-full bg-gradient-to-b from-[#1e3264] to-black text-white">
@@ -61,7 +61,7 @@ export default function Onboarding() {
         nextButtonText="Lanjut"
         completeButtonText="Selesai"
         stepCircleContainerClassName="!max-w-2xl bg-[#181818] border border-white/10"
-        nextButtonProps={{ disabled: !canNext, className: cx('rounded-full bg-gema-green px-6 py-2 font-bold text-black transition hover:scale-105', !canNext && 'pointer-events-none opacity-40') }}
+        nextButtonProps={{ disabled: !canNext, className: cx('rounded-full bg-gema-primary px-6 py-2 font-bold text-white transition hover:scale-105', !canNext && 'pointer-events-none opacity-40') }}
         disableStepIndicators
       >
         <Step>
@@ -99,9 +99,9 @@ export default function Onboarding() {
                 return (
                   <button key={a.id} type="button" onClick={() => toggle(artists, setArtists, a.id)} aria-pressed={on} className="group text-center">
                     <span className="relative mx-auto block size-20">
-                      {a.image_url ? <img src={a.image_url} alt="" className={cx('size-20 rounded-full object-cover transition', on && 'ring-4 ring-gema-green')} /> : <span className="block size-20 rounded-full bg-gema-highlight" />}
+                      {a.image_url ? <img src={a.image_url} alt="" className={cx('size-20 rounded-full object-cover transition', on && 'ring-4 ring-gema-primary')} /> : <span className="block size-20 rounded-full bg-gema-highlight" />}
                       {on && (
-                        <span className="absolute -right-1 -bottom-1 grid size-7 place-items-center rounded-full bg-gema-green text-black">
+                        <span className="absolute -right-1 -bottom-1 grid size-7 place-items-center rounded-full bg-gema-primary text-white">
                           <Check className="size-4" />
                         </span>
                       )}

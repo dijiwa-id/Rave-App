@@ -11,6 +11,7 @@
     "./money": "./src/money.ts",
     "./events": "./src/events.ts",
     "./seed-ids": "./src/seed-ids.ts",
-    "./settings": "./src/settings.ts"
+    "./settings": "./src/settings.ts",
+    "./ads": "./src/ads.ts"
   }
 }

@@ -18,6 +18,8 @@ export interface DomainEvents {
 
   // Library
   'library.artist.followed': { userId: string; artistId: string };
+  /** Hanya bila baris follow benar-benar dihapus (unfollow berulang tidak mengurangi dua kali). */
+  'library.artist.unfollowed': { userId: string; artistId: string };
   'library.track.liked': { userId: string; trackId: string };
 
   // Playback & analytics
@@ -44,14 +46,22 @@ export interface DomainEvents {
   'booking.dispute.resolved': {
     bookingId: string; disputeId: string; outcome: 'RELEASE_TO_ARTIST' | 'REFUND_PROMOTOR';
     fee: number; splits: { partyId: string; pct: number }[]; payeeType: 'individual' | 'company'; promotorOrgId: string;
+    artistId?: string; // aditif (notifikasi hasil mediasi ke sisi artis)
   };
 
   // Finance
   'finance.payment.succeeded': { intentId: string; purpose: PaymentPurpose; referenceId: string; amount: number; payerUserId: string };
-  'finance.payment.failed': { intentId: string; purpose: PaymentPurpose; referenceId: string };
+  'finance.payment.failed': { intentId: string; purpose: PaymentPurpose; referenceId: string; payerUserId?: string; amount?: number };
   'finance.escrow.released': { referenceId: string; amount: number; lines: { partyId: string; amount: number }[] };
-  'finance.escrow.refunded': { referenceId: string; amount: number };
+  'finance.escrow.refunded': { referenceId: string; amount: number; promotorOrgId?: string | null; promotorUserId?: string | null };
   'finance.payout.completed': { payoutId: string; partyId: string; amount: number };
+  // Refund ke pembeli (dana keluar dari escrow lewat mitra ke metode pembayaran asal). Satu refund per invoice.
+  'finance.refund.completed': { refundId: string; invoiceId: string; purpose: PaymentPurpose; referenceId: string; amount: number; payerUserId: string; reason: string };
+  'finance.refund.failed': { invoiceId: string | null; purpose: PaymentPurpose; referenceId: string; reason: string; error: string };
+
+  // Live streaming
+  'live.stream.started': { streamId: string; orgId: string; artistId: string | null; title: string };
+  'live.stream.ended': { streamId: string; reason: string; durationS: number; peakViewers: number };
 
   // Platform (Super Admin)
   'platform.settings.updated': { changes: Record<string, unknown>; version: number; byUserId: string };
@@ -60,6 +70,13 @@ export interface DomainEvents {
   'ticketing.event.published': { eventId: string; title: string; city: string; startsAt: string; artistIds: string[]; slug: string };
   'ticketing.order.paid': { orderId: string; eventId: string; userId: string; quantity: number; amount: number };
   'ticketing.ticket.checked_in': { ticketId: string; eventId: string; gate: string };
+  // Event lewat ends_at → COMPLETED; finance mencairkan escrow tiket ke promotor setelah jendela dispute.
+  'ticketing.event.completed': { eventId: string; orgId: string; endedAt: string };
+  'ticketing.event.cancelled': { eventId: string; orgId: string; title: string; reason: string };
+  /** Jadwal/venue event PUBLISHED berubah. `userIds` = pemegang tiket (dipecah per batch bila banyak). */
+  'ticketing.event.rescheduled': { eventId: string; title: string; startsAt: string; venueName: string; city: string; optOutUntil: string | null; userIds: string[] };
+  /** Ticketing sudah membatalkan tiket order ini; finance mengembalikan dana sesuai porsi. */
+  'ticketing.order.refund_requested': { orderId: string; eventId: string; userId: string; escrowPct: number; refundFee: boolean; reason: string };
 }
 
 export type Topic = keyof DomainEvents;

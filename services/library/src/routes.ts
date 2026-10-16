@@ -137,7 +137,11 @@ export async function routes(app: FastifyInstance, { db, log }: ServiceContext) 
       return { following: true };
     });
     a.delete('/v1/library/follows/:artistId', async (req) => {
-      await db.query(`DELETE FROM follows WHERE user_id = $1 AND artist_id = $2`, [uid(req), uuid.parse((req.params as any).artistId)]);
+      const artistId = uuid.parse((req.params as any).artistId);
+      await db.tx(async (tx) => {
+        const r = await tx.query(`DELETE FROM follows WHERE user_id = $1 AND artist_id = $2`, [uid(req), artistId]);
+        if (r.rowCount) await publish(tx, 'library.artist.unfollowed', artistId, { userId: uid(req), artistId });
+      });
       return { following: false };
     });
 

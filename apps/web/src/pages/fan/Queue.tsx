@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ListMusic } from 'lucide-react';
 import { fmt } from '@/lib/api';
+import { useShallow } from 'zustand/react/shallow';
 import { usePlayer, type Playable } from '@/stores/player';
 import { FanPage } from '@/components/fan';
 import { cx, EmptyState } from '@/components/ui';
@@ -8,11 +9,11 @@ import { cx, EmptyState } from '@/components/ui';
 function Row({ p, i, active, onPlay }: { p: Playable; i: number; active?: boolean; onPlay: () => void }) {
   return (
     <button onClick={onPlay} className="grid w-full grid-cols-[24px_1fr_60px] items-center gap-4 rounded-md px-4 py-2 text-left text-sm text-gema-muted hover:bg-white/10">
-      <span className={cx('text-right', active && 'text-gema-green')}>{i}</span>
+      <span className={cx('text-right', active && 'text-gema-primary-text')}>{i}</span>
       <span className="flex min-w-0 items-center gap-3">
-        {p.image_url ? <img src={p.image_url} alt="" className="size-10 rounded" /> : <span className="size-10 rounded bg-gema-highlight" />}
+        {p.image_url ? <img src={p.image_url} alt="" loading="lazy" decoding="async" width={40} height={40} className="size-10 rounded" /> : <span className="size-10 rounded bg-gema-highlight" />}
         <span className="min-w-0">
-          <span className={cx('block truncate text-base', active ? 'text-gema-green' : 'text-white')}>{p.title}</span>
+          <span className={cx('block truncate text-base', active ? 'text-gema-primary-text' : 'text-white')}>{p.title}</span>
           <span className="block truncate">{p.subtitle}</span>
         </span>
       </span>
@@ -22,7 +23,7 @@ function Row({ p, i, active, onPlay }: { p: Playable; i: number; active?: boolea
 }
 
 export default function Queue() {
-  const { queue, index, current } = usePlayer();
+  const { queue, index, current } = usePlayer(useShallow((s) => ({ queue: s.queue, index: s.index, current: s.current })));
   const playQueue = usePlayer((s) => s.playQueue);
   if (!current)
     return (

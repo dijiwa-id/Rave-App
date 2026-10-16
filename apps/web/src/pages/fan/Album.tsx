@@ -54,7 +54,7 @@ export default function Album() {
       <div style={{ background: `linear-gradient(${color}55, transparent 240px)` }}>
         <ActionBar>
           <PlayFab size="lg" onClick={() => playQueue(r.tracks.map(trackToPlayable))} />
-          <button onClick={toggleSave} aria-label={saved ? 'Hapus dari Koleksi' : 'Simpan ke Koleksi'} className={saved ? 'text-gema-green' : 'text-gema-muted hover:text-white'}>
+          <button onClick={toggleSave} aria-label={saved ? 'Hapus dari Koleksi' : 'Simpan ke Koleksi'} className={saved ? 'text-gema-primary-text' : 'text-gema-muted hover:text-white'}>
             {saved ? <CheckCircle2 className="size-8" /> : <PlusCircle className="size-8" />}
           </button>
         </ActionBar>

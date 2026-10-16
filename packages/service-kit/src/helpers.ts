@@ -1,8 +1,8 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Client, Db } from './db.js';
 import { badRequest } from './errors.js';
-import { config, serviceUrl, type ServiceName } from './config.js';
-import { serviceToken } from './auth.js';
+import { serviceUrl, type ServiceName } from './config.js';
+import { serviceHeaders } from './auth.js';
 import { HttpError } from './errors.js';
 
 /**
@@ -31,6 +31,13 @@ export async function idempotent<T>(
     return prev.response as T;
   }
   return db.tx(async (tx) => {
+    // Retry paralel dengan key sama: tunggu yang pertama selesai lalu putar ulang responsnya (bukan menjalankan fn dua kali).
+    await tx.query(`SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, [fullScope, key]);
+    const again = (await tx.query(`SELECT status_code, response FROM idempotency_keys WHERE scope=$1 AND key=$2`, [fullScope, key])).rows[0];
+    if (again) {
+      reply.header('Idempotent-Replayed', 'true').status(again.status_code);
+      return again.response as T;
+    }
     const r = await fn(tx);
     const status = r.status ?? 200;
     await tx.query(`INSERT INTO idempotency_keys (scope, key, status_code, response) VALUES ($1,$2,$3,$4)`, [fullScope, key, status, JSON.stringify(r.body ?? null)]);
@@ -60,19 +67,27 @@ export async function callService<T = any>(
   path: string,
   init: { method?: string; body?: unknown; userToken?: string } = {},
 ): Promise<T> {
-  const token = init.userToken ?? (await serviceToken(from));
-  const res = await fetch(serviceUrl(to) + path, {
-    method: init.method ?? 'GET',
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-      'x-internal-secret': config.internalSecret,
-    },
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
-    signal: AbortSignal.timeout(5000),
-  });
+  const auth = init.userToken ? { authorization: `Bearer ${init.userToken}` } : await serviceHeaders(from);
+  let res: Response;
+  try {
+    res = await fetch(serviceUrl(to) + path, {
+      method: init.method ?? 'GET',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch (e: any) {
+    // Timeout → 504, tidak terjangkau → 502 (Problem Details), bukan 500 dengan stack trace.
+    const timeout = e?.name === 'TimeoutError' || e?.name === 'AbortError';
+    throw new HttpError(timeout ? 504 : 502, timeout ? 'Gateway Timeout' : 'Bad Gateway', `${to} ${timeout ? 'tidak merespons' : 'tidak terjangkau'}`);
+  }
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: any = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null; // halaman galat HTML dari proxy dsb.
+  }
   if (!res.ok) throw new HttpError(res.status >= 500 ? 502 : res.status, 'Upstream error', data?.detail ?? `${to}${path} → ${res.status}`);
   return data as T;
 }

@@ -1,10 +1,13 @@
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Muat .env dari root monorepo (jika ada) tanpa dependensi tambahan.
+// `.env.example` hanya fallback dev — di produksi konfigurasi wajib eksplisit.
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
-for (const f of ['.env', '.env.example']) {
+for (const f of process.env.NODE_ENV === 'production' ? ['.env'] : ['.env', '.env.example']) {
   const p = join(root, f);
   if (existsSync(p)) {
     try {
@@ -43,8 +46,24 @@ export const config = {
     ticketing: Number(env('TICKETING_PORT', '4007')),
     notification: Number(env('NOTIFICATION_PORT', '4008')),
     platform: Number(env('PLATFORM_PORT', '4009')),
+    live: Number(env('LIVE_PORT', '4010')),
+    ads: Number(env('ADS_PORT', '4011')),
   },
 };
+
+/** Nilai bawaan dev yang tidak boleh terbawa ke produksi (siapa pun yang tahu bisa menerbitkan token service). */
+const DEV_DEFAULTS: [name: string, value: string][] = [
+  ['JWT_SECRET', 'dev-only-change-me-please-32-bytes-min'],
+  ['MEDIA_SIGNING_SECRET', 'dev-media-signing-secret'],
+  ['PG_WEBHOOK_SECRET', 'dev-pg-webhook-secret'],
+  ['INTERNAL_SERVICE_SECRET', 'dev-internal-service-secret'],
+];
+if (!config.isDev) {
+  const bad = DEV_DEFAULTS.filter(([n, v]) => (process.env[n] ?? v) === v).map(([n]) => n);
+  if (!process.env.KYC_KEY) bad.push('KYC_KEY');
+  if (process.env.GEMA_FAST_CLOCK === '1') bad.push('GEMA_FAST_CLOCK (tidak boleh 1 di produksi)');
+  if (bad.length) throw new Error(`NODE_ENV=production: set nilai produksi untuk ${bad.join(', ')}`);
+}
 
 export type ServiceName = keyof typeof config.ports;
 
@@ -52,3 +71,9 @@ export function serviceUrl(name: Exclude<ServiceName, 'gateway'>): string {
   const override = process.env[`${name.toUpperCase()}_URL`];
   return override ?? `http://127.0.0.1:${config.ports[name]}`;
 }
+
+/**
+ * Identitas instance (replika) proses ini — unik per start. Dipakai di log, `/internal/stats`,
+ * dan kepemilikan sumber daya per instance (mis. siaran live). Bisa dipaksa via env INSTANCE_ID.
+ */
+export const INSTANCE_ID = process.env.INSTANCE_ID || `${hostname()}-${process.pid}-${randomBytes(3).toString('hex')}`;

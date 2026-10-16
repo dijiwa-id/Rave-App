@@ -24,8 +24,15 @@
 | `/v1/finance`, `/v1/webhooks/pg`, `/v1/admin/finance` | finance | 4006 | `finance` |
 | `/v1/ticketing` | ticketing | 4007 | `ticketing` |
 | `/v1/notifications` | notification | 4008 | `notify` |
+| `/v1/platform`, `/v1/admin/platform` | platform | 4009 | `platform` |
+| `/v1/live`, `/v1/admin/live` | live | 4010 | `live` |
+| `/v1/ads`, `/v1/admin/ads` | ads | 4011 | `ads` |
 
-Endpoint internal antar-service memakai prefix `/internal/...` (TIDAK diekspos gateway; wajib token role `service`).
+Gateway sendiri melayani `GET /v1/status` → `{ ok, services: { service, ok, ms }[] }` (cek `/readyz` semua upstream, cache 5 dtk).
+
+Modul yang dimatikan Super Admin (`modules.booking|ticketing|waitlist|live|podcasts`) → semua metode ke prefix modul (`/v1/booking`, `/v1/ticketing`, `/v1/waitlist`, `/v1/live`, `/v1/catalog/shows`, `/v1/catalog/episodes`) dijawab `503` `type: …/module-disabled` untuk non-admin.
+
+Endpoint internal antar-service memakai prefix `/internal/...` (TIDAK diekspos gateway; wajib token role `service` **dan** header `x-internal-secret` = `INTERNAL_SERVICE_SECRET`).
 
 ---
 
@@ -254,7 +261,7 @@ Wallet = { party_id, balances: { royalty, offair, ticket, merch, tip, total }, t
 Payout = { id, party_id, amount, status: "REQUESTED"|"PROCESSING"|"COMPLETED"|"FAILED", created_at }
 ```
 
-Internal: `POST /internal/invoices` `{ purpose, reference_id, amount, payer_user_id, payer_org_id?, description, due_at }` → `Invoice` (dipakai ticketing).
+Internal: `POST /internal/invoices` `{ purpose, reference_id, amount, payer_user_id, payer_org_id?, description, due_at, metadata?: { event_id, promotor_org_id, service_fee? } }` → `Invoice` (dipakai ticketing; `metadata.event_id` mengelompokkan escrow tiket per event).
 
 **Catatan implementasi finance (v1):**
 - `Invoice` juga memuat `escrow_amount`, `fee_amount` (service fee platform; DP = DP fee + service fee promotor), `depends_on` (pelunasan menunggu DP → simulate-pay 422 bila DP belum lunas).
@@ -273,6 +280,7 @@ Internal: `POST /internal/invoices` `{ purpose, reference_id, amount, payer_user
 | `GET /v1/ticketing/events/:idOrSlug` | publik | | `EventDetail` |
 | `GET /v1/ticketing/orgs/:orgId/events` | promotor | | `{ data: (EventSummary & { sold, revenue, checked_in })[] }` |
 | `POST /v1/ticketing/events` | promotor | `{ org_id, booking_id?, title, description, city, venue_name, venue_address, starts_at, ends_at, poster_url?, artist_ids, rules?, ticket_types: { name, price, quota, max_per_account, sale_starts_at?, presale?: bool }[] }` | `EventDetail` (DRAFT) |
+| `PATCH /v1/ticketing/events/:id` | promotor | subset body `POST` tanpa `org_id`; `ticket_types` hanya saat DRAFT (diganti seluruhnya) | `EventDetail` |
 | `POST /v1/ticketing/events/:id/publish` | promotor | | `EventDetail` (PUBLISHED, event `ticketing.event.published`) |
 | `POST /v1/ticketing/orders` | ✓ **Idempotency-Key** | `{ event_id, items: { ticket_type_id, quantity }[] }` | `{ order: Order, invoice: Invoice }` — kuota ditahan 10 menit, atomik (tanpa oversell) |
 | `GET /v1/ticketing/orders/:id` | pemilik | | `Order` |
@@ -280,6 +288,27 @@ Internal: `POST /internal/invoices` `{ purpose, reference_id, amount, payer_user
 | `GET /v1/ticketing/tickets/:id/qr` | pemilik | | `{ payload: "GEMA1.<ticket_id>.<code>", expires_in }` (berputar 15 dtk) |
 | `POST /v1/ticketing/checkin` | anggota org promotor | `{ event_id, payload, gate }` | `{ ok: bool, reason?: "INVALID"\|"DUPLICATE"\|"WRONG_EVENT"\|"EXPIRED_CODE", ticket? }` |
 | `GET /v1/ticketing/events/:id/checkin-stats` | promotor | | `{ sold, checked_in, by_gate: { gate, count }[] }` |
+| `POST /v1/ticketing/events/:id/cancel` | OWNER/ADMIN org promotor, admin | `{ reason }` (min. 10 karakter) | `EventDetail & { refunds: { requested, queued, sla_days } }` — event `CANCELLED`, reservasi berjalan dihentikan, semua order PAID direfund penuh termasuk biaya layanan (sisa diteruskan job `refund-cancelled-events`) |
+| `GET /v1/ticketing/orders/:id/refund` | pemilik | | `RefundQuote { eligible, reason, pct, refund_fee, amount, deadline, message }` |
+| `POST /v1/ticketing/orders/:id/refund` | pemilik | | `Order` (`REFUNDED`, `refund.status = PENDING`) atau `409` dengan alasan ketidaklayakan |
+| `GET /v1/admin/ticketing/refunds` | admin | `status?: PENDING\|COMPLETED\|FAILED\|REVIEW` | `{ data: AdminRefundRow[], counts }` |
+| `POST /v1/admin/ticketing/orders/:id/refund` | admin | `{ pct: 0–100, refund_fee: bool, note }` | `Order` — untuk order PAID atau pembayaran terlambat berstatus `REVIEW` |
+
+**Refund tiket (REQ-TIX-05).** Kebijakan dari pengaturan `refund.*`:
+- **Event dibatalkan:** refund 100% + biaya layanan, otomatis.
+- **Jadwal/venue berubah** (`PATCH` mengubah `starts_at`, `city`, atau `venue_name` setelah publish): pemegang tiket dikabari (`ticketing.event.rescheduled`) dan berhak refund 100% + biaya layanan selama `refund.reschedule_opt_out_days`.
+- **Permintaan pembeli:** hanya bila `refund.buyer_request_enabled`, sampai H-`refund.buyer_deadline_days`, sebesar `refund.buyer_refund_pct`% tanpa biaya layanan; sisanya tetap di escrow event milik promotor.
+- **Pembayaran terlambat** (reservasi habis & kuota penuh, atau event sudah batal/selesai): refund penuh otomatis; bila `refund.late_payment_auto_refund` mati → `REVIEW` untuk diputus admin.
+- **Alur:** ticketing membatalkan tiket & mengembalikan kuota → `ticketing.order.refund_requested` → finance mencatat refund `REQUESTED` (idempoten per invoice, tabel `refunds`) dengan jurnal akrual D `liability:escrow:event:<id>` (+ D `revenue:service_fee:ticket`), K `liability:refund:<pembeli>` → job `refund-dispatch` mengirim ke penyedia pembayaran (adapter `PAYMENT_PROVIDER`, idempotency key = id refund; gagal sementara dicoba ulang dengan backoff, maks. 6×) → `PENDING` → webhook penyedia menetapkan hasil akhir: `COMPLETED` (jurnal D `liability:refund:<pembeli>`, K `asset:escrow_bank`, event `finance.refund.completed`) atau `FAILED` (utang ke pembeli tetap tercatat, event `finance.refund.failed`).
+- **Webhook refund** (`POST /v1/webhooks/pg/:provider`, tanda tangan sama dengan pembayaran): `{ event_id, refund_ref, status: "COMPLETED"|"FAILED", failure_reason? }`. Dedupe per `event_id`; refund yang sudah final tidak berubah oleh webhook susulan. Sandbox: dikonfirmasi otomatis oleh job `refund-sandbox-settle` lewat jalur verifikasi yang sama.
+
+| Endpoint | Auth | Body / query | Response |
+|---|---|---|---|
+| `GET /v1/admin/finance/refunds` | admin | `status?`, `reference_id?` | `{ data: Refund[] }` (status, provider, provider_ref, attempts, error, settled_by, manual_ref) |
+| `POST /v1/admin/finance/refunds/:referenceId/retry` | admin | | `Refund` — `FAILED` → `REQUESTED` (dikirim ulang ke penyedia) |
+| `POST /v1/admin/finance/refunds/:referenceId/complete-manual` | admin | `{ transfer_ref, note }` | `Refund` `COMPLETED` (`settled_by: manual:<admin>`) — bila dana dikembalikan lewat transfer bank manual |
+
+**Order dua fase** (`POST /v1/ticketing/orders`, kontrak klien tetap): (1) transaksi pendek memvalidasi & mereservasi kuota → order `RESERVED` (`invoice_id` belum terisi), (2) invoice dibuat di finance **di luar transaksi** (idempoten per `TICKET_ORDER` + `reference_id = order.id`), (3) transaksi pendek menempelkan `invoice_id` dan menyimpan respons. Retry dengan `Idempotency-Key` sama memutar ulang respons `201` yang sama (`Idempotent-Replayed: true`) atau melanjutkan order yang sama — tidak pernah reservasi ganda. Finance gagal/timeout → reservasi dilepas (order `CANCELLED`) dan klien menerima `503` (atau `502` bila finance menolak) dengan `order_id`; retry dengan key sama membuat order baru. Order yatim (proses mati di antara fase) dipulihkan job reservasi: invoice dicoba ulang setelah ±60 dtk, dilepas (`EXPIRED`) bila tetap gagal.
 
 ```ts
 EventSummary = { id, slug, title, poster_url, city, venue_name, starts_at, min_price, status, artists: { id, name }[] }
@@ -302,7 +331,8 @@ Ticket = { id, event: EventSummary, type_name, status: "VALID"|"CHECKED_IN"|"REF
 | `artis@gema.id` | artist | OWNER org artis **Senja Kolektif** |
 | `manajer@gema.id` | manager | OWNER **Nada Manajemen**, mengelola Senja Kolektif |
 | `promotor@gema.id` | promotor | OWNER **Pensi Nusantara** (KYC terverifikasi) |
-| `admin@gema.id` | admin | back office |
+| `admin@gema.id` | admin (admin_role OPS) | back office |
+| `superadmin@gema.id` | admin + superadmin (admin_role SUPER_ADMIN) | back office + panel Platform (§9) |
 
 Login: `POST /v1/auth/otp` → pakai `dev_code` dari respons → `POST /v1/auth/token`.
 
@@ -310,7 +340,22 @@ Login: `POST /v1/auth/otp` → pakai `dev_code` dari respons → `POST /v1/auth/
 
 Service `platform` (port **4009**, schema `platform`). Gateway: `/v1/platform` dan `/v1/admin/platform` → platform.
 Peran: klaim JWT `roles` memuat `superadmin` (dan `admin`) untuk Super Admin; `admin_role` ∈ `SUPER_ADMIN|OPS|CONTENT_QC|FINANCE|LEGAL|SUPPORT|EDITORIAL`.
-**R** = admin mana pun boleh membaca; **W** = hanya Super Admin (`requireSuperAdmin`). Semua W tercatat di audit log.
+Seluruh `/v1/admin/platform/*` (baca maupun tulis) dan `GET /v1/admin/iam/admins` **khusus Super Admin** (`requireSuperAdmin`); admin lain mendapat `403`. Semua perubahan tercatat di audit log.
+
+**Peran & Akses (izin back office).** Endpoint back office lain dijaga `requirePermission(<izin>)` (service-kit). Matriks peran → izin disimpan sebagai pengaturan `access.role.<PERAN>` (grup `access`, daftar dengan pilihan tetap) sehingga berlaku seketika tanpa login ulang; Super Admin selalu memegang semua izin, akun non-admin tidak memegang izin apa pun. `GET /v1/me` mengembalikan `admin_permissions` (izin efektif) untuk menu web.
+
+| Izin | Endpoint | Default peran |
+|---|---|---|
+| `qc.review` | `/v1/admin/qc/*` | OPS, Content QC, Legal |
+| `live.moderate` | `/v1/admin/live/*` | OPS, Content QC, Editorial |
+| `ads.review` | `POST /v1/admin/ads/campaigns/:id/review` (+ baca area iklan) | OPS, Content QC |
+| `ads.manage` | buat/ubah/ajukan/hapus kampanye, simulator (+ baca area iklan) | OPS, Editorial |
+| `kyc.review` | `/v1/admin/iam/kyc*` | OPS, Finance, Legal |
+| `dispute.resolve` | `/v1/admin/disputes*` | OPS, Legal |
+| `finance.view` | `GET /v1/admin/finance/*`, `GET /v1/admin/ticketing/refunds` | OPS, Finance, Support |
+| `finance.refund` | `POST /v1/admin/finance/refunds/*`, `POST /v1/admin/ticketing/orders/:id/refund` | Finance |
+| `users.view` | `GET /v1/admin/iam/users` | OPS, Support |
+| `audit.view` | `GET /v1/admin/iam/audit-logs` | OPS, Legal |
 
 Registri pengaturan = `packages/domain/src/settings.ts` (`SETTINGS`, `coerceSetting`). Perubahan dipublikasikan sebagai event `platform.settings.updated { changes, version, byUserId }`; setiap service menerapkannya otomatis (`settings.get()` dari service-kit). Gateway mem-polling `/internal/settings`.
 
@@ -321,6 +366,8 @@ Registri pengaturan = `packages/domain/src/settings.ts` (`SETTINGS`, `coerceSett
 | `PUT /v1/admin/platform/settings` | W | `{ changes: Record<key, value>, reason: string (min 5) }` | sama seperti GET; `400` bila validasi registri gagal (`errors[{path:key,message}]`) |
 | `POST /v1/admin/platform/settings/reset` | W | `{ keys: string[], reason }` | kembali ke default |
 | `GET /v1/admin/platform/settings/history` | R | `key?` | `{ data: { id, key, old_value, new_value, reason, by_user_id, by_name, created_at }[] }` |
+| `POST /v1/admin/platform/branding?slot=logo\|logo_dark\|icon` | W | body biner `image/svg+xml` (≤ 512 KB) atau `image/png` (≤ 2 MB) | `201 { slot, url, content_type, size, width, height, sha256 }` — file belum dipakai sampai `branding.*_url` disimpan lewat `PUT /settings`. `422` bila SVG berisi skrip/`on*`/`foreignObject`/DOCTYPE/tautan eksternal, PNG rusak/terlalu kecil, atau ikon tidak persegi |
+| `GET /v1/platform/branding/:file` | publik | | file logo/ikon; `cache-control: immutable` (nama = hash isi), `x-content-type-options: nosniff`, CSP `default-src 'none'; sandbox` |
 | `GET /v1/admin/platform/overview` | R | | `PlatformOverview` |
 | `GET /v1/admin/platform/storage` | R | | `StorageOverview` |
 | `GET /v1/admin/platform/storage/buckets/:bucket/files` | R | `q?, sort=date\|size\|name, order=desc\|asc, cursor?, limit?` | `{ data: StoredFile[], next_cursor, total_files, total_bytes }` |
@@ -349,7 +396,7 @@ PlatformOverview = {
   settings_version, maintenance: boolean }
 StorageOverview = {
   disk: { path, total_bytes, used_bytes, free_bytes, used_pct, warn_pct },
-  buckets: { name: "uploads"|"backups", description, path, files, bytes, quota_bytes, used_pct, by_type: { type, files, bytes }[] }[],
+  buckets: { name: "uploads"|"backups"|"branding", description, path, files, bytes, quota_bytes, used_pct, by_type: { type, files, bytes }[] }[],
   database: { total_bytes, schemas: { schema, service, bytes, tables, rows_est }[], largest_tables: { schema, table, bytes, rows_est }[] },
   bus: { events, bytes, oldest_at, prunable },
   retention: { bus_days, idempotency_days },
@@ -370,4 +417,105 @@ IAM tambahan (Super Admin):
 
 Pengguna yang ditangguhkan: OTP & refresh ditolak `403`. `Me` kini memuat `admin_role`.
 
-Penegakan di gateway: `maintenance.enabled` → semua non-GET selain `/v1/auth`, `/v1/admin`, `/v1/platform` (dan token admin) dijawab `503 { type: "https://gema.id/problems/maintenance", detail: maintenance.message }`; `modules.booking=false` / `modules.ticketing=false` / `modules.waitlist=false` → non-GET ke prefix terkait `503 { type: ".../module-disabled" }`; rate limit membaca `security.rate_limit_*`.
+Branding & tema (grup `branding`, semua publik): `branding.logo_url` (logo latar terang), `branding.logo_dark_url` (latar gelap; kosong = logo terang), `branding.icon_url` (ikon + favicon, persegi), `appearance.dashboard_theme` ∈ `light|dark|system` (default dasbor B2B), `appearance.allow_user_theme` (pengguna boleh override; pilihan disimpan per perangkat). Nilai gambar hanya boleh path `/v1/platform/branding/<file>.svg|png` yang sudah diunggah; file yang sedang dipakai tidak bisa dihapus dari bucket (`409`).
+
+Penegakan di gateway: `maintenance.enabled` → semua non-GET selain `/v1/auth`, `/v1/admin`, `/v1/platform`, `/v1/webhooks`, POST pemutaran (`/v1/playback/*`, `/v1/events/play`, `/v1/live/streams/:id/playback|heartbeat`) (dan token admin) dijawab `503 { type: "https://gema.id/problems/maintenance", detail: maintenance.message }`; `modules.booking=false` / `modules.ticketing=false` / `modules.waitlist=false` → non-GET ke prefix terkait `503 { type: ".../module-disabled" }`; rate limit membaca `security.rate_limit_*`.
+
+## 10. Live Streaming (konser & sesi live)
+
+Service `live` (port **4010**, schema `live`). Gateway: `/v1/live` dan `/v1/admin/live` → live. Feature flag `modules.live` (non-GET ditolak `503 module-disabled`; UI menyembunyikan menu).
+Pipa media: **ingest** RTMP (`rtmp://<host>:1935/live/<stream_key>` — OBS, Larix, ffmpeg) atau **browser** (kamera via MediaRecorder, potongan WebM lewat HTTP) → ffmpeg (supervisor, restart otomatis) → **HLS** (`storage/live/<id>/`) → pemutar hls.js (Safari: HLS native).
+Status: `SCHEDULED → LIVE ⇄ INTERRUPTED → ENDED`. `INTERRUPTED` = publisher putus; bila tersambung lagi dalam `live.reconnect_grace_seconds` kembali `LIVE` (HLS menyisipkan discontinuity), bila tidak → `ENDED (reason: "signal_lost")`. Stream yang sudah `ENDED` tidak bisa disiarkan ulang (buat stream baru).
+Akses tonton: `PUBLIC` (siapa saja; anonim boleh) atau `TICKET` (wajib tiket VALID/CHECKED_IN untuk `event_id` di ticketing; integrasi ke halaman event).
+Event domain: `live.stream.started { streamId, orgId, artistId, title }` → notifikasi follower artis ("… sedang live"); `live.stream.ended { streamId, reason, durationS, peakViewers }`.
+
+```ts
+LiveStatus = "SCHEDULED" | "LIVE" | "INTERRUPTED" | "ENDED"
+LiveStream = {
+  id, title, description: string|null, status: LiveStatus, access: "PUBLIC"|"TICKET",
+  event: { id, slug, title, city, starts_at } | null,          // terisi bila terkait event ticketing
+  artist: { id, name, slug, image_url } | null,
+  org: { id, name, type: "ARTIST"|"PROMOTOR"|"MANAGEMENT"|"LABEL" },
+  cover_url: string|null, scheduled_at, started_at, ended_at, ended_reason: string|null,
+  viewers: number,            // penonton aktif (heartbeat ≤ 30 dtk)
+  peak_viewers, total_views,  // total = penonton unik
+  ingest: "rtmp"|"browser"|"demo"|null,   // sumber yang sedang aktif
+  chat_enabled: boolean, is_demo: boolean,
+  // hanya untuk anggota org pemilik / admin:
+  key_hint?: string            // 4 karakter terakhir stream key
+}
+ChatMessage = { id: number, user_id, display_name, body, created_at, mine: boolean }
+StreamHealth = { status, ingest, uptime_s, bitrate_kbps: number|null, last_segment_at: string|null, segment_age_s: number|null,
+                 transcoder: "idle"|"starting"|"running"|"restarting"|"failed", restarts: number, viewers, warnings: string[] }
+```
+
+| Method & Path | Akses | Body / Query | Respons |
+|---|---|---|---|
+| `GET /v1/live/streams` | publik | `status=live\|upcoming\|ended` (live = LIVE+INTERRUPTED), `artist_id?`, `event_id?`, `org_id?`, `limit?` | `{ data: LiveStream[] }` (live: urut viewers desc; upcoming: scheduled_at asc; ended: ended_at desc) |
+| `GET /v1/live/streams/:id` | publik | | `LiveStream & { can_watch: boolean, access_reason: null\|"login_required"\|"ticket_required"\|"not_live" }` |
+| `POST /v1/live/streams/:id/playback` | publik/login | | `{ hls_url, expires_at }` — `hls_url` sudah bertanda tangan (token di query, berlaku 6 jam). `401` login dibutuhkan (TICKET), `403 { type: ".../ticket-required", event_id, event_slug }`, `409 { type: ".../not-live" }` |
+| `GET /v1/live/hls/:id/index.m3u8?token=` | token | | playlist HLS (URL segmen ditulis ulang membawa token); `404` bila belum ada segmen |
+| `GET /v1/live/hls/:id/:segment.ts?token=` | token | | segmen MPEG-TS |
+| `POST /v1/live/streams/:id/heartbeat` | publik | `{ viewer_id: uuid }` (dibuat klien, disimpan di sessionStorage; user login dipakai sub-nya) | `{ viewers, status }` — kirim tiap 15 dtk selama memutar |
+| `GET /v1/live/streams/:id/chat` | publik | `after?` (id terakhir), `limit?` (≤ 100) | `{ data: ChatMessage[] (urut naik), last_id, chat_enabled, slowmode_s }` — polling tiap 2 dtk |
+| `POST /v1/live/streams/:id/chat` | login | `{ body: 1..300 }` | `ChatMessage` (201). `429` slowmode, `403` chat mati/stream selesai |
+| `GET /v1/live/studio/streams` | anggota org | `org_id` | `{ data: LiveStream[] }` (semua status, termasuk key_hint) |
+| `POST /v1/live/studio/streams` | OWNER/ADMIN/MEMBER org | `{ org_id, title (3..120), description?, scheduled_at?, access, event_id? (wajib bila TICKET), artist_id? (default: artis org ARTIST), cover_url? }` | `201 { stream: LiveStream, stream_key, rtmp_url, rtmp_server }` — **stream_key hanya ditampilkan sekali** |
+| `PATCH /v1/live/studio/streams/:id` | idem | `{ title?, description?, scheduled_at?, access?, event_id?, cover_url? }` | `LiveStream` (`409` bila ENDED) |
+| `POST /v1/live/studio/streams/:id/key` | idem | | `{ stream_key, rtmp_url, rtmp_server }` (rotasi; `409` saat LIVE) |
+| `POST /v1/live/studio/streams/:id/ingest/start` | idem | `{ mime: string }` (mis. `video/webm;codecs=vp8,opus`) | `{ session_id, chunk_ms: 1000 }` — `409` bila sudah ada ingest aktif / ENDED; `429` bila `live.max_concurrent` tercapai |
+| `PUT /v1/live/studio/streams/:id/ingest/:session/chunks/:seq` | idem | body biner (`video/webm`), seq mulai 0, kirim berurutan; ulang dengan seq sama aman (idempoten) | `{ received: seq, buffered: n }` |
+| `POST /v1/live/studio/streams/:id/ingest/:session/stop` | idem | | `{ stopped: true }` (stream → INTERRUPTED, bukan ENDED; akhiri lewat `/end`) |
+| `GET /v1/live/studio/streams/:id/health` | idem | | `StreamHealth` |
+| `POST /v1/live/studio/streams/:id/end` | idem | | `LiveStream` (ENDED, reason `ended_by_host`) |
+| `DELETE /v1/live/studio/streams/:id` | idem | | `{ deleted: true }` (hanya SCHEDULED/ENDED) |
+| `GET /v1/admin/live/streams` | admin | `status?` | `{ data: (LiveStream & { health: StreamHealth })[] }` |
+| `POST /v1/admin/live/streams/:id/stop` | admin | `{ reason (min 5) }` | `LiveStream` (ENDED, reason `moderation: …`) |
+| `DELETE /v1/admin/live/chat/:messageId` | admin | | `{ deleted: true }` |
+
+Pengaturan (grup `live`): `modules.live`, `live.max_concurrent` (stream LIVE bersamaan), `live.max_duration_hours` (dihentikan otomatis), `live.latency_mode` (`low` 1 dtk / `balanced` 2 dtk / `stable` 4 dtk per segmen), `live.reconnect_grace_seconds`, `live.chat_enabled`, `live.chat_slowmode_seconds`, `live.rtmp_enabled`, `live.browser_ingest_enabled`, `live.demo_channel` (dev: kanal demo yang selalu live).
+Seed: "Senja Kolektif — Live Session dari Studio" (PUBLIC, LIVE lewat kanal demo), "Pulang ke Utara Tour — Bandung (Live)" (TICKET, SCHEDULED, event ticketing #1), satu stream ENDED.
+
+## 11. Iklan — kebijakan penayangan (tier Gratis)
+
+Service `ads` (port **4011**, schema `ads`). Gateway: `/v1/ads` dan `/v1/admin/ads` → ads.
+Domain: `packages/domain/src/ads.ts` — `AD_CATEGORIES` (tier `prohibited|restricted|general`), `AD_FIXED_RULES` (aturan yang tidak bisa diubah), `evaluateAdBreak(policy, state)` (keputusan jeda; murni), `categoryViolation()`, `AD_OUTCOME_LABEL`.
+Pengaturan grup `ads` (registri settings): `ads.enabled`, `ads.break_interval_minutes`, `ads.min_streams_between_breaks`, `ads.max_ads_per_break`, `ads.max_ads_per_hour`, `ads.daily_grace_streams`, `ads.max_audio_seconds`, `ads.max_display_seconds`, `ads.skip_after_seconds`, `ads.audio_skippable`, `ads.frequency_cap_per_day`, `ads.blocked_categories`, `ads.podcast_preroll`, `ads.sensitive_adjacency`, `ads.house_ads_enabled`.
+Hitungan "lagu" berasal dari event `playback.stream.qualified` (server), bukan laporan klien. Penargetan kota hanya bila consent `ads` (IAM `/v1/me/consents`) diberikan; tanpa consent hanya kontekstual (genre).
+
+```ts
+AdCreative = {
+  impression_id, campaign_id, type: "audio"|"display", advertiser, title, body: string|null,
+  image_url: string|null, audio_url: string|null, click_url: string|null, cta_label: string|null,
+  theme_color: string|null,          // warna latar kartu display bila tanpa gambar
+  duration_s, skippable_after_s: number|null,   // null = tidak bisa dilewati
+  label: "Iklan" | "Dari GEMA", is_house: boolean
+}
+AdBreakResponse = { break_id: string|null, ads: AdCreative[], outcome: AdBreakOutcome, reason: string }
+Campaign = {
+  id, advertiser, name, category: AdCategory, license_ref: string|null, type: "audio"|"display",
+  title, body, image_url, audio_url, click_url, cta_label, theme_color, duration_s,
+  target_genres: string[], target_cities: string[], start_at, end_at: string|null,
+  max_impressions: number|null, priority: 1..10, is_house: boolean,
+  status: "DRAFT"|"PENDING_REVIEW"|"APPROVED"|"REJECTED"|"PAUSED"|"ENDED",
+  review_note: string|null, reviewed_by_name: string|null, reviewed_at: string|null,
+  created_by_name: string|null, created_at,
+  stats: { impressions, completes, skips, clicks, ctr: number, completion_rate: number }
+}
+```
+
+| Method & Path | Akses | Body / Query | Respons |
+|---|---|---|---|
+| `POST /v1/ads/break` | login (anonim → `outcome: anonymous`) | `{ placement: "between_tracks"\|"podcast_preroll", content?: { kind: "track"\|"episode", id, genres?: string[], content_warning?: boolean, premium?: boolean } }` — dipanggil pemutar saat lagu/episode selesai, **sebelum** item berikutnya mulai | `AdBreakResponse` (ads kosong bila tidak tayang) |
+| `POST /v1/ads/impressions/:id/events` | login (pemilik impresi) | `{ event: "start"\|"complete"\|"skip"\|"click" }` | `{ ok: true }` — `409` bila skip sebelum `skippable_after_s` / iklan tidak bisa dilewati |
+| `GET /v1/admin/ads/overview` | admin | `days=7` | `{ kpis: { impressions, completes, clicks, ctr, completion_rate, fill_rate, breaks, active_campaigns, pending_review }, by_day: { date, impressions, clicks, breaks }[], outcomes: { outcome, label, n }[], top_campaigns: Campaign[], policy: { fixed_rules: string[], categories: { key, label, tier, license, blocked: boolean }[] } }` |
+| `GET /v1/admin/ads/campaigns` | admin | `status?` | `{ data: Campaign[] }` |
+| `POST /v1/admin/ads/campaigns` | admin | field `Campaign` yang dapat ditulis (`advertiser, name, category, license_ref?, type, title, body?, image_url?, audio_url?, click_url?, cta_label?, theme_color?, duration_s, target_genres?, target_cities?, start_at?, end_at?, max_impressions?, priority?, is_house?`) + `submit?: boolean` | `201 Campaign` (DRAFT, atau PENDING_REVIEW bila `submit`). `422 { errors[{path,message}] }` bila melanggar kebijakan (kategori, durasi, URL non-https, audio tanpa `audio_url`) |
+| `PATCH /v1/admin/ads/campaigns/:id` | admin | sebagian field di atas | `Campaign` — mengubah kampanye APPROVED mengembalikannya ke PENDING_REVIEW |
+| `POST /v1/admin/ads/campaigns/:id/submit` | admin | | `Campaign` (PENDING_REVIEW) |
+| `POST /v1/admin/ads/campaigns/:id/review` | Super Admin atau admin_role `OPS`/`CONTENT_QC` | `{ approve: boolean, note?: string }` (note wajib bila menolak) | `Campaign` (APPROVED/REJECTED). Kebijakan dicek ulang saat menyetujui. Pembuat kampanye tidak boleh meninjau kampanyenya sendiri (kecuali Super Admin) |
+| `POST /v1/admin/ads/campaigns/:id/pause` / `/resume` | admin | | `Campaign` |
+| `DELETE /v1/admin/ads/campaigns/:id` | admin | | `{ deleted: true }` (hanya DRAFT/REJECTED tanpa impresi) |
+| `POST /v1/admin/ads/simulate` | admin | `{ premium, anonymous?, consent?, placement, premium_content?, content_warning?, streams_today, streams_since_break, minutes_since_break: number\|null, ads_last_hour, city?, genres? }` | `{ outcome, label, slots, trace: { rule, pass, detail }[], eligible_campaigns: { id, name, advertiser, is_house, reason: string\|null }[] }` — memakai pengaturan saat ini |
+
+Seed: 3 promosi internal (Premium, event, live), 2 kampanye berbayar fiktif disetujui (kategori `food_beverage`, `telco`), 1 kampanye `finance` menunggu tinjauan.

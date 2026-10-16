@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { MoreHorizontal } from 'lucide-react';
 import { api, fmt } from '@/lib/api';
 import type { Artist, Track as TrackT } from '@/lib/types';
+import { useShallow } from 'zustand/react/shallow';
 import { trackToPlayable, usePlayer } from '@/stores/player';
 import { LikeButton } from '@/layouts/PlayerBar';
 import { ActionBar, colorFor, DarkError, PlayFab, TrackTable } from '@/components/fan';
@@ -16,7 +17,7 @@ export interface Lyrics {
 /** Halaman lagu (mockup Spotify 9): judul raksasa, tombol play hijau, lirik. */
 export default function Track() {
   const { id = '' } = useParams();
-  const { current, playing, toggle, playQueue } = usePlayer();
+  const { current, playing, toggle, playQueue } = usePlayer(useShallow((s) => ({ current: s.current, playing: s.playing, toggle: s.toggle, playQueue: s.playQueue })));
   const q = useQuery({ queryKey: ['track', id], queryFn: () => api<TrackT>(`/v1/catalog/tracks/${id}`) });
   const lyrics = useQuery({ queryKey: ['lyrics', id], queryFn: () => api<Lyrics>(`/v1/catalog/tracks/${id}/lyrics`), enabled: !!q.data?.has_lyrics, retry: false });
   const artist = useQuery({ queryKey: ['artist', q.data?.artist.slug], queryFn: () => api<Artist>(`/v1/catalog/artists/${q.data!.artist.slug}`), enabled: !!q.data });
@@ -69,7 +70,7 @@ export default function Track() {
                 <p key={i}>{l.text || '♪'}</p>
               ))}
               {lyrics.data!.synced && (
-                <Link to="/app/lyrics" className="mt-4 inline-block text-sm font-bold text-gema-green hover:underline" onClick={() => !isCurrent && playQueue([trackToPlayable(t)])}>
+                <Link to="/app/lyrics" className="mt-4 inline-block text-sm font-bold text-gema-primary-text hover:underline" onClick={() => !isCurrent && playQueue([trackToPlayable(t)])}>
                   Buka lirik tersinkron →
                 </Link>
               )}

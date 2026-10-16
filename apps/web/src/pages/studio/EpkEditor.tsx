@@ -95,9 +95,9 @@ export default function EpkEditor() {
         subtitle="Data streaming (pendengar, kota, demografi) & off-air (show, rating) diperbarui otomatis."
         actions={
           <>
-            <div className="flex rounded-full border border-b2b-line bg-white p-0.5">
+            <div className="flex rounded-full border border-b2b-line bg-b2b-card p-0.5">
               {(['edit', 'preview'] as const).map((t) => (
-                <button key={t} onClick={() => setTab(t)} className={cx('flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold', tab === t ? 'bg-b2b-ink text-white' : 'text-b2b-muted')}>
+                <button key={t} onClick={() => setTab(t)} className={cx('flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold', tab === t ? 'bg-b2b-ink text-b2b-on-ink' : 'text-b2b-muted')}>
                   {t === 'edit' ? <Pencil className="size-3.5" /> : <Eye className="size-3.5" />} {t === 'edit' ? 'Edit' : 'Pratinjau'}
                 </button>
               ))}

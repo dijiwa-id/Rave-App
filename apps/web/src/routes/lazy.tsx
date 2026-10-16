@@ -10,12 +10,3 @@ export function page(loader: () => Promise<{ default: ComponentType<any> }>) {
     </Suspense>
   );
 }
-
-export function Todo({ title }: { title: string }) {
-  return (
-    <div className="p-8 pt-24">
-      <h1 className="text-3xl font-bold">{title}</h1>
-      <p className="mt-2 opacity-70">Sedang dibangun.</p>
-    </div>
-  );
-}

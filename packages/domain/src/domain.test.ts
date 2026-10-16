@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  quoteTicketRefund,
+  ticketRefundAmount,
+  type TicketRefundPolicy,
+  categoryViolation,
+  evaluateAdBreak,
+  type AdPolicy,
+  type ListenerAdState,
   allocate,
   assertBalanced,
   audienceMatchScore,
@@ -122,5 +129,62 @@ describe('tiket & analitik', () => {
     );
     expect(r.t1).toBe(10_000); // niche tetap mendapat penuh walau stream sedikit
     expect(r.t2).toBe(10_000);
+  });
+});
+
+describe('kebijakan iklan', () => {
+  const policy: AdPolicy = { enabled: true, breakIntervalMinutes: 15, minStreamsBetweenBreaks: 3, maxAdsPerBreak: 2, maxAdsPerHour: 6, dailyGraceStreams: 5, podcastPreroll: true };
+  const base: ListenerAdState = { anonymous: false, premium: false, placement: 'between_tracks', streamsToday: 10, streamsSinceBreak: 4, minutesSinceBreak: 20, adsLastHour: 0 };
+  it('menayangkan iklan bila semua aturan lolos', () => {
+    expect(evaluateAdBreak(policy, base)).toMatchObject({ outcome: 'serve', slots: 2 });
+  });
+  it('Premium, anonim, dan konten premium tidak pernah mendapat iklan', () => {
+    expect(evaluateAdBreak(policy, { ...base, premium: true }).outcome).toBe('premium');
+    expect(evaluateAdBreak(policy, { ...base, anonymous: true }).outcome).toBe('anonymous');
+    expect(evaluateAdBreak(policy, { ...base, premiumContent: true }).outcome).toBe('premium_content');
+  });
+  it('menghormati masa bebas iklan, jeda minimum, jumlah lagu, dan batas per jam', () => {
+    expect(evaluateAdBreak(policy, { ...base, streamsToday: 2 }).outcome).toBe('grace');
+    expect(evaluateAdBreak(policy, { ...base, minutesSinceBreak: 5 }).outcome).toBe('too_soon');
+    expect(evaluateAdBreak(policy, { ...base, streamsSinceBreak: 1 }).outcome).toBe('too_few_streams');
+    expect(evaluateAdBreak(policy, { ...base, adsLastHour: 6 }).outcome).toBe('hourly_cap');
+    expect(evaluateAdBreak(policy, { ...base, adsLastHour: 5 }).slots).toBe(1);
+  });
+  it('kategori: terlarang selalu ditolak, terbatas butuh izin & bisa diblokir', () => {
+    expect(categoryViolation('gambling', [], 'X')).toMatch(/dilarang/);
+    expect(categoryViolation('finance', [], null)).toMatch(/OJK/);
+    expect(categoryViolation('finance', [], 'KEP-123/OJK')).toBeNull();
+    expect(categoryViolation('alcohol', ['alcohol'], 'ABC')).toMatch(/diblokir/);
+    expect(categoryViolation('music', ['alcohol'])).toBeNull();
+  });
+});
+
+describe('refund tiket (REQ-TIX-05)', () => {
+  const DAY = 86_400_000;
+  const now = new Date('2026-11-01T12:00:00+07:00');
+  const at = (days: number) => new Date(now.getTime() + days * DAY);
+  const policy: TicketRefundPolicy = { buyerRequestEnabled: true, buyerDeadlineDays: 7, buyerRefundPct: 80, rescheduleOptOutDays: 7 };
+
+  it('permintaan pembeli sebelum H-7 → porsi kebijakan tanpa biaya layanan', () => {
+    const q = quoteTicketRefund({ startsAt: at(10), checkedIn: false }, policy, now);
+    expect(q).toMatchObject({ eligible: true, reason: 'buyer_request', escrowPct: 80, refundFee: false });
+  });
+  it('lewat batas H-7 atau fitur dimatikan → ditolak', () => {
+    expect(quoteTicketRefund({ startsAt: at(5), checkedIn: false }, policy, now).eligible).toBe(false);
+    expect(quoteTicketRefund({ startsAt: at(30), checkedIn: false }, { ...policy, buyerRequestEnabled: false }, now).eligible).toBe(false);
+  });
+  it('jadwal berubah → refund penuh + biaya layanan selama masa opt-out, walau permintaan biasa dimatikan', () => {
+    const off = { ...policy, buyerRequestEnabled: false };
+    const q = quoteTicketRefund({ startsAt: at(3), rescheduledAt: at(-2), checkedIn: false }, off, now);
+    expect(q).toMatchObject({ eligible: true, reason: 'rescheduled', escrowPct: 100, refundFee: true });
+    expect(quoteTicketRefund({ startsAt: at(3), rescheduledAt: at(-8), checkedIn: false }, off, now).eligible).toBe(false);
+  });
+  it('sudah check-in atau event sudah mulai → ditolak', () => {
+    expect(quoteTicketRefund({ startsAt: at(10), checkedIn: true }, policy, now).eligible).toBe(false);
+    expect(quoteTicketRefund({ startsAt: at(-1), rescheduledAt: at(-2), checkedIn: false }, policy, now).eligible).toBe(false);
+  });
+  it('nominal: porsi escrow dibulatkan ke bawah, biaya layanan utuh bila dikembalikan', () => {
+    expect(ticketRefundAmount({ escrowAmount: 150_001, feeAmount: 5_000 }, { escrowPct: 80, refundFee: false })).toEqual({ escrow: 120_000, fee: 0, total: 120_000 });
+    expect(ticketRefundAmount({ escrowAmount: 150_000, feeAmount: 5_000 }, { escrowPct: 100, refundFee: true })).toEqual({ escrow: 150_000, fee: 5_000, total: 155_000 });
   });
 });

@@ -23,6 +23,13 @@ interface Driver {
   close(): Promise<void>;
 }
 
+/** Galat yang layak dicoba ulang: deadlock/serialisasi Postgres, putus koneksi, timeout/5xx upstream. */
+function isTransient(e: any): boolean {
+  if (['40P01', '40001', '57014', '08006', '08003'].includes(e?.code)) return true;
+  if (e?.name === 'TimeoutError' || e?.name === 'AbortError' || e?.code === 'ECONNREFUSED' || e?.code === 'ECONNRESET') return true;
+  return typeof e?.status === 'number' && e.status >= 502;
+}
+
 // ---------- Driver PG: log append-only bus.events + offset per consumer group ----------
 function pgDriver(db: Db, log: (o: object, m: string) => void): Driver {
   const listeners: (() => void)[] = [];
@@ -30,17 +37,40 @@ function pgDriver(db: Db, log: (o: object, m: string) => void): Driver {
   const timers: NodeJS.Timeout[] = [];
   let closed = false;
 
-  async function ensureListen() {
-    if (listenClient) return;
-    listenClient = new pg.Client({ connectionString: config.databaseUrl });
-    await listenClient.connect();
-    await listenClient.query('LISTEN gema_bus');
-    listenClient.on('notification', () => listeners.forEach((l) => l()));
-    listenClient.on('error', () => {});
+  let reconnectMs = 1000;
+  async function ensureListen(): Promise<void> {
+    if (listenClient || closed) return;
+    const c = new pg.Client({ connectionString: config.databaseUrl });
+    // Koneksi LISTEN putus (mis. Postgres restart) → sambung ulang dengan backoff; sementara itu interval drain tetap jalan.
+    const lost = (err?: Error) => {
+      if (listenClient !== c) return;
+      listenClient = null;
+      if (closed) return;
+      log({ err: err?.message }, 'koneksi LISTEN bus terputus — menyambung ulang');
+      setTimeout(() => void ensureListen().catch(() => {}), reconnectMs).unref();
+      reconnectMs = Math.min(reconnectMs * 2, 30_000);
+    };
+    c.on('error', lost);
+    c.on('end', () => lost());
+    c.on('notification', () => listeners.forEach((l) => l()));
+    listenClient = c;
+    try {
+      await c.connect();
+      await c.query('LISTEN gema_bus');
+      reconnectMs = 1000;
+      listeners.forEach((l) => l()); // kejar event yang terlewat selama terputus
+    } catch (e: any) {
+      lost(e);
+    }
   }
 
   return {
     async publish(c, envs) {
+      if (!envs.length) return;
+      // seq (bigserial) diambil saat INSERT, bukan saat commit. Tanpa kunci, relay A (seq 10) yang commit setelah
+      // relay B (seq 11) membuat konsumen yang sudah membaca 11 melewatkan 10 selamanya. Kunci transaksi global
+      // menyerialkan relay sehingga urutan seq = urutan commit.
+      await c.query(`SELECT pg_advisory_xact_lock(4243)`);
       for (const e of envs) {
         await c.query(
           `INSERT INTO bus.events (id, topic, key, payload, occurred_at, producer) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO NOTHING`,
@@ -98,7 +128,15 @@ function pgDriver(db: Db, log: (o: object, m: string) => void): Driver {
         try {
           do {
             again = false;
-            for (const t of topics) {
+            // Satu query murah untuk menemukan topik yang punya event baru — tanpa membuka transaksi per topik
+            // saat bus diam (sebelumnya: 1 transaksi × jumlah topik × setiap 2 dtk × setiap service).
+            const pending = await db.query(
+              `SELECT o.topic FROM bus.consumer_offsets o
+                WHERE o.group_id = $1 AND o.topic = ANY($2)
+                  AND EXISTS (SELECT 1 FROM bus.events e WHERE e.topic = o.topic AND e.seq > o.last_seq)`,
+              [group, topics],
+            );
+            for (const { topic: t } of pending) {
               // Satu event per transaksi: offset & efek samping handler commit bersama (exactly-once dalam DB).
               for (let i = 0; i < 200; i++) {
                 const handled = await db.tx(async (c) => {
@@ -115,12 +153,23 @@ function pgDriver(db: Db, log: (o: object, m: string) => void): Driver {
                     occurredAt: new Date(row.occurred_at).toISOString(),
                     producer: row.producer,
                   };
-                  await c.query('SAVEPOINT h');
-                  try {
-                    await (onEvent as any)(env, c);
-                    await c.query('RELEASE SAVEPOINT h');
-                  } catch (err: any) {
-                    await c.query('ROLLBACK TO SAVEPOINT h');
+                  let err: any = null;
+                  for (let attempt = 1; ; attempt++) {
+                    await c.query('SAVEPOINT h');
+                    try {
+                      await (onEvent as any)(env, c);
+                      await c.query('RELEASE SAVEPOINT h');
+                      err = null;
+                      break;
+                    } catch (e: any) {
+                      await c.query('ROLLBACK TO SAVEPOINT h');
+                      err = e;
+                      // Galat sementara (deadlock, serialisasi, upstream timeout) dicoba ulang dulu, baru dead letter.
+                      if (attempt >= 3 || !isTransient(e)) break;
+                      await new Promise((r) => setTimeout(r, 150 * attempt));
+                    }
+                  }
+                  if (err) {
                     log({ err: err?.message, topic: t, eventId: env.id }, 'consumer handler gagal → dead letter');
                     await c.query(
                       `INSERT INTO bus.dead_letters (group_id, event_id, topic, error) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
@@ -142,7 +191,8 @@ function pgDriver(db: Db, log: (o: object, m: string) => void): Driver {
         }
       };
       listeners.push(() => void drain());
-      timers.push(setInterval(() => void drain(), 2000));
+      // LISTEN/NOTIFY membangunkan drain secara real-time; interval hanya jaring pengaman (NOTIFY terlewat, retry dead letter).
+      timers.push(setInterval(() => void drain(), 5000));
       void drain();
     },
     async close() {
@@ -209,6 +259,8 @@ export function createBus(db: Db, service: string, log: (o: object, m: string) =
     if (relaying) return;
     relaying = true;
     try {
+      // Cek murah via indeks parsial outbox_unpublished_idx — relay jalan tiap 250 ms di setiap service.
+      if (!(await db.one(`SELECT 1 AS x FROM outbox WHERE published_at IS NULL LIMIT 1`))) return;
       await db.tx(async (c) => {
         const r = await c.query(`SELECT * FROM outbox WHERE published_at IS NULL ORDER BY occurred_at, id LIMIT 100 FOR UPDATE SKIP LOCKED`);
         if (!r.rows.length) return;

@@ -1,6 +1,6 @@
 import type { Consumers, ServiceContext } from '@gema/service-kit';
-import { createInvoice, refundEscrow, releaseEscrow } from './escrow.js';
-import { DISPUTE_WINDOW_MS } from './jobs.js';
+import { createInvoice, refundEscrow, refundTicketOrder, releaseEscrow } from './escrow.js';
+import { disputeWindowMs } from './jobs.js';
 
 const endOfDayWib = (date: string) => new Date(`${date}T23:59:59+07:00`);
 
@@ -47,9 +47,25 @@ export function consumers({ log }: ServiceContext): Consumers {
       const p = e.payload;
       await tx.query(`UPDATE escrow_holds SET release_at = now() + make_interval(secs => $2), release_payload=$3, updated_at=now() WHERE reference_id=$1`, [
         p.bookingId,
-        DISPUTE_WINDOW_MS / 1000,
+        disputeWindowMs() / 1000,
         JSON.stringify({ fee: p.fee, splits: p.splits, payeeType: p.payeeType }),
       ]);
+    },
+
+    // Event tiket selesai → jadwalkan pencairan escrow tiket ke promotor setelah jendela dispute
+    // Ticketing sudah membatalkan tiket order → kembalikan dana sesuai porsi (idempoten per invoice).
+    'ticketing.order.refund_requested': async (e, tx) => {
+      const p = e.payload;
+      await refundTicketOrder(tx, { orderId: p.orderId, escrowPct: p.escrowPct, refundFee: p.refundFee, reason: p.reason });
+    },
+
+    'ticketing.event.completed': async (e, tx) => {
+      const p = e.payload;
+      await tx.query(
+        `UPDATE escrow_holds SET release_at = now() + make_interval(secs => $2), promotor_org_id = coalesce(promotor_org_id, $3::uuid), updated_at=now()
+         WHERE reference_id=$1 AND kind='EVENT' AND status='HELD'`,
+        [`event:${p.eventId}`, disputeWindowMs() / 1000, p.orgId],
+      );
     },
 
     'booking.cancelled': async (e, tx) => {

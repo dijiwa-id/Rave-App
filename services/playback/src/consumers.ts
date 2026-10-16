@@ -1,5 +1,5 @@
 import { callService, type Consumers, type ServiceContext } from '@gema/service-kit';
-import { bumpArtistDaily } from './events.js';
+import { bumpArtistDaily } from './aggregates.js';
 import { todayWib } from './util.js';
 
 export function consumers(ctx: ServiceContext): Consumers {

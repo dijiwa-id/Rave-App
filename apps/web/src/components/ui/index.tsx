@@ -6,16 +6,16 @@ const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).jo
 export { cx };
 
 // ---------- Button ----------
-type Variant = 'green' | 'white' | 'outline' | 'ghost' | 'dark' | 'danger' | 'ink' | 'outline-ink';
+type Variant = 'primary' | 'white' | 'outline' | 'ghost' | 'dark' | 'danger' | 'ink' | 'outline-ink';
 const variants: Record<Variant, string> = {
-  green: 'bg-gema-green text-black hover:bg-[#3be477] hover:scale-[1.03]',
+  primary: 'bg-gema-primary text-white hover:bg-gema-primary-hover hover:scale-[1.03]',
   white: 'bg-white text-black hover:scale-[1.03]',
   outline: 'border border-white/40 text-white hover:border-white hover:scale-[1.03]',
   ghost: 'text-gema-muted hover:text-white',
   dark: 'bg-gema-highlight text-white hover:bg-[#3e3e3e]',
-  danger: 'bg-red-600 text-white hover:bg-red-500',
-  ink: 'bg-b2b-ink text-white hover:bg-black/80',
-  'outline-ink': 'border border-b2b-line bg-white text-b2b-ink hover:border-b2b-ink',
+  danger: 'bg-[#dc2626] text-white hover:bg-[#ef4444]',
+  ink: 'bg-b2b-ink text-b2b-on-ink hover:bg-b2b-ink/80',
+  'outline-ink': 'border border-b2b-line bg-b2b-card text-b2b-ink hover:border-b2b-ink',
 };
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
@@ -24,7 +24,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: ReactNode;
 }
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = 'green', size = 'md', loading, icon, className, children, disabled, ...rest },
+  { variant = 'primary', size = 'md', loading, icon, className, children, disabled, ...rest },
   ref,
 ) {
   const sizes = { sm: 'h-8 px-4 text-sm', md: 'h-10 px-6 text-sm', lg: 'h-12 px-8 text-base' };
@@ -51,7 +51,7 @@ type Theme = { theme?: 'dark' | 'light' };
 const fieldBase = (theme: 'dark' | 'light' = 'light') =>
   theme === 'dark'
     ? 'w-full rounded-md border border-[#727272] bg-[#121212] px-3.5 py-3 text-white placeholder:text-gema-subtle focus:border-white focus:outline-none'
-    : 'w-full rounded-lg border border-b2b-line bg-white px-3.5 py-2.5 text-b2b-ink placeholder:text-b2b-muted/70 focus:border-b2b-ink focus:outline-none';
+    : 'w-full rounded-lg border border-b2b-line bg-b2b-card px-3.5 py-2.5 text-b2b-ink placeholder:text-b2b-muted/70 focus:border-b2b-ink focus:outline-none';
 
 export function Label({ children, hint, theme = 'light' }: { children: ReactNode; hint?: string } & Theme) {
   return (
@@ -123,7 +123,7 @@ export function ErrorState({ error, retry }: { error: unknown; retry?: () => voi
 
 export function Badge({ children, tone = 'neutral', className }: { children: ReactNode; tone?: 'neutral' | 'green' | 'blue' | 'amber' | 'red' | 'purple'; className?: string }) {
   const tones = {
-    neutral: 'bg-black/5 text-b2b-ink border-black/10',
+    neutral: 'bg-b2b-ink/5 text-b2b-ink border-b2b-ink/10',
     green: 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30',
     blue: 'bg-blue-500/15 text-blue-600 border-blue-500/30',
     amber: 'bg-amber-500/15 text-amber-700 border-amber-500/30',
@@ -143,7 +143,7 @@ export function Modal({ open, onClose, title, children, theme = 'light', wide }:
         className={cx(
           'max-h-[90vh] w-full overflow-y-auto rounded-xl p-6 shadow-2xl',
           wide ? 'max-w-3xl' : 'max-w-lg',
-          theme === 'dark' ? 'bg-gema-highlight text-white' : 'bg-white text-b2b-ink',
+          theme === 'dark' ? 'bg-gema-highlight text-white' : 'bg-b2b-card text-b2b-ink',
         )}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -187,8 +187,8 @@ export function Toaster() {
           key={t.id}
           className={cx(
             'pointer-events-auto rounded-lg px-4 py-3 text-sm font-semibold shadow-xl',
-            t.kind === 'success' && 'bg-gema-green text-black',
-            t.kind === 'error' && 'bg-red-600 text-white',
+            t.kind === 'success' && 'bg-gema-primary text-white',
+            t.kind === 'error' && 'bg-[#dc2626] text-white',
             t.kind === 'info' && 'bg-[#2e77d0] text-white',
           )}
         >
@@ -215,7 +215,7 @@ export function Card({ children, className, title, action }: { children: ReactNo
 }
 export function Stat({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
   return (
-    <div className="rounded-xl border border-b2b-line bg-white p-4">
+    <div className="rounded-xl border border-b2b-line bg-b2b-card p-4">
       <p className="text-xs font-semibold tracking-wide text-b2b-muted uppercase">{label}</p>
       <p className="mt-1 text-2xl font-extrabold text-b2b-ink">{value}</p>
       {hint && <p className="mt-0.5 text-xs text-b2b-muted">{hint}</p>}

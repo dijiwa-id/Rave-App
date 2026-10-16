@@ -1,0 +1,18 @@
+{
+  "name": "@gema/live",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "migrate": "tsx src/index.ts migrate",
+    "seed": "tsx src/index.ts seed"
+  },
+  "dependencies": {
+    "@gema/domain": "*",
+    "@gema/service-kit": "*",
+    "ffmpeg-static": "^5.2.0",
+    "node-media-server": "4.4.3"
+  }
+}

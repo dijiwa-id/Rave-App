@@ -1,7 +1,10 @@
 import { lazy, Suspense, type ComponentType } from 'react';
 import type { RouteObject } from 'react-router-dom';
-import { RequireAuth, RequireRole } from '@/components/guards';
+import type { AdminPermission } from '@gema/domain/settings';
+import { RequireAdminAccess, RequireAuth, RequireRole } from '@/components/guards';
 import { PageLoader } from '@/components/ui';
+import { RouteError } from '@/components/RouteError';
+import { ModuleGate, type ModuleKey } from '@/components/ModuleGate';
 
 // Rute Artist Studio (/studio), Promotor Hub (/promotor), Back Office (/admin). Code-split per modul.
 function named<M extends Record<string, any>>(loader: () => Promise<M>, key: keyof M) {
@@ -12,6 +15,12 @@ function named<M extends Record<string, any>>(loader: () => Promise<M>, key: key
     </Suspense>
   );
 }
+
+// errorElement di layout + pembungkus tanpa path untuk anak (halaman crash tetap di dalam shell dasbor).
+const B2B_ERR = <RouteError variant="b2b" />;
+const guarded = (children: RouteObject[]): RouteObject[] => [{ errorElement: B2B_ERR, children }];
+// Rute milik modul yang bisa dimatikan Super Admin → tampilkan keadaan "dinonaktifkan", bukan error 503.
+const gated = (module: ModuleKey, children: RouteObject[]): RouteObject => ({ element: <ModuleGate module={module} variant="b2b" />, children });
 
 const studio = {
   layout: () => import('@/pages/studio/StudioLayout'),
@@ -26,6 +35,7 @@ const studio = {
   bookings: () => import('@/pages/studio/Bookings'),
   finance: () => import('@/pages/studio/Finance'),
   team: () => import('@/pages/studio/Team'),
+  profile: () => import('@/pages/studio/Profile'),
 };
 const promotor = {
   layout: () => import('@/pages/promotor/PromotorLayout'),
@@ -37,48 +47,73 @@ const promotor = {
   checkin: () => import('@/pages/promotor/Checkin'),
 };
 const admin = () => import('@/pages/admin/Admin');
+const adminLive = () => import('@/pages/admin/AdminLive');
+const adminAds = () => import('@/pages/admin/AdminAds');
+// Live Streaming: satu modul untuk Studio & Promotor Hub (org dari pemilih layout).
+const live = () => import('@/pages/live/LiveStudio');
+const platform = {
+  main: () => import('@/pages/admin/Platform'),
+  settings: () => import('@/pages/admin/PlatformSettings'),
+  storage: () => import('@/pages/admin/PlatformStorage'),
+  roles: () => import('@/pages/admin/PlatformRoles'),
+};
+const access = (perms: AdminPermission[], children: RouteObject[]): RouteObject => ({ element: <RequireAdminAccess perms={perms} />, children });
 
 export const b2bRoutes: RouteObject[] = [
   {
     element: <RequireAuth />,
+    errorElement: B2B_ERR,
     children: [
       {
         path: '/studio',
         element: named(studio.layout, 'default'),
-        children: [
+        errorElement: B2B_ERR,
+        children: guarded([
           { index: true, element: named(studio.dashboard, 'default') },
           { path: 'releases', element: named(studio.releases, 'default') },
           { path: 'releases/new', element: named(studio.newRelease, 'default') },
           { path: 'releases/:id', element: named(studio.release, 'default') },
           { path: 'analytics', element: named(studio.analytics, 'default') },
-          { path: 'epk', element: named(studio.epk, 'default') },
-          { path: 'rate-card', element: named(studio.rate, 'default') },
-          { path: 'calendar', element: named(studio.calendar, 'default') },
-          { path: 'bookings', element: named(studio.bookings, 'StudioBookings') },
-          { path: 'bookings/:id', element: named(studio.bookings, 'StudioBookingPage') },
-          { path: 'contracts', element: named(studio.bookings, 'StudioContracts') },
+          { path: 'profile', element: named(studio.profile, 'default') },
+          gated('booking', [
+            { path: 'epk', element: named(studio.epk, 'default') },
+            { path: 'rate-card', element: named(studio.rate, 'default') },
+            { path: 'calendar', element: named(studio.calendar, 'default') },
+            { path: 'bookings', element: named(studio.bookings, 'StudioBookings') },
+            { path: 'bookings/:id', element: named(studio.bookings, 'StudioBookingPage') },
+            { path: 'contracts', element: named(studio.bookings, 'StudioContracts') },
+          ]),
           { path: 'finance', element: named(studio.finance, 'default') },
           { path: 'team', element: named(studio.team, 'default') },
-        ],
+          { path: 'live', element: named(live, 'StudioLive') },
+          { path: 'live/:id', element: named(live, 'StudioLiveDetail') },
+        ]),
       },
       {
         path: '/promotor',
         element: named(promotor.layout, 'default'),
-        children: [
+        errorElement: B2B_ERR,
+        children: guarded([
           { index: true, element: named(promotor.dashboard, 'default') },
-          { path: 'discover', element: named(promotor.discover, 'default') },
-          { path: 'artists/:artistId', element: named(promotor.artist, 'default') },
-          { path: 'bookings', element: named(promotor.bookings, 'PromotorBookings') },
-          { path: 'bookings/:id', element: named(promotor.bookings, 'PromotorBookingPage') },
-          { path: 'contracts', element: named(promotor.bookings, 'PromotorContracts') },
-          { path: 'invoices', element: named(promotor.bookings, 'PromotorInvoices') },
-          { path: 'ratings', element: named(promotor.bookings, 'PromotorRatings') },
+          gated('booking', [
+            { path: 'discover', element: named(promotor.discover, 'default') },
+            { path: 'artists/:artistId', element: named(promotor.artist, 'default') },
+            { path: 'bookings', element: named(promotor.bookings, 'PromotorBookings') },
+            { path: 'bookings/:id', element: named(promotor.bookings, 'PromotorBookingPage') },
+            { path: 'contracts', element: named(promotor.bookings, 'PromotorContracts') },
+            { path: 'invoices', element: named(promotor.bookings, 'PromotorInvoices') },
+            { path: 'ratings', element: named(promotor.bookings, 'PromotorRatings') },
+          ]),
           { path: 'team', element: named(promotor.bookings, 'PromotorTeam') },
-          { path: 'events', element: named(promotor.events, 'PromotorEvents') },
-          { path: 'events/new', element: named(promotor.events, 'NewEvent') },
-          { path: 'events/:id/checkin', element: named(promotor.checkin, 'default') },
-          { path: 'checkin', element: named(promotor.checkin, 'default') },
-        ],
+          gated('ticketing', [
+            { path: 'events', element: named(promotor.events, 'PromotorEvents') },
+            { path: 'events/new', element: named(promotor.events, 'NewEvent') },
+            { path: 'events/:id/checkin', element: named(promotor.checkin, 'default') },
+            { path: 'checkin', element: named(promotor.checkin, 'default') },
+          ]),
+          { path: 'live', element: named(live, 'PromotorLive') },
+          { path: 'live/:id', element: named(live, 'PromotorLiveDetail') },
+        ]),
       },
       {
         element: <RequireRole roles={['admin']} />,
@@ -86,15 +121,32 @@ export const b2bRoutes: RouteObject[] = [
           {
             path: '/admin',
             element: named(admin, 'AdminLayout'),
-            children: [
+            errorElement: B2B_ERR,
+            // Izin per halaman = matriks "Peran & Akses" (ditegakkan juga di backend); Platform khusus Super Admin.
+            children: guarded([
               { index: true, element: named(admin, 'AdminDashboard') },
-              { path: 'qc', element: named(admin, 'AdminQc') },
-              { path: 'kyc', element: named(admin, 'AdminKyc') },
-              { path: 'disputes', element: named(admin, 'AdminDisputes') },
-              { path: 'finance', element: named(admin, 'AdminFinance') },
-              { path: 'users', element: named(admin, 'AdminUsers') },
-              { path: 'audit', element: named(admin, 'AdminAudit') },
-            ],
+              access(['qc.review'], [{ path: 'qc', element: named(admin, 'AdminQc') }]),
+              access(['kyc.review'], [{ path: 'kyc', element: named(admin, 'AdminKyc') }]),
+              access(['dispute.resolve'], [{ path: 'disputes', element: named(admin, 'AdminDisputes') }]),
+              access(['live.moderate'], [{ path: 'live', element: named(adminLive, 'AdminLive') }]),
+              access(['finance.view', 'finance.refund'], [{ path: 'finance', element: named(admin, 'AdminFinance') }]),
+              access(['users.view'], [{ path: 'users', element: named(admin, 'AdminUsers') }]),
+              access(['audit.view'], [{ path: 'audit', element: named(admin, 'AdminAudit') }]),
+              // Iklan tier Gratis (docs/API.md §11) — tab via ?tab=overview|campaigns|policy.
+              access(['ads.manage', 'ads.review'], [{ path: 'ads', element: named(adminAds, 'AdminAds') }]),
+              {
+                element: <RequireAdminAccess superOnly />,
+                children: [
+                  { path: 'platform', element: named(platform.main, 'PlatformDashboard') },
+                  { path: 'platform/settings', element: named(platform.settings, 'PlatformSettings') },
+                  { path: 'platform/roles', element: named(platform.roles, 'PlatformRoles') },
+                  { path: 'platform/storage', element: named(platform.storage, 'PlatformStorage') },
+                  { path: 'platform/backups', element: named(platform.storage, 'PlatformBackups') },
+                  { path: 'platform/bus', element: named(platform.main, 'PlatformBus') },
+                  { path: 'platform/admins', element: named(platform.main, 'PlatformAdmins') },
+                ],
+              },
+            ]),
           },
         ],
       },

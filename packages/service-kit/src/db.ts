@@ -19,13 +19,28 @@ export interface Db {
   close(): Promise<void>;
 }
 
+export interface DbOptions {
+  max?: number;
+  connectTimeoutMs?: number;
+  statementTimeoutMs?: number;
+  /** Batas waktu sisi klien per query (mis. jaringan macet) — melengkapi statement_timeout server. */
+  queryTimeoutMs?: number;
+  appName?: string;
+}
+
 /** Pool yang terikat ke schema milik service (search_path). Service hanya boleh menyentuh schema-nya + bus. */
-export function createDb(schema: string): Db {
+export function createDb(schema: string, opts: DbOptions = {}): Db {
   const pool = new pg.Pool({
     connectionString: config.databaseUrl,
-    max: Number(process.env.DB_POOL_MAX ?? 10),
-    options: `-c search_path=${schema},public`,
-    application_name: `gema-${schema}`,
+    // 11 service × pool + koneksi LISTEN harus muat di max_connections (default 100). Naikkan per service via DB_POOL_MAX.
+    max: opts.max ?? Number(process.env.DB_POOL_MAX ?? 6),
+    idleTimeoutMillis: 30_000,
+    // Pool penuh → gagal cepat (503) daripada antre tanpa batas.
+    connectionTimeoutMillis: opts.connectTimeoutMs ?? Number(process.env.DB_CONNECT_TIMEOUT_MS ?? 5_000),
+    query_timeout: opts.queryTimeoutMs,
+    // Query liar & transaksi menggantung dihentikan server (melepas kunci). Maintenance (VACUUM) memakai SET lokal.
+    options: `-c search_path=${schema},public -c statement_timeout=${opts.statementTimeoutMs ?? process.env.DB_STATEMENT_TIMEOUT_MS ?? 30_000} -c idle_in_transaction_session_timeout=60000`,
+    application_name: opts.appName ?? `gema-${schema}`,
   });
   pool.on('error', (e) => console.error(`[db:${schema}] idle client error`, e.message));
 
@@ -42,20 +57,80 @@ export function createDb(schema: string): Db {
     },
     async tx(fn, opts) {
       const c = await pool.connect();
+      let broken = false;
       try {
         await c.query(opts?.isolation ? `BEGIN ISOLATION LEVEL ${opts.isolation.toUpperCase()}` : 'BEGIN');
         const out = await fn(c);
         await c.query('COMMIT');
         return out;
       } catch (e) {
-        await c.query('ROLLBACK').catch(() => {});
+        // ROLLBACK gagal = koneksi rusak → buang dari pool (jangan dipakai ulang).
+        broken = await c.query('ROLLBACK').then(
+          () => false,
+          () => true,
+        );
         throw e;
       } finally {
-        c.release();
+        c.release(broken ? new Error('koneksi rusak') : undefined);
       }
     },
     async close() {
       await pool.end();
+    },
+  };
+}
+
+/**
+ * Kunci advisory tingkat sesi pada koneksi khusus (bukan pool) — "hanya satu replika yang menjalankan X".
+ * Kunci lepas otomatis bila koneksi putus/proses mati; `onLost` dipanggil agar pemegang berhenti seketika.
+ */
+export function sessionLock(name: string, opts: { onLost?: () => void; log?: (o: object, m: string) => void } = {}) {
+  let client: pg.Client | null = null;
+  let held = false;
+  const drop = (c: pg.Client, err?: Error) => {
+    if (client !== c) return;
+    client = null;
+    const was = held;
+    held = false;
+    c.end().catch(() => {});
+    if (was) {
+      opts.log?.({ lock: name, err: err?.message }, 'koneksi kunci advisory putus — kunci dilepas');
+      opts.onLost?.();
+    }
+  };
+  return {
+    get held() {
+      return held;
+    },
+    /** true bila kunci dipegang proses ini (dicoba tanpa menunggu). */
+    async tryAcquire(): Promise<boolean> {
+      if (held) return true;
+      if (!client) {
+        const c = new pg.Client({ connectionString: config.databaseUrl, application_name: `gema-lock-${name}`.slice(0, 63) });
+        c.on('error', (e) => drop(c, e));
+        c.on('end', () => drop(c));
+        client = c;
+        try {
+          await c.connect();
+        } catch (e: any) {
+          drop(c, e);
+          throw e;
+        }
+      }
+      const r = await client.query(`SELECT pg_try_advisory_lock(hashtext($1)) AS ok`, [name]);
+      held = !!r.rows[0]?.ok;
+      return held;
+    },
+    async release() {
+      if (!held || !client) return;
+      held = false;
+      await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [name]).catch(() => {});
+    },
+    async close() {
+      held = false;
+      const c = client;
+      client = null;
+      await c?.end().catch(() => {});
     },
   };
 }

@@ -12,15 +12,19 @@ import {
   managedArtistIds,
   notFound,
   requireAuth,
+  requirePermission,
   requireRole,
+  settings,
   unprocessable,
   uuidv7,
   z,
   type AuthUser,
   type ServiceContext,
 } from '@gema/service-kit';
-import { createInvoice, invoiceView, processPgEvent, signPayload, verifySignature, type PgEvent } from './escrow.js';
+import { createInvoice, invoiceView, processPgEvent, processRefundEvent, settleRefund, signPayload, verifySignature, type PgEvent } from './escrow.js';
 import { C, D, SOURCES, payableAccount, post, serial, walletBalances } from './ledger.js';
+
+const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 const orgIds = (u: AuthUser) => u.orgs.map((o) => o.id);
 
@@ -46,6 +50,8 @@ function holdStatus(h: any): string {
   return h.status;
 }
 
+const rupiah = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID');
+
 export async function routes(app: FastifyInstance, { db }: ServiceContext) {
   // ---------- Webhook PG (raw body untuk verifikasi HMAC) ----------
   await app.register(async (s) => {
@@ -53,9 +59,18 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     s.post('/v1/webhooks/pg/:provider', async (req) => {
       const raw = req.body as string;
       verifySignature(raw, req.headers['x-pg-signature'] as string | undefined);
+      const body = JSON.parse(raw);
+      // Event refund dari penyedia (hasil akhir refund yang sebelumnya diterima PENDING).
+      if (body && typeof body === 'object' && 'refund_ref' in body) {
+        const rev = z
+          .object({ event_id: z.string().min(6), refund_ref: z.string().min(3), status: z.enum(['COMPLETED', 'FAILED']), failure_reason: z.string().max(500).optional() })
+          .parse(body);
+        const r = await serial(db, (c) => processRefundEvent(c, (req.params as any).provider, rev));
+        return { ok: true, duplicate: r.duplicate };
+      }
       const ev = z
         .object({ event_id: z.string().min(6), intent_id: z.string().uuid(), status: z.enum(['PAID', 'FAILED']), amount: z.number().int(), paid_at: z.string(), method: z.string().optional() })
-        .parse(JSON.parse(raw));
+        .parse(body);
       const r = await serial(db, (c) => processPgEvent(c, (req.params as any).provider, ev));
       return { ok: true, duplicate: r.duplicate };
     });
@@ -77,8 +92,16 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       })
       .parse(req.body);
     const fee = Math.min(p.metadata?.service_fee ?? 0, p.amount);
-    const inv = await db.tx((c) =>
-      createInvoice(c, {
+    // Idempoten per (purpose, reference_id) (UNIQUE di 001_init): retry/pemulihan ticketing menerima invoice yang sama (200).
+    const r = await db.tx(async (c) => {
+      await c.query(`SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, [p.purpose, p.reference_id]);
+      const existing = (await c.query(`SELECT * FROM invoices WHERE purpose = $1 AND reference_id = $2`, [p.purpose, p.reference_id])).rows[0];
+      if (existing) {
+        if (Number(existing.amount) !== p.amount || existing.payer_user_id !== p.payer_user_id)
+          throw conflict('Invoice untuk referensi ini sudah ada dengan nominal/pembayar berbeda');
+        return { inv: existing, created: false };
+      }
+      const inv = await createInvoice(c, {
         purpose: p.purpose,
         referenceId: p.reference_id,
         escrowAmount: p.amount - fee,
@@ -88,10 +111,11 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         description: p.description,
         dueAt: new Date(p.due_at),
         metadata: p.metadata,
-      }),
-    );
-    reply.status(201);
-    return invoiceView(inv);
+      });
+      return { inv, created: true };
+    });
+    reply.status(r.created ? 201 : 200);
+    return invoiceView(r.inv);
   });
 
   // ---------- Endpoint pengguna ----------
@@ -104,10 +128,10 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       const rows = await db.query(
         `SELECT i.* FROM invoices i LEFT JOIN escrow_holds h ON h.reference_id = i.reference_id
          WHERE ($1::text IS NULL OR i.reference_id = $1)
-           AND ($2 OR i.payer_user_id::text = $3 OR i.payer_org_id = ANY($4::uuid[])
+           AND ($2 OR i.payer_user_id = $3::uuid OR i.payer_org_id = ANY($4::uuid[])
                 OR h.promotor_org_id = ANY($4::uuid[]) OR h.artist_org_id = ANY($4::uuid[]) OR h.artist_id = ANY($5::uuid[]))
          ORDER BY i.created_at DESC LIMIT 200`,
-        [reference_id ?? null, isAdmin(u), u.sub, orgIds(u), managedArtistIds(u)],
+        [reference_id ?? null, isAdmin(u), isUuid(u.sub) ? u.sub : null, orgIds(u), managedArtistIds(u)],
       );
       return { data: rows.map(invoiceView), next_cursor: null };
     });
@@ -126,7 +150,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       const { id } = req.params as { id: string };
       const { method } = z.object({ method: z.enum(['VA', 'QRIS', 'EWALLET', 'CARD']).default('VA') }).parse(req.body ?? {});
       return idempotent(db, req, reply, `simulate-pay:${id}`, async (c) => {
-        const inv = (await c.query(`SELECT * FROM invoices WHERE id=$1`, [id])).rows[0];
+        const inv = (await c.query(`SELECT * FROM invoices WHERE id=$1 FOR UPDATE`, [id])).rows[0];
         if (!inv) throw notFound('Invoice');
         if (!canPayInvoice(req.user!, inv)) throw forbidden('Bukan pembayar tagihan ini');
         if (inv.status !== 'PENDING') throw conflict(`Invoice berstatus ${inv.status}`);
@@ -139,8 +163,9 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         const sig = signPayload(raw);
         // Jalur verifikasi yang sama dengan webhook nyata.
         verifySignature(raw, sig);
-        await serial(db, (tx) => processPgEvent(tx, 'sandbox', ev));
-        const fresh = (await db.query(`SELECT * FROM invoices WHERE id=$1`, [id]))[0];
+        // Di transaksi idempotensi yang sama: satu koneksi per permintaan (bukan dua yang saling menunggu di pool).
+        await processPgEvent(c, 'sandbox', ev);
+        const fresh = (await c.query(`SELECT * FROM invoices WHERE id=$1`, [id])).rows[0];
         return { body: invoiceView(fresh) };
       });
     });
@@ -184,14 +209,29 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       const p = z
         .object({
           party_id: z.string().uuid(),
-          amount: z.number().int().min(50_000, 'Minimal penarikan Rp 50.000'),
+          amount: z.number().int().positive(),
           bank_account: z.object({ bank: z.string().min(2), number: z.string().regex(/^\d{6,20}$/), holder: z.string().min(2) }),
         })
         .parse(req.body);
       const u = req.user!;
       if (p.party_id !== u.sub) assertOrg(u, p.party_id, ['OWNER', 'FINANCE']);
+      const minAmount = settings.num('payout.min_amount_idr');
+      if (p.amount < minAmount) throw badRequest(`Minimal penarikan ${rupiah(minAmount)}`);
       return idempotent(db, req, reply, 'payout', async (c) => {
         await c.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`wallet:${p.party_id}`]);
+        // Batas harian per wallet (hari kalender WIB), dihitung di dalam kunci wallet agar permintaan paralel tidak lolos bersamaan.
+        const dailyLimit = settings.num('payout.daily_limit_idr');
+        const today = Number(
+          (
+            await c.query(
+              `SELECT coalesce(sum(amount), 0) AS n FROM payouts
+               WHERE party_id=$1 AND status <> 'FAILED' AND (created_at AT TIME ZONE 'Asia/Jakarta')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date`,
+              [p.party_id],
+            )
+          ).rows[0].n,
+        );
+        if (today + p.amount > dailyLimit)
+          throw unprocessable(`Melebihi batas penarikan harian ${rupiah(dailyLimit)} (sisa hari ini ${rupiah(Math.max(0, dailyLimit - today))})`);
         const bal = await walletBalances(c, p.party_id);
         if (bal.total < p.amount) throw unprocessable(`Saldo tidak cukup (tersedia ${bal.total})`);
         // Rekening: perubahan dicatat audit (produksi: dual control + cooling 24 jam, §11.5).
@@ -228,7 +268,64 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
   });
 
   // ---------- Admin finance (REQ-PAY-05, REQ-ADM-01) ----------
-  app.get('/v1/admin/finance/ledger', { preHandler: requireRole('admin') }, async (req) => {
+  // ---------- Refund (back office) ----------
+  const refundOut = (r: any) => ({
+    id: r.id,
+    reference_id: r.reference_id,
+    purpose: r.purpose,
+    amount: Number(r.amount),
+    reason: r.reason,
+    status: r.status,
+    provider: r.provider,
+    provider_ref: r.provider_ref,
+    attempts: r.attempts,
+    error: r.error,
+    created_at: r.created_at,
+    dispatched_at: r.dispatched_at,
+    completed_at: r.completed_at,
+    settled_by: r.settled_by,
+    manual_ref: r.manual_ref,
+  });
+  app.get('/v1/admin/finance/refunds', { preHandler: requirePermission('finance.view') }, async (req) => {
+    const q = z.object({ status: z.enum(['REQUESTED', 'DISPATCHING', 'PENDING', 'COMPLETED', 'FAILED']).optional(), reference_id: z.string().optional() }).parse(req.query);
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (q.status) where.push(`status = $${params.push(q.status)}`);
+    if (q.reference_id) where.push(`reference_id = $${params.push(q.reference_id)}`);
+    const rows = await db.query(`SELECT * FROM refunds ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT 200`, params);
+    return { data: rows.map(refundOut) };
+  });
+  /** Kirim ulang refund FAILED ke penyedia (dana masih tercatat sebagai utang ke pembeli). */
+  app.post('/v1/admin/finance/refunds/:referenceId/retry', { preHandler: requirePermission('finance.refund') }, async (req) => {
+    const { referenceId } = req.params as { referenceId: string };
+    return db.tx(async (c) => {
+      const r = (await c.query(`UPDATE refunds SET status = 'REQUESTED', attempts = 0, next_attempt_at = now(), error = NULL WHERE reference_id = $1 AND status = 'FAILED' RETURNING *`, [referenceId])).rows[0];
+      if (!r) throw conflict('Tidak ada refund gagal untuk referensi ini');
+      await audit(c, { actorId: req.user!.sub, action: 'refund.retry', entity: 'refund', entityId: r.id, data: { reference_id: referenceId }, ip: req.ip });
+      return refundOut(r);
+    });
+  });
+  /** Tandai selesai lewat transfer manual (mis. metode pembayaran asal tidak mendukung refund). Wajib nomor bukti transfer. */
+  app.post('/v1/admin/finance/refunds/:referenceId/complete-manual', { preHandler: requirePermission('finance.refund') }, async (req) => {
+    const { referenceId } = req.params as { referenceId: string };
+    const b = z.object({ transfer_ref: z.string().trim().min(4, 'Isi nomor/bukti transfer').max(120), note: z.string().trim().min(5).max(1000) }).parse(req.body);
+    return db.tx(async (c) => {
+      // Hanya FAILED, atau REQUESTED yang belum pernah dikirim ke penyedia — refund yang pernah dikirim (bisa saja
+      // berhasil di penyedia walau responsnya hilang) tidak boleh ditransfer manual lagi: refund ganda.
+      const r = (
+        await c.query(
+          `SELECT * FROM refunds WHERE reference_id = $1 AND (status = 'FAILED' OR (status = 'REQUESTED' AND attempts = 0 AND provider_ref IS NULL)) FOR UPDATE`,
+          [referenceId],
+        )
+      ).rows[0];
+      if (!r) throw conflict('Refund ini tidak dapat diselesaikan manual (sedang/pernah dikirim ke penyedia, atau sudah selesai)');
+      const done = await settleRefund(c, r, { status: 'COMPLETED', settledBy: `manual:${req.user!.sub}`, manualRef: b.transfer_ref });
+      await audit(c, { actorId: req.user!.sub, action: 'refund.complete_manual', entity: 'refund', entityId: r.id, data: { reference_id: referenceId, ...b }, ip: req.ip });
+      return refundOut(done);
+    });
+  });
+
+  app.get('/v1/admin/finance/ledger', { preHandler: requirePermission('finance.view') }, async (req) => {
     const { account, reference_id } = req.query as { account?: string; reference_id?: string };
     const txns = await db.query(
       `SELECT t.* FROM ledger_transactions t
@@ -241,7 +338,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     return { data: txns.map((t) => ({ ...t, entries: entries.filter((e) => e.txn_id === t.id).map(({ txn_id, ...e }) => e) })) };
   });
 
-  app.get('/v1/admin/finance/reconciliation', { preHandler: requireRole('admin') }, async () => {
+  app.get('/v1/admin/finance/reconciliation', { preHandler: requirePermission('finance.view') }, async () => {
     const tot = await db.one(
       `SELECT coalesce(sum(amount) FILTER (WHERE side='DEBIT'),0)::bigint AS d, coalesce(sum(amount) FILTER (WHERE side='CREDIT'),0)::bigint AS c FROM ledger_entries`,
     );

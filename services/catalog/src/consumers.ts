@@ -27,28 +27,36 @@ export function consumers(_ctx: ServiceContext): Consumers {
          ON CONFLICT (artist_id, user_id) DO UPDATE SET last_at = greatest(artist_listeners.last_at, EXCLUDED.last_at)`,
         [p.artistId, p.userId, p.at],
       );
-      await tx.query(
-        `UPDATE artists SET monthly_listeners = listeners_base +
-           (SELECT count(*) FROM artist_listeners WHERE artist_id = $1 AND last_at > now() - interval '28 days')
-         WHERE id = $1`,
-        [p.artistId],
-      );
+      // monthly_listeners dihitung ulang job per jam (bukan per stream: count(*) per event membebani artis populer).
     },
 
     'library.artist.followed': async (e, tx) => {
       await tx.query(`UPDATE artists SET followers = followers + 1 WHERE id = $1`, [e.payload.artistId]);
     },
+    'library.artist.unfollowed': async (e, tx) => {
+      await tx.query(`UPDATE artists SET followers = greatest(followers - 1, 0) WHERE id = $1`, [e.payload.artistId]);
+    },
   };
 }
 
-/** Pendengar yang tidak kembali dalam 28 hari keluar dari hitungan monthly_listeners. */
+/**
+ * Pendengar bulanan (unik 28 hari) dihitung ulang per jam: buang baris > 28 hari (bertahap), lalu tulis hanya artis
+ * yang angkanya berubah. Idempoten — aman berjalan paralel di beberapa replika.
+ */
 export const listenersDecayJob: Job = {
   name: 'monthly-listeners-decay',
   everyMs: 3600_000,
   async run({ db }) {
+    for (let i = 0; i < 100; i++) {
+      const r = await db.query(
+        `DELETE FROM artist_listeners WHERE ctid IN (SELECT ctid FROM artist_listeners WHERE last_at < now() - interval '28 days' LIMIT 5000) RETURNING 1`,
+      );
+      if (r.length < 5000) break;
+    }
     await db.query(
-      `UPDATE artists a SET monthly_listeners = a.listeners_base +
-         (SELECT count(*) FROM artist_listeners l WHERE l.artist_id = a.id AND l.last_at > now() - interval '28 days')`,
+      `UPDATE artists a SET monthly_listeners = a.listeners_base + c.n
+         FROM (SELECT x.id, (SELECT count(*) FROM artist_listeners l WHERE l.artist_id = x.id AND l.last_at > now() - interval '28 days')::int AS n FROM artists x) c
+        WHERE c.id = a.id AND a.monthly_listeners IS DISTINCT FROM a.listeners_base + c.n`,
     );
   },
 };

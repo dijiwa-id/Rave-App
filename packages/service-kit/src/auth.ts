@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { SignJWT, jwtVerify } from 'jose';
 import type { OrgType } from '@gema/domain';
@@ -74,13 +75,29 @@ export async function serviceToken(name: string): Promise<string> {
   return token;
 }
 
-/** onRequest hook: isi req.user bila ada Bearer token valid (tidak menolak). */
+/** Header panggilan antar-service: token role "service" + shared secret (token saja tidak cukup). */
+export async function serviceHeaders(name: string): Promise<Record<string, string>> {
+  return { authorization: `Bearer ${await serviceToken(name)}`, 'x-internal-secret': config.internalSecret };
+}
+
+function internalSecretOk(v: string | string[] | undefined) {
+  const got = Buffer.from(typeof v === 'string' ? v : '');
+  const want = Buffer.from(config.internalSecret);
+  return got.length === want.length && timingSafeEqual(got, want);
+}
+
+/**
+ * onRequest hook: isi req.user bila ada Bearer token valid (tidak menolak).
+ * Token role "service" hanya diakui bersama `x-internal-secret` yang cocok — bocornya JWT secret saja
+ * tidak cukup untuk memanggil /internal/*, dan klien di balik gateway tidak pernah tahu secret ini.
+ */
 export async function attachUser(req: FastifyRequest) {
   req.user = null;
   const h = req.headers.authorization;
   if (!h?.startsWith('Bearer ')) return;
   try {
-    req.user = await verifyAccessToken(h.slice(7));
+    const u = await verifyAccessToken(h.slice(7));
+    req.user = u.roles.includes('service') && !internalSecretOk(req.headers['x-internal-secret']) ? null : u;
   } catch {
     req.user = null;
   }

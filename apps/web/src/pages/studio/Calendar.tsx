@@ -9,7 +9,7 @@ import { useCurrentArtist } from '@/components/b2b/common';
 
 // Warna status kalender (status = identitas kategorikal → label teks selalu menyertai).
 export const CAL_STATUS: Record<string, { label: string; cls: string }> = {
-  AVAILABLE: { label: 'Available', cls: 'bg-white text-b2b-muted border-b2b-line' },
+  AVAILABLE: { label: 'Available', cls: 'bg-b2b-card text-b2b-muted border-b2b-line' },
   HOLD_1: { label: 'Hold 1st', cls: 'bg-amber-100 text-amber-900 border-amber-300' },
   HOLD_2: { label: 'Hold 2nd', cls: 'bg-amber-50 text-amber-800 border-amber-200 border-dashed' },
   HOLD: { label: 'Hold', cls: 'bg-amber-100 text-amber-900 border-amber-300' },
@@ -37,7 +37,7 @@ export function MonthGrid({ month, onMonth, cell, onDayClick }: { month: Date; o
   }, [month]);
   const today = iso(new Date());
   return (
-    <div className="rounded-xl border border-b2b-line bg-white">
+    <div className="rounded-xl border border-b2b-line bg-b2b-card">
       <div className="flex items-center justify-between border-b border-b2b-line px-4 py-3">
         <button aria-label="Bulan sebelumnya" onClick={() => onMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="rounded-full p-1.5 hover:bg-b2b-bg">
           <ChevronLeft className="size-5" />
@@ -67,7 +67,7 @@ export function MonthGrid({ month, onMonth, cell, onDayClick }: { month: Date; o
               onKeyDown={(e) => e.key === 'Enter' && onDayClick?.(k)}
               className={cx('min-h-24 border-r border-b border-b2b-line p-1.5 text-left last:border-r-0 [&:nth-child(7n)]:border-r-0', !inMonth && 'bg-b2b-bg/50 opacity-50', onDayClick && 'cursor-pointer hover:bg-b2b-bg/70')}
             >
-              <span className={cx('inline-grid size-6 place-items-center rounded-full text-xs font-bold', k === today && 'bg-b2b-ink text-white')}>{d.getDate()}</span>
+              <span className={cx('inline-grid size-6 place-items-center rounded-full text-xs font-bold', k === today && 'bg-b2b-ink text-b2b-on-ink')}>{d.getDate()}</span>
               <div className="mt-1 space-y-1">{cell(k)}</div>
             </div>
           );

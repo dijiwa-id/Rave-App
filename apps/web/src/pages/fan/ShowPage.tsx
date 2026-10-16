@@ -7,8 +7,19 @@ import { usePlayer, type Playable } from '@/stores/player';
 import { colorFor, DarkError, HeroHeader } from '@/components/fan';
 import { PageLoader } from '@/components/ui';
 
-export function episodeToPlayable(e: Episode, show: Pick<Show, 'id' | 'title'>): Playable {
-  return { id: e.id, kind: 'episode', title: e.title, subtitle: show.title, subtitleHref: `/app/show/${show.id}`, image_url: e.cover_url, duration_ms: e.duration_ms };
+export function episodeToPlayable(e: Episode, show: Pick<Show, 'id' | 'title'> & Partial<Pick<Show, 'content_warning'>>): Playable {
+  return {
+    id: e.id,
+    kind: 'episode',
+    title: e.title,
+    subtitle: show.title,
+    subtitleHref: `/app/show/${show.id}`,
+    image_url: e.cover_url,
+    duration_ms: e.duration_ms,
+    // Info untuk kebijakan iklan: episode Premium tanpa iklan; konten berperingatan → hanya promosi internal.
+    premium: e.is_premium,
+    content_warning: !!show.content_warning,
+  };
 }
 
 export default function ShowPage() {

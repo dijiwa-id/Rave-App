@@ -2,7 +2,7 @@
 
 /*
  * GEMA design tokens (BRD §12.1: satu design system; mode gelap default di player, terang di dasbor B2B).
- * Palet fan app mengikuti mockup UI UX (sidebar hitam, kanvas #121212, aksen hijau tombol play).
+ * Palet fan app: sidebar hitam, kanvas #121212, aksen primer magenta GEMA (dari gradien logo ungu → magenta → oranye).
  */
 @theme {
   --font-sans: 'Figtree', ui-sans-serif, system-ui, sans-serif;
@@ -14,19 +14,25 @@
   --color-gema-line: #2a2a2a;
   --color-gema-muted: #b3b3b3;
   --color-gema-subtle: #727272;
-  --color-gema-green: #1ed760;
-  --color-gema-green-dark: #1db954;
+  /* Primer GEMA: isian (tombol play, toggle, progress) dengan teks putih — kontras 4.88:1. */
+  --color-gema-primary: #da1c5c;
+  --color-gema-primary-hover: #e6336f;
+  --color-gema-primary-dark: #b8174e;
+  /* Teks & ikon aktif di atas kanvas gelap — kontras 6.4:1 pada #121212 (primer saja hanya 3.8:1). */
+  --color-gema-primary-text: #ff5c8e;
   --color-gema-blue: #1e70e0;
   --color-gema-purple: #7c3aed;
   --color-gema-pink: #e8115b;
   --color-gema-orange: #f59b23;
 
-  /* B2B (light) */
+  /* B2B (light; tema gelap meng-override di bawah) */
   --color-b2b-bg: #f6f6f4;
   --color-b2b-card: #ffffff;
   --color-b2b-line: #e7e5e4;
   --color-b2b-ink: #111111;
   --color-b2b-muted: #6b6b6b;
+  /* Teks di atas permukaan "ink" (tombol utama, nav aktif) */
+  --color-b2b-on-ink: #ffffff;
 
   --radius-card: 8px;
   --shadow-card: 0 8px 24px rgba(0, 0, 0, 0.5);
@@ -37,8 +43,88 @@ body,
 #root {
   height: 100%;
 }
+/* dvh: tinggi mengikuti toolbar browser mobile yang muncul/hilang (100% tetap sebagai cadangan). */
+#root {
+  height: 100dvh;
+}
 body {
   @apply bg-gema-black text-white antialiased font-sans;
+}
+
+/*
+ * Tema gelap dasbor B2B (Super Admin → Branding & Tema). Dipasang di <html data-b2b-theme="dark">
+ * selama layout B2B aktif, sehingga modal & toast ikut. Utilitas Tailwind v4 membaca var(--color-*),
+ * jadi cukup memetakan ulang token B2B + tint palet yang dipakai badge/status.
+ */
+:root[data-b2b-theme='dark'] {
+  color-scheme: dark;
+  --color-b2b-bg: #0e0e10;
+  --color-b2b-card: #18181b;
+  --color-b2b-line: #2e2e33;
+  --color-b2b-ink: #f4f4f5;
+  --color-b2b-muted: #a1a1aa;
+  --color-b2b-on-ink: #111111;
+
+  /* Tint terang (bg-*-50/100/200) → lapisan gelap transparan; teks *-600..900 → versi terang. */
+  --color-emerald-50: rgb(16 185 129 / 0.12);
+  --color-emerald-100: rgb(16 185 129 / 0.2);
+  --color-emerald-200: rgb(16 185 129 / 0.3);
+  --color-emerald-600: #34d399;
+  --color-emerald-700: #6ee7b7;
+  --color-emerald-800: #a7f3d0;
+  --color-green-50: rgb(34 197 94 / 0.12);
+  --color-green-100: rgb(34 197 94 / 0.2);
+  --color-green-700: #86efac;
+  --color-red-50: rgb(239 68 68 / 0.12);
+  --color-red-100: rgb(239 68 68 / 0.2);
+  --color-red-200: rgb(239 68 68 / 0.3);
+  --color-red-600: #f87171;
+  --color-red-700: #fca5a5;
+  --color-red-800: #fecaca;
+  --color-amber-50: rgb(245 158 11 / 0.12);
+  --color-amber-100: rgb(245 158 11 / 0.2);
+  --color-amber-200: rgb(245 158 11 / 0.3);
+  --color-amber-600: #fbbf24;
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fde68a;
+  --color-orange-50: rgb(249 115 22 / 0.12);
+  --color-orange-100: rgb(249 115 22 / 0.2);
+  --color-orange-700: #fdba74;
+  --color-blue-50: rgb(59 130 246 / 0.12);
+  --color-blue-100: rgb(59 130 246 / 0.2);
+  --color-blue-200: rgb(59 130 246 / 0.3);
+  --color-blue-600: #60a5fa;
+  --color-blue-700: #93c5fd;
+  --color-blue-800: #bfdbfe;
+  --color-sky-50: rgb(14 165 233 / 0.12);
+  --color-sky-100: rgb(14 165 233 / 0.2);
+  --color-sky-700: #7dd3fc;
+  --color-violet-50: rgb(139 92 246 / 0.14);
+  --color-violet-100: rgb(139 92 246 / 0.22);
+  --color-violet-200: rgb(139 92 246 / 0.32);
+  --color-violet-600: #a78bfa;
+  --color-violet-700: #c4b5fd;
+  --color-violet-800: #ddd6fe;
+  --color-purple-50: rgb(168 85 247 / 0.14);
+  --color-purple-100: rgb(168 85 247 / 0.22);
+  --color-purple-700: #d8b4fe;
+  --color-rose-50: rgb(244 63 94 / 0.12);
+  --color-rose-700: #fda4af;
+  --color-stone-100: #232327;
+  --color-stone-200: #2e2e33;
+  --color-stone-300: #3f3f46;
+  --color-stone-400: #52525b;
+  --color-stone-700: #d4d4d8;
+  --color-stone-900: #f4f4f5;
+  --color-amber-300: rgb(245 158 11 / 0.45);
+  --color-amber-900: #fef3c7;
+  --color-emerald-900: #d1fae5;
+  --color-rose-200: rgb(244 63 94 / 0.3);
+  --color-rose-800: #fecdd3;
+  --color-sky-300: rgb(14 165 233 / 0.45);
+  --color-sky-900: #e0f2fe;
+  --color-violet-300: rgb(139 92 246 / 0.45);
+  --color-violet-900: #ede9fe;
 }
 
 /* Scrollbar ala player */
@@ -60,7 +146,7 @@ body {
   @apply relative rounded-[var(--radius-card)] bg-gema-elevated p-4 transition-colors duration-300 hover:bg-gema-highlight;
 }
 .media-card .play-fab {
-  @apply absolute right-6 bottom-[96px] grid size-12 translate-y-2 place-items-center rounded-full bg-gema-green text-black opacity-0 shadow-[var(--shadow-card)] transition-all duration-300;
+  @apply absolute right-6 bottom-[96px] grid size-12 translate-y-2 place-items-center rounded-full bg-gema-primary text-white opacity-0 shadow-[var(--shadow-card)] transition-all duration-300;
 }
 .media-card:hover .play-fab {
   @apply translate-y-0 opacity-100;
@@ -75,7 +161,7 @@ body {
 
 /* Fokus terlihat (WCAG 2.2 AA) */
 :focus-visible {
-  outline: 2px solid var(--color-gema-green);
+  outline: 2px solid var(--color-gema-primary-text);
   outline-offset: 2px;
 }
 

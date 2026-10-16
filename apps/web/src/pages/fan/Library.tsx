@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Play } from 'lucide-react';
@@ -8,6 +8,7 @@ import { trackToPlayable, usePlayer } from '@/stores/player';
 import { CardSkeleton, DarkError, FanPage, MediaCard } from '@/components/fan';
 import { usePlayMedia } from '@/components/fan/usePlayMedia';
 import { cx, EmptyState } from '@/components/ui';
+import { useModule } from '@/components/ModuleGate';
 
 interface Summary {
   liked_count: number;
@@ -57,7 +58,7 @@ function LikedCard({ count }: { count: number }) {
             e.stopPropagation();
             playQueue((likes.data?.data ?? []).map(trackToPlayable));
           }}
-          className="absolute right-5 bottom-5 grid size-14 translate-y-2 place-items-center rounded-full bg-gema-green text-black opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100"
+          className="absolute right-5 bottom-5 grid size-14 translate-y-2 place-items-center rounded-full bg-gema-primary text-white opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100"
         >
           <Play className="ml-0.5 size-6 fill-current" />
         </button>
@@ -104,7 +105,7 @@ function PodcastsTab() {
   const q = useQuery({ queryKey: ['shows', 'PODCAST'], queryFn: () => api<Paged<Show>>('/v1/catalog/shows') });
   return (
     <>
-      <Link to="/app/podcasts" className="flex aspect-square flex-col justify-end rounded-lg bg-[#056952] p-5">
+      <Link to="/app/podcasts" className="flex aspect-square flex-col justify-end rounded-lg bg-[#662d91] p-5">
         <p className="text-2xl font-bold">Episode Kamu</p>
         <p className="text-sm text-white/80">Lanjutkan yang belum selesai</p>
       </Link>
@@ -117,12 +118,17 @@ function PodcastsTab() {
 
 export default function Library() {
   const [tab, setTab] = useState<Tab>('playlists');
+  const podcasts = useModule('podcasts');
+  const tabs = TABS.filter(([k]) => k !== 'podcasts' || podcasts);
+  useEffect(() => {
+    if (!podcasts && tab === 'podcasts') setTab('playlists');
+  }, [podcasts, tab]);
   const play = usePlayMedia();
   const q = useQuery({ queryKey: ['library-summary'], queryFn: () => api<Summary>('/v1/library/summary') });
   return (
     <FanPage>
       <div className="mb-6 flex flex-wrap gap-2" role="tablist" aria-label="Koleksi">
-        {TABS.map(([k, l]) => (
+        {tabs.map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={cx('rounded-md px-4 py-2 text-sm font-bold', tab === k ? 'bg-gema-highlight text-white' : 'text-white hover:bg-white/10')}>
             {l}
           </button>
@@ -142,7 +148,7 @@ export default function Library() {
         )}
         {tab === 'artists' && <ArtistsTab ids={q.data?.followed_artists ?? []} />}
         {tab === 'albums' && <AlbumsTab ids={q.data?.saved_releases ?? []} />}
-        {tab === 'podcasts' && <PodcastsTab />}
+        {tab === 'podcasts' && podcasts && <PodcastsTab />}
       </div>
     </FanPage>
   );

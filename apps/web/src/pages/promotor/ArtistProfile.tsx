@@ -31,7 +31,7 @@ function Availability({ artistId, selected, onPick }: { artistId: string; select
           return (
             <>
               {s && s !== 'AVAILABLE' && <span className={cx('block rounded border px-1 text-[10px] font-bold', CAL_STATUS[s]?.cls)}>{CAL_STATUS[s]?.label ?? s}</span>}
-              {d === selected && <span className="block rounded bg-b2b-ink px-1 text-[10px] font-bold text-white">Dipilih</span>}
+              {d === selected && <span className="block rounded bg-b2b-ink px-1 text-[10px] font-bold text-b2b-on-ink">Dipilih</span>}
             </>
           );
         }}

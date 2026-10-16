@@ -9,6 +9,7 @@ import {
   notFound,
   publish,
   requireAuth,
+  settings,
   slugify,
   unauthorized,
   uuidv7,
@@ -76,15 +77,29 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     const b = otpBody.parse(req.body);
     const dest = normalizeDestination(b.channel, b.destination);
     if (b.channel === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dest)) throw badRequest('Email tidak valid');
-    const recent = await db.one(`SELECT count(*)::int AS n FROM otp_codes WHERE destination = $1 AND created_at > now() - interval '15 minutes'`, [dest]);
-    if ((recent?.n ?? 0) >= 5) throw new HttpError(429, 'Too Many Requests', 'Terlalu banyak permintaan OTP. Coba lagi dalam 15 menit.');
+    // Batas & kebijakan dari pengaturan platform (Super Admin).
+    const provider = b.channel === 'email' || dest.includes('@') ? 'email' : 'whatsapp';
+    const existing = await db.one(
+      `SELECT u.suspended_at FROM identities i JOIN users u ON u.id = i.user_id WHERE i.provider = $1 AND i.subject = $2 AND u.deleted_at IS NULL`,
+      [provider, dest],
+    );
+    if (existing?.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan GEMA.');
+    if (!existing && !settings.bool('general.registrations_open')) throw forbidden('Pendaftaran akun baru sedang ditutup');
+    const windowMin = settings.num('security.otp_window_minutes');
     const code = otpCode();
-    await db.query(`INSERT INTO otp_codes (destination, channel, code_hash, expires_at) VALUES ($1,$2,$3, now() + make_interval(secs => $4))`, [
-      dest,
-      b.channel,
-      sha256(`${dest}:${code}`),
-      OTP_TTL_SEC,
-    ]);
+    // Hitung + terbitkan di bawah kunci per tujuan: permintaan paralel tidak bisa melewati batas per jendela.
+    await db.tx(async (tx) => {
+      await tx.query(`SELECT pg_advisory_xact_lock(hashtext('otp:' || $1::text))`, [dest]);
+      const recent = (await tx.query(`SELECT count(*)::int AS n FROM otp_codes WHERE destination = $1 AND created_at > now() - make_interval(mins => $2)`, [dest, windowMin])).rows[0];
+      if ((recent?.n ?? 0) >= settings.num('security.otp_max_per_window'))
+        throw new HttpError(429, 'Too Many Requests', `Terlalu banyak permintaan OTP. Coba lagi dalam ${windowMin} menit.`);
+      await tx.query(`INSERT INTO otp_codes (destination, channel, code_hash, expires_at) VALUES ($1,$2,$3, now() + make_interval(secs => $4))`, [
+        dest,
+        b.channel,
+        sha256(`${dest}:${code}`),
+        OTP_TTL_SEC,
+      ]);
+    });
     // Produksi: kirim via adapter email / WhatsApp Business API (§11.9).
     req.log.info({ dest: mask(dest), channel: b.channel }, 'OTP diterbitkan');
     return { sent: true, expires_in: OTP_TTL_SEC, ...(config.isDev ? { dev_code: code } : {}) };
@@ -99,11 +114,13 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         [dest],
       );
       if (!otp) throw unauthorized('Kode OTP tidak ditemukan atau kedaluwarsa');
-      if (otp.attempts >= OTP_MAX_ATTEMPTS) throw unauthorized('Terlalu banyak percobaan. Minta kode baru.');
-      if (otp.code_hash !== sha256(`${dest}:${b.code}`)) {
-        await db.query(`UPDATE otp_codes SET attempts = attempts + 1 WHERE id = $1`, [otp.id]);
-        throw unauthorized('Kode OTP salah');
-      }
+      // Pesan satu percobaan secara atomik SEBELUM membandingkan kode: tebakan paralel tidak bisa melewati batas.
+      const reserved = await db.query(
+        `UPDATE otp_codes SET attempts = attempts + 1 WHERE id = $1 AND attempts < $2 AND consumed_at IS NULL RETURNING id`,
+        [otp.id, OTP_MAX_ATTEMPTS],
+      );
+      if (!reserved.length) throw unauthorized('Terlalu banyak percobaan. Minta kode baru.');
+      if (otp.code_hash !== sha256(`${dest}:${b.code}`)) throw unauthorized('Kode OTP salah');
       return db.tx(async (tx) => {
         // Klaim kode secara atomik (cegah pemakaian ganda paralel)
         const claimed = await tx.query(`UPDATE otp_codes SET consumed_at = now() WHERE id = $1 AND consumed_at IS NULL RETURNING id`, [otp.id]);
@@ -125,6 +142,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         }
         const me = await buildMe(tx, userId);
         if (!me) throw forbidden('Akun telah dihapus');
+        if (me.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan GEMA.');
         return issueTokens(tx, me);
       });
     }
@@ -136,16 +154,20 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       req.log.warn({ family: rt.family_id }, 'refresh token reuse terdeteksi — family dicabut');
       return unauthorized('Sesi tidak valid, silakan masuk lagi');
     };
-    if (rt.rotated_at || rt.revoked_at) throw await revokeFamily();
-    if (new Date(rt.expires_at) < new Date()) throw unauthorized('Sesi kedaluwarsa');
-    // Klaim rotasi atomik di luar transaksi utama: bila balapan, pemenang tunggal; yang kalah = reuse.
-    const rot = await db.query(`UPDATE refresh_tokens SET rotated_at = now() WHERE id = $1 AND rotated_at IS NULL AND revoked_at IS NULL RETURNING id`, [rt.id]);
-    if (!rot.length) throw await revokeFamily();
-    return db.tx(async (tx) => {
+    // Rotasi + penerbitan token baru dalam SATU transaksi: bila penerbitan gagal, token lama tetap berlaku
+    // (retry klien bukan "reuse"). Baris dikunci → permintaan paralel berurutan; yang kalah terdeteksi sebagai reuse.
+    const out = await db.tx(async (tx) => {
+      const row = (await tx.query(`SELECT * FROM refresh_tokens WHERE id = $1 FOR UPDATE`, [rt.id])).rows[0];
+      if (!row || row.rotated_at || row.revoked_at) return { reuse: true as const };
+      if (new Date(row.expires_at) < new Date()) throw unauthorized('Sesi kedaluwarsa');
+      await tx.query(`UPDATE refresh_tokens SET rotated_at = now() WHERE id = $1`, [rt.id]);
       const me = await buildMe(tx, rt.user_id);
       if (!me) throw unauthorized('Akun tidak aktif');
-      return issueTokens(tx, me, rt.family_id);
+      if (me.suspended_at) throw forbidden('Akun ini ditangguhkan');
+      return { tokens: await issueTokens(tx, me, rt.family_id) };
     });
+    if ('reuse' in out) throw await revokeFamily();
+    return out.tokens;
   });
 
   app.post('/v1/auth/logout', async (req) => {
@@ -175,6 +197,8 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       .parse(req.body);
     const email = b.email.toLowerCase();
     return db.tx(async (tx) => {
+      // Pendaftaran paralel dengan email sama: dikunci per email (bukan 500 karena unique violation).
+      await tx.query(`SELECT pg_advisory_xact_lock(hashtext('waitlist:' || $1::text))`, [email]);
       const existing = (await tx.query(`SELECT * FROM waitlist WHERE email = $1`, [email])).rows[0];
       let row = existing;
       if (!row) {
@@ -384,6 +408,11 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
           user = (await tx.query(`INSERT INTO users (id, email, display_name) VALUES ($1,$2,$3) RETURNING id, display_name, email`, [uid, email, email.split('@')[0]])).rows[0];
           await tx.query(`INSERT INTO identities (provider, subject, user_id) VALUES ('email',$1,$2)`, [email, uid]);
         }
+        // Undangan tidak boleh menurunkan/menaikkan pihak yang setara atau lebih tinggi: OWNER tidak pernah diubah lewat sini,
+        // dan ADMIN org hanya boleh mengubah peran anggota di bawahnya (admin platform dikecualikan).
+        const current = (await tx.query(`SELECT role FROM memberships WHERE org_id = $1 AND user_id = $2 FOR UPDATE`, [id, user.id])).rows[0];
+        if (current?.role === 'OWNER') throw forbidden('Peran OWNER tidak dapat diubah lewat undangan');
+        if (current?.role === 'ADMIN' && myRole !== 'OWNER' && !req.user!.roles.includes('admin')) throw forbidden('Hanya OWNER yang dapat mengubah peran ADMIN lain');
         const ins = await tx.query(`INSERT INTO memberships (org_id, user_id, role) VALUES ($1,$2,$3) ON CONFLICT (org_id, user_id) DO UPDATE SET role = $3 RETURNING created_at`, [
           id,
           user.id,

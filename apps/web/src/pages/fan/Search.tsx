@@ -7,6 +7,7 @@ import { trackToPlayable, usePlayer } from '@/stores/player';
 import { DarkError, FanPage, MediaCard, Shelf, TrackTable } from '@/components/fan';
 import { EmptyState, Skeleton } from '@/components/ui';
 import { usePlayMedia } from '@/components/fan/usePlayMedia';
+import { useModule } from '@/components/ModuleGate';
 
 interface SearchResult {
   artists: ArtistSummary[];
@@ -21,20 +22,25 @@ function CategoryTile({ c }: { c: Category }) {
   return (
     <Link to={c.href} className="relative block aspect-square overflow-hidden rounded-lg p-4 transition hover:scale-[1.02]" style={{ background: c.color }}>
       <span className="text-2xl font-bold break-words text-white">{c.name}</span>
-      {c.image_url && <img src={c.image_url} alt="" className="absolute -right-4 -bottom-2 size-[45%] rotate-[25deg] rounded shadow-[0_2px_4px_rgba(0,0,0,0.2)]" loading="lazy" />}
+      {c.image_url && <img src={c.image_url} alt="" className="absolute -right-4 -bottom-2 size-[45%] rotate-[25deg] rounded shadow-[0_2px_4px_rgba(0,0,0,0.2)]" loading="lazy" decoding="async" />}
     </Link>
   );
 }
 
 function Browse() {
   const q = useQuery({ queryKey: ['browse'], queryFn: () => api<Paged<Category>>('/v1/catalog/browse') });
+  const podcasts = useModule('podcasts');
   return (
     <FanPage>
       <h1 className="mb-6 text-2xl font-bold">Jelajahi semua</h1>
       {q.isError && <DarkError error={q.error} retry={() => q.refetch()} />}
       <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         {q.isLoading && Array.from({ length: 10 }).map((_, i) => <Skeleton key={i} className="aspect-square" />)}
-        {q.data?.data.map((c) => <CategoryTile key={c.id} c={c} />)}
+        {q.data?.data
+          .filter((c) => podcasts || !c.href.startsWith('/app/podcasts'))
+          .map((c) => (
+            <CategoryTile key={c.id} c={c} />
+          ))}
       </div>
     </FanPage>
   );
@@ -51,7 +57,7 @@ function TopResult({ r }: { r: SearchResult }) {
   const href = isArtist ? `/app/artist/${a.slug}` : `/app/track/${t.id}`;
   return (
     <div onClick={() => nav(href)} className="group relative cursor-pointer rounded-lg bg-gema-elevated p-5 transition hover:bg-gema-highlight">
-      <img src={(isArtist ? a.image_url : t.release.cover_url) ?? ''} alt="" className={`mb-5 size-24 object-cover shadow-xl ${isArtist ? 'rounded-full' : 'rounded'}`} />
+      <img src={(isArtist ? a.image_url : t.release.cover_url) ?? ''} alt="" decoding="async" width={96} height={96} className={`mb-5 size-24 object-cover shadow-xl ${isArtist ? 'rounded-full' : 'rounded'}`} />
       <p className="truncate text-3xl font-bold">{isArtist ? a.name : t.title}</p>
       <p className="mt-1 text-sm text-gema-muted">
         {isArtist ? 'Artis' : t.artist.name} <span className="ml-2 rounded-full bg-black/40 px-3 py-1 text-xs font-bold text-white">{isArtist ? 'Artis' : 'Lagu'}</span>
@@ -62,7 +68,7 @@ function TopResult({ r }: { r: SearchResult }) {
           e.stopPropagation();
           isArtist ? play({ id: a.id, kind: 'artist' }) : playQueue([trackToPlayable(t)]);
         }}
-        className="absolute right-5 bottom-5 grid size-12 translate-y-2 place-items-center rounded-full bg-gema-green text-black opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100"
+        className="absolute right-5 bottom-5 grid size-12 translate-y-2 place-items-center rounded-full bg-gema-primary text-white opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100"
       >
         <Play className="ml-0.5 size-5 fill-current" />
       </button>
@@ -73,8 +79,10 @@ function TopResult({ r }: { r: SearchResult }) {
 function Results({ q }: { q: string }) {
   const res = useQuery({ queryKey: ['search', q], queryFn: () => api<SearchResult>('/v1/catalog/search', { query: { q } }), placeholderData: (p) => p });
   const play = usePlayMedia();
+  const podcasts = useModule('podcasts');
   if (res.isError) return <DarkError error={res.error} retry={() => res.refetch()} />;
-  const r = res.data;
+  // Modul podcast mati → hasil acara & episode tidak ditampilkan (rutenya juga ditutup).
+  const r = res.data && !podcasts ? { ...res.data, shows: [], episodes: [] } : res.data;
   if (res.isLoading || !r)
     return (
       <FanPage>

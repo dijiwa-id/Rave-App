@@ -90,7 +90,7 @@ export function PromotorRatings() {
     <div>
       <PageHeader title="Rating" subtitle="Rating dua arah double-blind: dibuka setelah kedua pihak mengisi atau setelah 14 hari." />
       <QueryState q={q} empty={q.data && !done.length ? <Empty title="Belum ada acara selesai" /> : undefined}>
-        <ul className="divide-y divide-b2b-line overflow-hidden rounded-xl border border-b2b-line bg-white">
+        <ul className="divide-y divide-b2b-line overflow-hidden rounded-xl border border-b2b-line bg-b2b-card">
           {done.map((b) => (
             <li key={b.id}>
               <Link to={`/promotor/bookings/${b.id}`} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-b2b-bg/60">
@@ -117,7 +117,7 @@ export function PromotorTeam() {
       <PageHeader title="Tim & KYC" subtitle="Badge “Terverifikasi” tampil di profil promotor setelah KYC/KYB lolos." />
       <div className="grid gap-6 lg:grid-cols-2">
         <TeamPanel orgId={org.id} myRole={org.role} />
-        <KycForm compact />
+        <KycForm compact orgId={org.id} />
       </div>
     </div>
   );

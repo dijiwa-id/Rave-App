@@ -184,9 +184,32 @@ const useAnimationLoop = (
       rafRef.current = requestAnimationFrame(animate);
     };
 
-    rafRef.current = requestAnimationFrame(animate);
+    // Jeda rAF saat di luar viewport / tab tersembunyi; timestamp direset agar tidak melompat saat lanjut.
+    let visible = true;
+    const sync = () => {
+      const run = visible && document.visibilityState === 'visible';
+      if (run && rafRef.current === null) {
+        lastTimestampRef.current = null;
+        rafRef.current = requestAnimationFrame(animate);
+      } else if (!run && rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+    const io =
+      typeof IntersectionObserver !== 'undefined'
+        ? new IntersectionObserver(([entry]) => {
+            visible = entry.isIntersecting;
+            sync();
+          })
+        : null;
+    io?.observe(track);
+    document.addEventListener('visibilitychange', sync);
+    sync();
 
     return () => {
+      io?.disconnect();
+      document.removeEventListener('visibilitychange', sync);
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;

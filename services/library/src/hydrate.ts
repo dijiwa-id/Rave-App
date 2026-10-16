@@ -16,6 +16,14 @@ export interface Track {
 
 const cache = new Map<string, { t: Track; at: number }>();
 const TTL = 60_000;
+const MAX_ENTRIES = 20_000;
+
+/** Batasi memori cache: buang entri kedaluwarsa; bila masih penuh, kosongkan. */
+function prune(now: number) {
+  if (cache.size < MAX_ENTRIES) return;
+  for (const [k, v] of cache) if (now - v.at >= TTL) cache.delete(k);
+  if (cache.size >= MAX_ENTRIES) cache.clear();
+}
 
 /** Stub bila katalog tak terjangkau / lagu ditarik, supaya item tetap tampil (graceful degradation). */
 function stub(id: string): Track {
@@ -48,6 +56,7 @@ export async function hydrateTracks(ids: string[], log?: { warn: (o: object, m: 
     const chunk = missing.slice(i, i + 100);
     try {
       const r = await callService<{ data: Track[] }>('library', 'catalog', `/v1/catalog/tracks?ids=${chunk.join(',')}`);
+      prune(now);
       for (const t of r.data ?? []) {
         out.set(t.id, t);
         cache.set(t.id, { t, at: now });

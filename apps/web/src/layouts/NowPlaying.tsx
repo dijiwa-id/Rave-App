@@ -1,0 +1,122 @@
+import { useEffect, useRef } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { ChevronDown, ListMusic, Mic2, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-react';
+import { BRAND_GRADIENT } from '@/components/ads/AdCard';
+import { cx } from '@/components/ui';
+import { usePlayer } from '@/stores/player';
+import { AdProgress, IconBtn, LikeButton, LOCKED_CLS, PlayButton, PlayerError, Progress, Range, usePlayerView, VOLUME_CONTROLLABLE } from './playerParts';
+
+/**
+ * Tampilan penuh "Sedang Diputar" untuk ponsel/tablet kecil (< md): sampul besar, seek yang nyaman disentuh,
+ * semua kontrol (acak, ulang, volume, kualitas) plus jalan pintas ke Lirik & Antrean yang tak muat di mini-player.
+ */
+export function NowPlayingSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { p, ad, adBreak, locked, lockTitle } = usePlayerView();
+  const quality = usePlayer((s) => s.session?.codec_label);
+  const loc = useLocation();
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  // Pindah halaman (Lirik/Antrean/tautan artis) → tutup sheet.
+  useEffect(() => {
+    if (open) onClose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loc.pathname]);
+
+  // Escape menutup; fokus dipindah ke tombol tutup; kanvas di belakang tidak ikut ter-scroll.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    closeRef.current?.focus();
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+  const VolIcon = p.muted || p.volume === 0 ? VolumeX : p.volume < 0.5 ? Volume1 : Volume2;
+  const RepeatIcon = p.repeat === 'one' ? Repeat1 : Repeat;
+  const title = ad ? ad.title : p.current?.title;
+  const subtitle = ad ? ad.advertiser : p.current?.subtitle;
+  const image = ad ? ad.image_url : p.current?.image_url;
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Sedang diputar" className="gema-sheet fixed inset-0 z-40 flex flex-col overflow-y-auto bg-gradient-to-b from-gema-highlight via-gema-elevated to-black pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:hidden">
+      <div className="flex items-center justify-between px-3 py-2">
+        <IconBtn ref={closeRef} onClick={onClose} aria-label="Perkecil pemutar" className="text-white hover:bg-white/10">
+          <ChevronDown className="size-7" />
+        </IconBtn>
+        <p className="text-xs font-bold tracking-wider text-gema-muted uppercase">{ad ? 'Iklan' : 'Sedang diputar'}</p>
+        <span className="size-11" aria-hidden />
+      </div>
+
+      <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-5 px-6 pb-6">
+        <div className="mx-auto aspect-square w-full max-w-[min(100%,48dvh)] overflow-hidden rounded-xl bg-gema-highlight shadow-card">
+          {image ? <img src={image} alt="" className="size-full object-cover" /> : <div className={cx('size-full', ad && !ad.theme_color ? BRAND_GRADIENT : 'bg-gema-highlight')} style={ad?.theme_color ? { background: ad.theme_color } : undefined} />}
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xl font-bold text-white">{title ?? 'Pilih lagu untuk diputar'}</p>
+            {!ad && p.current?.subtitleHref ? (
+              <Link to={p.current.subtitleHref} className="block truncate text-sm text-gema-muted hover:text-white hover:underline">
+                {subtitle}
+              </Link>
+            ) : (
+              <p className="truncate text-sm text-gema-muted">{subtitle}</p>
+            )}
+          </div>
+          {!ad && p.current?.kind === 'track' && <LikeButton trackId={p.current.id} className="[&>svg]:size-6" />}
+        </div>
+
+        <div>
+          {ad ? <AdProgress elapsedMs={adBreak!.elapsedMs} durationS={ad.duration_s} gradient={BRAND_GRADIENT} /> : <Progress locked={locked} big />}
+          <PlayerError className="mt-1 justify-center" />
+        </div>
+
+        <div className="flex items-center justify-between">
+          <IconBtn onClick={p.toggleShuffle} aria-disabled={locked} title={lockTitle('Acak')} aria-label="Acak" aria-pressed={p.shuffle} className={cx(p.shuffle ? 'text-gema-primary-text' : 'text-gema-muted', locked && LOCKED_CLS)}>
+            <Shuffle className="size-5" />
+          </IconBtn>
+          <IconBtn onClick={p.prev} aria-disabled={locked} title={lockTitle('Sebelumnya')} aria-label="Sebelumnya" className={cx('text-white', locked && LOCKED_CLS)}>
+            <SkipBack className="size-7 fill-current" />
+          </IconBtn>
+          <PlayButton big />
+          <IconBtn onClick={p.next} aria-disabled={locked} title={lockTitle('Berikutnya')} aria-label="Berikutnya" className={cx('text-white', locked && LOCKED_CLS)}>
+            <SkipForward className="size-7 fill-current" />
+          </IconBtn>
+          <IconBtn onClick={p.cycleRepeat} aria-disabled={locked} title={lockTitle('Ulangi')} aria-label={p.repeat === 'one' ? 'Ulangi satu lagu' : p.repeat === 'all' ? 'Ulangi semua' : 'Ulangi'} aria-pressed={p.repeat !== 'off'} className={cx('relative', p.repeat !== 'off' ? 'text-gema-primary-text' : 'text-gema-muted', locked && LOCKED_CLS)}>
+            <RepeatIcon className="size-5" />
+            {p.repeat !== 'off' && <span className="absolute bottom-1.5 left-1/2 size-1 -translate-x-1/2 rounded-full bg-gema-primary" />}
+          </IconBtn>
+        </div>
+
+        {VOLUME_CONTROLLABLE && (
+          <div className="flex items-center gap-2">
+            <IconBtn onClick={p.toggleMute} aria-label={p.muted ? 'Suarakan' : 'Bisukan'} aria-pressed={p.muted} className="text-gema-muted">
+              <VolIcon className="size-5" />
+            </IconBtn>
+            <Range label="Volume" value={p.muted ? 0 : p.volume} max={1} onChange={p.setVolume} valueText={(v) => `${Math.round(v * 100)}%`} className="flex-1" />
+          </div>
+        )}
+
+        <div className="flex items-center justify-center gap-3 text-sm font-bold">
+          <Link to="/app/lyrics" className="flex min-h-11 items-center gap-2 rounded-full bg-white/10 px-5 text-white hover:bg-white/20">
+            <Mic2 className="size-4" /> Lirik
+          </Link>
+          <Link to="/app/queue" className="flex min-h-11 items-center gap-2 rounded-full bg-white/10 px-5 text-white hover:bg-white/20">
+            <ListMusic className="size-4" /> Antrean
+          </Link>
+          {quality && !ad && (
+            <span title="Kualitas audio (REQ-STR-02)" className="rounded border border-gema-primary/50 px-1.5 py-0.5 text-[10px] font-bold text-gema-primary-text">
+              {quality}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

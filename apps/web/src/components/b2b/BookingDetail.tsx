@@ -142,7 +142,7 @@ export function BookingDetail({ id }: { id: string }) {
                   <HoldButton
                     holdTime={1400}
                     backgroundColor="#111111"
-                    fillColor="#1ed760"
+                    fillColor="#DA1C5C"
                     textColor="#ffffff"
                     fillTextColor="#000000"
                     doneLabel="Ditandatangani"
@@ -405,7 +405,7 @@ function Thread({ booking: b }: { booking: Booking }) {
         {items.map((it, i) =>
           it.kind === 'offer' ? (
             <li key={i} className={cx('flex', mine(it.o.by_party) ? 'justify-end' : 'justify-start')}>
-              <div className={cx('max-w-[85%] rounded-xl border p-3', mine(it.o.by_party) ? 'border-b2b-ink bg-b2b-ink text-white' : 'border-b2b-line bg-b2b-bg')}>
+              <div className={cx('max-w-[85%] rounded-xl border p-3', mine(it.o.by_party) ? 'border-b2b-ink bg-b2b-ink text-b2b-on-ink' : 'border-b2b-line bg-b2b-bg')}>
                 <p className="text-[11px] font-bold tracking-wide uppercase opacity-70">{it.o.by_party === 'promotor' ? 'Offer promotor' : 'Offer manajemen'}</p>
                 <p className="text-lg font-extrabold">{fmt.idr(it.o.fee)}</p>
                 <p className="text-xs opacity-80">
@@ -602,7 +602,7 @@ export function BookingList({ side, artistId, orgId, basePath }: { side: 'artist
     <div>
       <div className="mb-4 flex flex-wrap gap-2">
         {filters.map(([v, l]) => (
-          <button key={v} onClick={() => setStatus(v)} className={cx('rounded-full border px-3 py-1.5 text-xs font-bold', status === v ? 'border-b2b-ink bg-b2b-ink text-white' : 'border-b2b-line bg-white text-b2b-muted')}>
+          <button key={v} onClick={() => setStatus(v)} className={cx('rounded-full border px-3 py-1.5 text-xs font-bold', status === v ? 'border-b2b-ink bg-b2b-ink text-b2b-on-ink' : 'border-b2b-line bg-b2b-card text-b2b-muted')}>
             {l}
           </button>
         ))}
@@ -612,9 +612,9 @@ export function BookingList({ side, artistId, orgId, basePath }: { side: 'artist
       ) : q.error ? (
         <ErrorState error={q.error} retry={() => q.refetch()} />
       ) : !q.data?.data.length ? (
-        <div className="rounded-xl border border-dashed border-b2b-line bg-white p-10 text-center text-sm text-b2b-muted">Belum ada booking.</div>
+        <div className="rounded-xl border border-dashed border-b2b-line bg-b2b-card p-10 text-center text-sm text-b2b-muted">Belum ada booking.</div>
       ) : (
-        <ul className="divide-y divide-b2b-line overflow-hidden rounded-xl border border-b2b-line bg-white">
+        <ul className="divide-y divide-b2b-line overflow-hidden rounded-xl border border-b2b-line bg-b2b-card">
           {q.data.data.map((b) => (
             <li key={b.id}>
               <Link to={`${basePath}/${b.id}`} className="flex flex-wrap items-center gap-4 px-4 py-3.5 hover:bg-b2b-bg/60">

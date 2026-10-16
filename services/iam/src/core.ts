@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomInt } from 'node:crypto';
-import { config, signAccessToken, uuidv7, ACCESS_TOKEN_TTL_SEC, type OrgClaim, type PlatformRole } from '@gema/service-kit';
+import { adminPermissions } from '@gema/domain/settings';
+import { config, settings, signAccessToken, uuidv7, ACCESS_TOKEN_TTL_SEC, type OrgClaim, type PlatformRole } from '@gema/service-kit';
 
 /** Pool atau client transaksi — keduanya punya .query() yang mengembalikan { rows }. */
 export interface Q {
@@ -76,10 +77,11 @@ const ROLE_BY_ORG: Record<string, PlatformRole> = {
   VENUE: 'promotor',
 };
 
-export function deriveRoles(isAdmin: boolean, orgs: OrgRow[]): PlatformRole[] {
+export function deriveRoles(adminRole: string | null, orgs: OrgRow[]): PlatformRole[] {
   const roles = new Set<PlatformRole>(['fan']);
   for (const o of orgs) if (o.direct) roles.add(ROLE_BY_ORG[o.type]);
-  if (isAdmin) roles.add('admin');
+  if (adminRole) roles.add('admin');
+  if (adminRole === 'SUPER_ADMIN') roles.add('superadmin');
   return [...roles];
 }
 
@@ -100,12 +102,16 @@ export async function buildMe(q: Q, userId: string) {
     avatar_url: u.avatar_url,
     city: u.city,
     genres: u.genres,
-    roles: deriveRoles(u.is_admin, orgs),
+    roles: deriveRoles(u.admin_role ?? (u.is_admin ? 'OPS' : null), orgs),
     orgs: orgs.map((o) => ({ id: o.id, type: o.type, name: o.name, role: o.role, artist_id: o.artist_id })),
     kyc_status: await kycStatus(q, userId),
     mfa_enabled: u.mfa_enabled,
     onboarded: u.onboarded,
     premium: u.premium,
+    admin_role: (u.admin_role as string | null) ?? null,
+    /** Izin back office efektif (matriks "Peran & Akses", dibaca terkini) — untuk menu & halaman di web. */
+    admin_permissions: adminPermissions(u.admin_role ?? (u.is_admin ? 'OPS' : null), (k) => settings.get(k)),
+    suspended_at: u.suspended_at as string | null,
     created_at: u.created_at,
   };
 }
@@ -122,6 +128,7 @@ export async function issueTokens(q: Q, me: Me, familyId: string = uuidv7()) {
     city: me.city,
     kyc: me.kyc_status === 'VERIFIED',
     premium: me.premium,
+    admin_role: me.admin_role,
   });
   const refresh = randomToken();
   await q.query(

@@ -6,13 +6,14 @@ import type { ArtistAnalytics, BookingSummary, Release, Wallet } from '@/lib/typ
 import { Badge, Button, Card, PageHeader } from '@/components/ui';
 import { BookingStatusBadge, useCurrentArtist } from '@/components/b2b/common';
 import { Sparkline } from '@/components/b2b/charts';
+import { PendingSplits } from '@/components/b2b/PendingSplits';
 import { ReleaseStatusBadge } from './Releases';
 
 const ACTIVE = ['INQUIRY', 'NEGOTIATING', 'AGREED', 'CONTRACT_SENT', 'SIGNED', 'BOOKED', 'BOOKED_AND_SECURED', 'AT_RISK', 'SHOW_DAY'];
 
 function Tile({ label, value, prefix, hint, spark }: { label: string; value: number | undefined; prefix?: string; hint?: string; spark?: number[] }) {
   return (
-    <div className="rounded-xl border border-b2b-line bg-white p-4">
+    <div className="rounded-xl border border-b2b-line bg-b2b-card p-4">
       <p className="text-xs font-semibold tracking-wide text-b2b-muted uppercase">{label}</p>
       <p className="mt-1 text-2xl font-extrabold text-b2b-ink tabular-nums">
         {prefix}
@@ -51,6 +52,8 @@ export default function StudioDashboard() {
         <Tile label="Booking aktif" value={bookings.data ? active.length : undefined} hint={`${inquiries} inquiry baru`} />
         <Tile label="Saldo wallet" prefix="Rp " value={wallet.data?.balances.total} hint="siap ditarik" />
       </div>
+
+      <PendingSplits className="mt-6" />
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card title="Inbox booking terbaru" action={<Link to="/studio/bookings" className="text-sm font-bold text-b2b-muted hover:text-b2b-ink">Semua</Link>}>

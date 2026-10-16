@@ -20,6 +20,15 @@ const svc = createService({
   routes,
   consumers,
   jobs: [scheduledReleaseJob, listenersDecayJob],
+  stats: async ({ db }) =>
+    (await db.one(
+      `SELECT (SELECT count(*) FROM artists)::int AS artists,
+              (SELECT count(*) FROM tracks t JOIN releases r ON r.id = t.release_id WHERE r.status = 'LIVE')::int AS tracks_live,
+              (SELECT count(*) FROM releases WHERE status = 'IN_REVIEW')::int AS releases_in_review,
+              (SELECT count(*) FROM releases)::int AS releases,
+              (SELECT count(*) FROM shows)::int AS shows,
+              (SELECT count(*) FROM uploads WHERE completed_at IS NOT NULL)::int AS uploads`,
+    )) ?? {},
   seed,
 });
 

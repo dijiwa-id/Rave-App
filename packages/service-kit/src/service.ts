@@ -1,9 +1,9 @@
 import cors from '@fastify/cors';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { attachUser, requireService } from './auth.js';
-import { refreshSettings, settings } from './settings.js';
+import { refreshSettings, settings, startSettingsListener } from './settings.js';
 import { createBus, type Consumers } from './bus.js';
-import { config } from './config.js';
+import { config, INSTANCE_ID } from './config.js';
 import { createDb, migrate, type Db } from './db.js';
 import { errorHandler } from './errors.js';
 
@@ -33,6 +33,8 @@ export interface ServiceDefinition {
   stats?: (ctx: ServiceContext) => Promise<Record<string, unknown>>;
   /** Seed data demo (idempoten). Dijalankan dengan argumen CLI `seed`. */
   seed?: (ctx: ServiceContext) => Promise<void>;
+  /** Dipanggil saat shutdown sebelum DB ditutup (mis. menghentikan proses anak). */
+  onShutdown?: (ctx: ServiceContext) => Promise<void> | void;
 }
 
 /**
@@ -46,15 +48,22 @@ export function createService(def: ServiceDefinition) {
     logger: {
       level: process.env.LOG_LEVEL ?? 'info',
       transport: undefined,
-      base: { svc: def.name },
+      base: { svc: def.name, instance: INSTANCE_ID },
     },
-    genReqId: (req) => (req.headers['x-request-id'] as string) ?? crypto.randomUUID(),
+    // x-request-id dari klien hanya dipakai bila wajar (mencegah log injection / id raksasa).
+    genReqId: (req) => {
+      const id = req.headers['x-request-id'];
+      return typeof id === 'string' && /^[\w.:-]{1,80}$/.test(id) ? id : crypto.randomUUID();
+    },
     bodyLimit: 5 * 1024 * 1024,
   });
   const db = createDb(def.schema);
   const log = app.log;
   const bus = createBus(db, def.name, (o, m) => log.warn(o, m));
   const ctx: ServiceContext = { name: def.name, db, log, bus };
+  const timers: NodeJS.Timeout[] = [];
+  let settingsListener: ReturnType<typeof startSettingsListener> | null = null;
+  let stopping = false;
 
   app.decorateRequest('user', null);
   app.addHook('onRequest', attachUser);
@@ -70,9 +79,12 @@ export function createService(def: ServiceDefinition) {
     const mem = process.memoryUsage();
     return {
       service: def.name,
+      instance: INSTANCE_ID,
+      pid: process.pid,
       uptime_s: Math.round((Date.now() - startedAt) / 1000),
       memory_mb: Math.round(mem.rss / 1048576),
       settings_loaded_at: settings.loadedAt() ? new Date(settings.loadedAt()!).toISOString() : null,
+      settings_version: settings.version(),
       metrics: def.stats ? await def.stats(ctx) : {},
     };
   });
@@ -82,6 +94,11 @@ export function createService(def: ServiceDefinition) {
     await migrate(db, def.migrationsDir, (m) => log.info(m));
     if (cmd === 'migrate') return shutdown(0);
     if (cmd === 'seed') {
+      // Akun demo (superadmin@gema.id dll.) tidak boleh muncul di produksi tanpa sengaja.
+      if (!config.isDev && process.env.GEMA_ALLOW_SEED !== '1') {
+        log.error('seed ditolak di produksi (set GEMA_ALLOW_SEED=1 bila memang disengaja)');
+        return shutdown(1);
+      }
       if (def.seed) await def.seed(ctx);
       await bus.relayOnce();
       log.info('seed selesai');
@@ -92,35 +109,56 @@ export function createService(def: ServiceDefinition) {
     });
     await app.listen({ port: def.port, host: process.env.HOST ?? '0.0.0.0' });
     bus.startRelay();
-    // Pengaturan platform: snapshot awal + pembaruan real-time lewat event bus (+ refresh berkala).
-    if (def.name !== 'platform') {
-      await refreshSettings(def.name);
-      setInterval(() => void refreshSettings(def.name), 60_000);
-    }
+    // Pengaturan platform: snapshot awal + LISTEN/NOTIFY `gema_settings` (setiap replika, termasuk platform —
+    // platform memuat dari DB lewat setSettingsLoader) + event bus + refresh berkala sebagai jaring pengaman.
+    await refreshSettings(def.name);
+    timers.push(setInterval(() => void refreshSettings(def.name), 60_000));
+    settingsListener = startSettingsListener(def.name, { log: (o, m) => log.warn(o, m) });
     const own = def.consumers ? def.consumers(ctx) : {};
     await bus.consume({
       ...own,
       'platform.settings.updated': async (e, tx) => {
-        settings.apply(e.payload.changes);
+        settings.applyVersioned(e.payload.changes, e.payload.version);
         if (own['platform.settings.updated']) await own['platform.settings.updated'](e, tx);
       },
     });
     for (const j of def.jobs ?? []) {
-      setInterval(() => {
-        j.run(ctx).catch((e) => log.error({ err: e?.message, job: j.name }, 'job gagal'));
-      }, j.everyMs);
+      // Satu job tidak pernah berjalan tumpang tindih: tick dilewati bila run sebelumnya belum selesai (DB lambat).
+      let running = false;
+      timers.push(
+        setInterval(() => {
+          if (running || stopping) return;
+          running = true;
+          j.run(ctx)
+            .catch((e) => log.error({ err: e?.message, job: j.name }, 'job gagal'))
+            .finally(() => (running = false));
+        }, j.everyMs),
+      );
     }
-    log.info({ port: def.port, bus: config.busDriver }, `${def.name} siap`);
+    log.info({ port: def.port, bus: config.busDriver, instance: INSTANCE_ID }, `${def.name} siap`);
   }
 
   async function shutdown(code = 0) {
+    if (stopping) return;
+    stopping = true;
+    // Batas keras: koneksi stream panjang (HLS, unduhan) tidak boleh menahan shutdown selamanya.
+    setTimeout(() => process.exit(code || 1), 10_000).unref();
+    timers.forEach(clearInterval);
+    await settingsListener?.close().catch(() => {});
     await bus.close().catch(() => {});
     await app.close().catch(() => {});
+    await Promise.resolve(def.onShutdown?.(ctx)).catch((e) => log.error({ err: e?.message }, 'onShutdown gagal'));
     await db.close().catch(() => {});
     process.exit(code);
   }
   process.on('SIGTERM', () => void shutdown(0));
   process.on('SIGINT', () => void shutdown(0));
+  // Promise yang lupa ditangani dicatat (bukan mematikan proses diam-diam); exception fatal → shutdown rapi.
+  process.on('unhandledRejection', (e: any) => log.error({ err: e?.message ?? String(e), stack: e?.stack }, 'unhandled rejection'));
+  process.on('uncaughtException', (e) => {
+    log.fatal({ err: e.message, stack: e.stack }, 'uncaught exception — shutdown');
+    void shutdown(1);
+  });
 
   return { app, ctx, start };
 }
