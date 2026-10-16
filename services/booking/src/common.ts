@@ -1,5 +1,6 @@
 import pg from 'pg';
-import { config, forbidden, isAdmin, managedArtistIds, type AuthUser } from '@gema/service-kit';
+import type { CommissionPolicy } from '@gema/domain';
+import { config, forbidden, isAdmin, managedArtistIds, settings, type AuthUser } from '@gema/service-kit';
 
 // Kolom DATE dikembalikan sebagai string 'YYYY-MM-DD' (bukan Date lokal yang bergeser zona).
 pg.types.setTypeParser(1082, (v) => v);
@@ -12,6 +13,12 @@ pg.types.setTypeParser(1082, (v) => v);
 export const FAST_CLOCK = (process.env.GEMA_FAST_CLOCK ?? (config.isDev ? '1' : '0')) === '1';
 export const AUTO_COMPLETE_MS = FAST_CLOCK ? 60_000 : 24 * 3600_000;
 export const RATING_REVEAL_DAYS = 14;
+
+/** Take rate off-air terkini dari pengaturan platform (Super Admin → Komisi & Biaya). */
+export const commissionPolicy = (): CommissionPolicy => ({
+  promotorServiceFeePct: settings.num('commission.promotor_service_fee_pct'),
+  artistCommissionPct: settings.num('commission.artist_commission_pct'),
+});
 
 export type Party = 'promotor' | 'management' | 'admin';
 

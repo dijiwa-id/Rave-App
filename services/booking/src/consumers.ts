@@ -1,5 +1,6 @@
 import { bookingInvoice } from '@gema/domain';
 import type { Consumers, ServiceContext } from '@gema/service-kit';
+import { commissionPolicy } from './common.js';
 import { loadBooking, transition } from './repo.js';
 
 export function consumers({ log }: ServiceContext): Consumers {
@@ -29,7 +30,7 @@ export function consumers({ log }: ServiceContext): Consumers {
       if (p.purpose !== 'BOOKING_DP' && p.purpose !== 'BOOKING_SETTLEMENT') return;
       const b = await loadBooking(tx, p.referenceId, true).catch(() => null);
       if (!b) return log.warn({ ref: p.referenceId }, 'payment untuk booking tak dikenal');
-      const inv = bookingInvoice(b.agreed_fee ?? 0, b.dp_pct);
+      const inv = bookingInvoice(b.agreed_fee ?? 0, b.dp_pct, commissionPolicy());
       if (p.purpose === 'BOOKING_DP') {
         if (b.status !== 'SIGNED') return log.warn({ id: b.id, status: b.status }, 'DP diterima di luar status SIGNED');
         await transition(tx, b, 'BOOKED', 'system', { note: 'DP diterima escrow — kontak dibuka', set: { dp_paid: inv.dp } });

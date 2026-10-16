@@ -1,10 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   BOOKING_STATUS_LABEL,
-  DEFAULT_DP_PCT,
-  DEFAULT_HOLD_HOURS,
-  DEFAULT_SETTLEMENT_DAYS_BEFORE,
   EVENT_CATEGORIES,
   PERFORMANCE_FORMATS,
   bookingInvoice,
@@ -23,7 +20,7 @@ import {
   notFound,
   publish,
   requireAuth,
-  unprocessable,
+  settings,
   uuidv7,
   z,
   type AuthUser,
@@ -31,8 +28,11 @@ import {
   type Db,
   type ServiceContext,
 } from '@gema/service-kit';
-import { FAST_CLOCK, RATING_REVEAL_DAYS, daysUntil, isPromotorMember, partyOf, requireParty, todayWib, type BookingRow, type Party } from './common.js';
-import { TEMPLATE_VERSION, renderContract } from './contract.js';
+import { FAST_CLOCK, RATING_REVEAL_DAYS, commissionPolicy, daysUntil, isPromotorMember, partyOf, requireParty, todayWib, type BookingRow, type Party } from './common.js';
+import { renderContract } from './contract.js';
+import { SPK_TEMPLATE_VERSION, buildContractData } from './contract-data.js';
+import { enqueueContractJob } from './contract-jobs.js';
+import { contractAudit } from './routes-contracts.js';
 import { feeSplits, loadBooking, managementOrgId, transition } from './repo.js';
 
 const SUMMARY_SQL = `SELECT b.*, a.name AS artist_name, a.image_url AS artist_image, a.city AS artist_city, coalesce(o.name, 'Promotor') AS promotor_name
@@ -103,7 +103,7 @@ export async function bookingView(db: Db | Client, id: string, u: AuthUser | nul
     contract: contract
       ? { id: contract.id, booking_id: id, template_version: contract.template_version, body_markdown: contract.body_markdown, sha256: contract.sha256, status: contract.status, created_at: contract.created_at, signed_at: contract.signed_at }
       : null,
-    invoice: fee ? invoiceDto(bookingInvoice(fee, r.dp_pct)) : null,
+    invoice: fee ? invoiceDto(bookingInvoice(fee, r.dp_pct, commissionPolicy())) : null,
     contact,
     my_party: party,
     signatures,
@@ -145,33 +145,34 @@ const inquirySchema = z.object({
 
 const offerSchema = z.object({
   fee: z.number().int().positive(),
-  dp_pct: z.number().int().min(10).max(100).default(DEFAULT_DP_PCT),
-  settlement_days_before: z.number().int().min(1).max(60).default(DEFAULT_SETTLEMENT_DAYS_BEFORE),
+  dp_pct: z.number().int().min(10).max(100).default(() => settings.num('booking.default_dp_pct')),
+  settlement_days_before: z.number().int().min(1).max(60).default(() => settings.num('booking.settlement_days_before')),
   rider_notes: z.string().max(4000).optional(),
   message: z.string().max(4000).optional(),
 });
 
-async function ensureContract(c: Client, b: BookingRow) {
-  const a = (await c.query(`SELECT name, city FROM artists WHERE id=$1`, [b.artist_id])).rows[0];
-  const o = (await c.query(`SELECT name FROM orgs WHERE id=$1`, [b.promotor_org_id])).rows[0];
-  const e = (await c.query(`SELECT content FROM epk WHERE artist_id=$1`, [b.artist_id])).rows[0];
+async function ensureContract(c: Client, b: BookingRow, who: { actorId?: string; req?: FastifyRequest } = {}) {
   const off = b.latest_offer_id ? (await c.query(`SELECT rider_notes FROM offers WHERE id=$1`, [b.latest_offer_id])).rows[0] : null;
+  const version = 1; // revisi (Tahap 6) membuat versi berikutnya
+  const data = await buildContractData(c, b, { version, riderNotes: off?.rider_notes ?? null });
+  // Teks markdown lama dipertahankan untuk kompatibilitas API/UI sampai viewer PDF menggantikannya (Tahap 7).
   const { body, sha256 } = renderContract({
     b,
     fee: b.agreed_fee!,
-    artistName: a?.name ?? 'Artis',
-    artistCity: a?.city ?? null,
-    promotorName: o?.name ?? 'Promotor',
-    rider: e?.content?.rider ?? {},
-    riderNotes: off?.rider_notes ?? null,
+    artistName: data.artist.stage_name,
+    artistCity: data.artist.city,
+    promotorName: data.promotor.legal_name,
+    rider: { ...data.rider.hospitality, ...data.rider.technical },
+    riderNotes: data.rider.notes,
   });
-  await c.query(`INSERT INTO contracts (id, booking_id, template_version, body_markdown, sha256) VALUES ($1,$2,$3,$4,$5)`, [
-    uuidv7(),
-    b.id,
-    TEMPLATE_VERSION,
-    body,
-    sha256,
-  ]);
+  const id = uuidv7();
+  await c.query(
+    `INSERT INTO contracts (id, booking_id, template_version, body_markdown, sha256, version, contract_no, template_id, terms, data_snapshot, require_artist_ack, expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now() + make_interval(days => $12))`,
+    [id, b.id, data.template.version, body, sha256, version, data.contract_no, data.template.id, JSON.stringify(data.terms), JSON.stringify(data), data.terms.require_artist_ack, settings.num('contract.sign_window_days')],
+  );
+  await enqueueContractJob(c, id, 'RENDER_DRAFT');
+  await contractAudit(c, { contractId: id, action: 'generate', actorId: who.actorId, req: who.req, data: { template: data.template, version } });
 }
 
 export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext) {
@@ -195,7 +196,8 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
       const id = uuidv7();
       const holdRank = slots.some((s) => s.status === 'HOLD_1') ? (slots.some((s) => s.status === 'HOLD_2') ? null : 'HOLD_2') : 'HOLD_1';
       if (p.hold && !holdRank) throw conflict('Sudah ada 1st & 2nd hold pada tanggal ini');
-      const holdExpires = p.hold ? new Date(Date.now() + DEFAULT_HOLD_HOURS * 3600_000).toISOString() : null;
+      const holdHours = settings.num('booking.hold_hours');
+      const holdExpires = p.hold ? new Date(Date.now() + holdHours * 3600_000).toISOString() : null;
       await c.query(
         `INSERT INTO bookings (id, artist_id, artist_org_id, promotor_org_id, promotor_user_id, promotor_contact, status, event_name, event_date, start_time,
            duration_min, city, venue, capacity, category, format, budget, notes, hold_expires_at)
@@ -204,7 +206,7 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
           p.start_time, p.duration_min, p.city, p.venue, p.capacity, p.category, p.format, p.budget, p.notes ?? null, holdExpires],
       );
       const b = await loadBooking(c, id);
-      await transition(c, b, 'INQUIRY', 'promotor', { actorId: u.sub, note: p.hold ? `Hold ${holdRank} ${DEFAULT_HOLD_HOURS} jam` : null });
+      await transition(c, b, 'INQUIRY', 'promotor', { actorId: u.sub, note: p.hold ? `Hold ${holdRank} ${holdHours} jam` : null });
       if (p.hold)
         await c.query(`INSERT INTO calendar_slots (id, artist_id, period, status, booking_id, note) VALUES ($1,$2, daterange($3::date,$3::date,'[]'), $4, $5, $6)`, [
           uuidv7(), p.artist_id, p.event_date, holdRank, id, p.event_name,
@@ -294,8 +296,8 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
       if (offer.by_party === party) throw conflict('Offer terakhir dikirim oleh pihak Anda; tunggu respons pihak lawan');
       b = await transition(c, b, 'AGREED', party, { actorId: req.user!.sub, note: `Fee disepakati ${offer.fee}`, set: { agreed_fee: offer.fee, hold_expires_at: null } });
       await audit(c, { actorId: req.user!.sub, action: 'booking.offer.accept', entity: 'booking', entityId: id, data: { offer_id: offer.id, fee: offer.fee }, ip: req.ip });
-      await ensureContract(c, b);
-      await transition(c, b, 'CONTRACT_SENT', 'system', { note: `Kontrak ${TEMPLATE_VERSION} dikirim ke PSrE (sandbox)` });
+      await ensureContract(c, b, { actorId: req.user!.sub, req });
+      await transition(c, b, 'CONTRACT_SENT', 'system', { note: `Kontrak ${SPK_TEMPLATE_VERSION} dibuat; PDF dirender & dikirim ke PSrE (sandbox)` });
       return view(id, req.user, c);
     });
   });
@@ -330,7 +332,7 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
       if (n >= 2) {
         await c.query(`UPDATE contracts SET status='SIGNED', signed_at=now() WHERE id=$1`, [k.id]);
         b = await transition(c, b, 'SIGNED', 'system', { note: `Ditandatangani semua pihak · sha256 ${k.sha256.slice(0, 12)}…` });
-        const inv = bookingInvoice(b.agreed_fee!, b.dp_pct);
+        const inv = bookingInvoice(b.agreed_fee!, b.dp_pct, commissionPolicy());
         await publish(c, 'booking.contract.signed', id, {
           bookingId: id,
           contractId: k.id,

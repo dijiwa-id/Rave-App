@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { bookingInvoice, formatIdr } from '@gema/domain';
-import type { BookingRow } from './common.js';
+import { commissionPolicy, type BookingRow } from './common.js';
 
 export const TEMPLATE_VERSION = 'booking-v1';
 
@@ -26,7 +26,7 @@ const CATEGORY: Record<string, string> = {
 
 /** Templat kontrak booking berversi — memuat klausul wajib BRD §8.7 & matriks pembatalan §7.3. */
 export function renderContract({ b, fee, artistName, artistCity, promotorName, rider, riderNotes }: Ctx): { body: string; sha256: string } {
-  const inv = bookingInvoice(fee, b.dp_pct);
+  const inv = bookingInvoice(fee, b.dp_pct, commissionPolicy());
   const r = rider ?? {};
   const body = `# PERJANJIAN PERTUNJUKAN (BOOKING) — GEMA
 Templat: \`${TEMPLATE_VERSION}\` · Nomor booking: \`${b.id}\`
