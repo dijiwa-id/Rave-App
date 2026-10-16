@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, Bookmark, ChevronDown, ChevronLeft, ChevronRight, Download, Globe, Heart, Home, Library, LogOut, Plus, Search, Ticket, User } from 'lucide-react';
+import { Bell, Bookmark, ChevronDown, ChevronLeft, ChevronRight, Download, Globe, Heart, Home, Library, LogOut, Plus, Radio, Search, Ticket, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { PlaylistSummary } from '@/lib/types';
-import { hasRole, useAuth } from '@/stores/auth';
+import { hasRole, isSuperAdmin, useAuth } from '@/stores/auth';
 import { GemaLogo } from '@/components/ui/GemaLogo';
 import { cx, toast } from '@/components/ui';
 import { usePlayer } from '@/stores/player';
+import { PlatformBanner } from '@/components/PlatformBanner';
+import { setting, usePlatformConfig } from '@/lib/platform';
+import { useAnyLive } from '@/components/live/common';
+import { useModule } from '@/components/ModuleGate';
+import { useMediaSession, usePlayerShortcuts } from '@/lib/playerControls';
 import { PlayerBar } from './PlayerBar';
+import { AdBreakOverlay } from './AdBreak';
 
 function SideLink({ to, icon: Icon, children, end }: { to: string; icon: any; children: string; end?: boolean }) {
   return (
@@ -19,10 +25,29 @@ function SideLink({ to, icon: Icon, children, end }: { to: string; icon: any; ch
   );
 }
 
+/** Menu "Live" (disembunyikan bila modules.live mati) dengan titik merah saat ada yang sedang live. */
+function useLiveNav() {
+  const enabled = setting(usePlatformConfig(), 'modules.live', true);
+  const anyLive = useAnyLive(enabled);
+  return { enabled, anyLive };
+}
+function LiveDot() {
+  return (
+    <span className="relative flex size-2" aria-label="Ada yang sedang live">
+      <span className="absolute inline-flex size-full animate-ping rounded-full bg-red-500 opacity-75" />
+      <span className="relative inline-flex size-2 rounded-full bg-red-500" />
+    </span>
+  );
+}
+
 function Sidebar() {
   const token = useAuth((s) => s.accessToken);
   const nav = useNavigate();
   const qc = useQueryClient();
+  // Modul podcast & ticketing bisa dimatikan Super Admin (modules.*).
+  const podcasts = useModule('podcasts');
+  const ticketing = useModule('ticketing');
+  const live = useLiveNav();
   const { data } = useQuery({
     queryKey: ['library-summary'],
     queryFn: () => api<{ playlists: PlaylistSummary[] }>('/v1/library/summary'),
@@ -53,6 +78,13 @@ function Sidebar() {
         <SideLink to="/app/library" icon={Library}>
           Koleksi Kamu
         </SideLink>
+        {live.enabled && (
+          <NavLink to="/app/live" className={({ isActive }) => cx('flex items-center gap-4 px-6 py-2 text-sm font-bold transition', isActive ? 'text-white' : 'text-gema-muted hover:text-white')}>
+            <Radio className="size-6" />
+            Live
+            {live.anyLive && <LiveDot />}
+          </NavLink>
+        )}
       </nav>
       <div className="mt-6 flex flex-col gap-1">
         <button onClick={createPlaylist} className="group flex items-center gap-4 px-6 py-2 text-sm font-bold text-gema-muted hover:text-white">
@@ -67,18 +99,22 @@ function Sidebar() {
           </span>
           Lagu yang Disukai
         </NavLink>
-        <NavLink to="/app/podcasts" className={({ isActive }) => cx('flex items-center gap-4 px-6 py-2 text-sm font-bold', isActive ? 'text-white' : 'text-gema-muted hover:text-white')}>
-          <span className="grid size-6 place-items-center rounded-sm bg-[#006450]">
-            <Bookmark className="size-3 fill-gema-green text-gema-green" />
-          </span>
-          Podcast & Cerita
-        </NavLink>
-        <NavLink to="/app/events" className={({ isActive }) => cx('flex items-center gap-4 px-6 py-2 text-sm font-bold', isActive ? 'text-white' : 'text-gema-muted hover:text-white')}>
-          <span className="grid size-6 place-items-center rounded-sm bg-gema-pink">
-            <Ticket className="size-3 text-white" />
-          </span>
-          Event & Tiket
-        </NavLink>
+        {podcasts && (
+          <NavLink to="/app/podcasts" className={({ isActive }) => cx('flex items-center gap-4 px-6 py-2 text-sm font-bold', isActive ? 'text-white' : 'text-gema-muted hover:text-white')}>
+            <span className="grid size-6 place-items-center rounded-sm bg-[#662d91]">
+              <Bookmark className="size-3 fill-gema-primary-text text-gema-primary-text" />
+            </span>
+            Podcast & Cerita
+          </NavLink>
+        )}
+        {ticketing && (
+          <NavLink to="/app/events" className={({ isActive }) => cx('flex items-center gap-4 px-6 py-2 text-sm font-bold', isActive ? 'text-white' : 'text-gema-muted hover:text-white')}>
+            <span className="grid size-6 place-items-center rounded-sm bg-gema-pink">
+              <Ticket className="size-3 text-white" />
+            </span>
+            Event & Tiket
+          </NavLink>
+        )}
       </div>
       <hr className="mx-6 my-3 border-white/10" />
       <div className="gema-scroll flex-1 overflow-y-auto px-6">
@@ -101,13 +137,14 @@ function Sidebar() {
               <a href="#">Cookie</a>
               <a href="#">Tentang Iklan</a>
             </div>
-            <button className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-gema-subtle px-3 py-1.5 text-sm font-bold text-white hover:border-white">
+            {/* Satu-satunya bahasa saat ini (belum ada i18n) — label informasi, bukan tombol. */}
+            <p className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-gema-subtle px-3 py-1.5 text-sm font-bold text-white">
               <Globe className="size-4" /> Bahasa Indonesia
-            </button>
+            </p>
           </div>
         )}
       </div>
-      <a href="#install" className="flex items-center gap-4 px-6 py-4 text-sm font-bold text-gema-muted hover:text-white">
+      <a href="/#unduh" className="flex items-center gap-4 px-6 py-4 text-sm font-bold text-gema-muted hover:text-white">
         <Download className="size-6" /> Instal Aplikasi
       </a>
     </aside>
@@ -115,8 +152,12 @@ function Sidebar() {
 }
 
 function UserMenu() {
-  const { user, clear, refreshToken } = useAuth();
+  const user = useAuth((s) => s.user);
+  const refreshToken = useAuth((s) => s.refreshToken);
+  const clear = useAuth((s) => s.clear);
+  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const ticketing = useModule('ticketing');
   const ref = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
   const { data: unread } = useQuery({
@@ -137,6 +178,8 @@ function UserMenu() {
     }
     clear();
     nav('/');
+    // Buang cache data pengguna (likes, library, tiket…) agar tidak bocor ke sesi berikutnya.
+    qc.clear();
   }
   const b2b = hasRole(user, 'artist', 'manager', 'label');
   const promotor = hasRole(user, 'promotor');
@@ -144,7 +187,7 @@ function UserMenu() {
     <div className="flex items-center gap-3">
       <Link to="/app/notifications" aria-label="Notifikasi" className="relative grid size-8 place-items-center rounded-full bg-black/70 text-gema-muted hover:text-white">
         <Bell className="size-4" />
-        {!!unread?.unread && <span className="absolute -top-0.5 -right-0.5 grid min-w-4 place-items-center rounded-full bg-gema-green px-1 text-[10px] font-bold text-black">{unread.unread}</span>}
+        {!!unread?.unread && <span className="absolute -top-0.5 -right-0.5 grid min-w-4 place-items-center rounded-full bg-gema-primary px-1 text-[10px] font-bold text-white">{unread.unread}</span>}
       </Link>
       <div ref={ref} className="relative">
         <button onClick={() => setOpen(!open)} className="flex items-center gap-2 rounded-full bg-black/70 p-0.5 pr-2 text-sm font-bold hover:bg-gema-highlight" aria-expanded={open}>
@@ -156,9 +199,11 @@ function UserMenu() {
         </button>
         {open && (
           <div className="absolute right-0 z-40 mt-2 w-56 rounded-md bg-gema-highlight p-1 text-sm shadow-2xl" onClick={() => setOpen(false)}>
-            <Link className="block rounded px-3 py-2.5 hover:bg-white/10" to="/app/tickets">
-              Tiket Saya
-            </Link>
+            {ticketing && (
+              <Link className="block rounded px-3 py-2.5 hover:bg-white/10" to="/app/tickets">
+                Tiket Saya
+              </Link>
+            )}
             <Link className="block rounded px-3 py-2.5 hover:bg-white/10" to="/app/settings">
               Profil & Pengaturan
             </Link>
@@ -173,8 +218,8 @@ function UserMenu() {
               {promotor ? 'Promotor Hub' : 'Daftar sebagai Promotor'}
             </Link>
             {hasRole(user, 'admin') && user?.roles.includes('admin') && (
-              <Link className="block rounded px-3 py-2.5 hover:bg-white/10" to="/admin">
-                Back Office
+              <Link className="block rounded px-3 py-2.5 hover:bg-white/10" to={isSuperAdmin(user) ? '/admin/platform' : '/admin'}>
+                {isSuperAdmin(user) ? 'Super Admin' : 'Back Office'}
               </Link>
             )}
             <hr className="my-1 border-white/10" />
@@ -252,9 +297,11 @@ function PreviewBanner() {
 }
 
 function MobileNav() {
-  const item = 'flex flex-1 flex-col items-center gap-1 py-2 text-[10px]';
+  const item = 'flex min-h-14 flex-1 flex-col items-center justify-center gap-1 py-2 text-[10px] active:bg-white/5';
+  const live = useLiveNav();
+  const ticketing = useModule('ticketing');
   return (
-    <nav className="flex border-t border-white/10 bg-black md:hidden">
+    <nav aria-label="Navigasi utama" className="flex shrink-0 border-t border-white/10 bg-black pb-[env(safe-area-inset-bottom)] md:hidden">
       <NavLink to="/app" end className={({ isActive }) => cx(item, isActive ? 'text-white' : 'text-gema-muted')}>
         <Home className="size-5" />
         Beranda
@@ -267,10 +314,23 @@ function MobileNav() {
         <Library className="size-5" />
         Koleksi
       </NavLink>
-      <NavLink to="/app/events" className={({ isActive }) => cx(item, isActive ? 'text-white' : 'text-gema-muted')}>
-        <Ticket className="size-5" />
-        Event
-      </NavLink>
+      {live.enabled && (
+        <NavLink to="/app/live" className={({ isActive }) => cx(item, 'relative', isActive ? 'text-white' : 'text-gema-muted')}>
+          <Radio className="size-5" />
+          Live
+          {live.anyLive && (
+            <span className="absolute top-1.5 right-[calc(50%-14px)]">
+              <LiveDot />
+            </span>
+          )}
+        </NavLink>
+      )}
+      {ticketing && (
+        <NavLink to="/app/events" className={({ isActive }) => cx(item, isActive ? 'text-white' : 'text-gema-muted')}>
+          <Ticket className="size-5" />
+          Event
+        </NavLink>
+      )}
     </nav>
   );
 }
@@ -279,6 +339,8 @@ function MobileNav() {
 export function FanLayout() {
   const token = useAuth((s) => s.accessToken);
   const hasCurrent = usePlayer((s) => !!s.current);
+  useMediaSession();
+  usePlayerShortcuts();
   const mainRef = useRef<HTMLDivElement>(null);
   const [scrolled, setScrolled] = useState(false);
   const loc = useLocation();
@@ -287,7 +349,8 @@ export function FanLayout() {
   }, [loc.pathname]);
   return (
     <div className="flex h-full flex-col bg-black">
-      <div className="flex min-h-0 flex-1">
+      <PlatformBanner />
+      <div className="relative flex min-h-0 flex-1">
         <Sidebar />
         <main ref={mainRef} onScroll={(e) => setScrolled((e.target as HTMLElement).scrollTop > 40)} className="gema-scroll relative min-w-0 flex-1 overflow-y-auto bg-gema-base">
           <TopBar scrolled={scrolled} />
@@ -295,6 +358,8 @@ export function FanLayout() {
             <Outlet />
           </div>
         </main>
+        {/* Jeda iklan tier Gratis — menutupi kanvas, pemutar tetap terlihat (docs/API.md §11) */}
+        <AdBreakOverlay />
       </div>
       {(token || hasCurrent) && <PlayerBar />}
       {!token && <PreviewBanner />}

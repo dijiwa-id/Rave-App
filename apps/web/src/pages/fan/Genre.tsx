@@ -1,24 +1,33 @@
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { ArtistSummary, Paged, PlaylistSummary } from '@/lib/types';
-import { colorFor, DarkError, MediaCard, Shelf } from '@/components/fan';
+import type { ArtistSummary, Category, Paged, PlaylistSummary, ReleaseSummary, Track } from '@/lib/types';
+import { colorFor, DarkError, MediaCard, Shelf, TrackTable } from '@/components/fan';
 import { usePlayMedia } from '@/components/fan/usePlayMedia';
 import { EmptyState } from '@/components/ui';
 
-/** Halaman kategori/genre dari tile Jelajahi. */
+interface BrowseCategory {
+  category: Category;
+  artists: ArtistSummary[];
+  releases: ReleaseSummary[];
+  tracks: Track[];
+}
+
+/** Halaman kategori/genre dari tile Jelajahi — isi dari `GET /v1/catalog/browse/:id` (genre kategori sudah di-resolve server). */
 export default function Genre() {
   const { id = '' } = useParams();
   const play = usePlayMedia();
-  const artists = useQuery({ queryKey: ['artists', 'genre', id], queryFn: () => api<Paged<ArtistSummary>>('/v1/catalog/artists', { query: { genre: id } }) });
+  const browse = useQuery({ queryKey: ['browse', id], queryFn: () => api<BrowseCategory>(`/v1/catalog/browse/${encodeURIComponent(id)}`) });
   const playlists = useQuery({ queryKey: ['featured-playlists', id], queryFn: () => api<Paged<PlaylistSummary>>('/v1/library/playlists/featured', { query: { tag: id } }) });
-  const title = id.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-  const color = colorFor(id);
+  const d = browse.data;
+  const title = d?.category.name ?? id.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const color = d?.category.color ?? colorFor(id);
+  const empty = !browse.isLoading && !d?.artists.length && !d?.releases.length && !d?.tracks.length && !playlists.data?.data.length;
   return (
     <div className="min-h-full pb-12" style={{ background: `linear-gradient(${color} 0, #121212 360px)` }}>
       <h1 className="px-4 pt-28 pb-10 text-5xl font-black tracking-tighter md:px-8 md:text-8xl">{title}</h1>
       <div className="px-4 md:px-8">
-        {artists.isError && <DarkError error={artists.error} />}
+        {browse.isError && <DarkError error={browse.error} retry={() => browse.refetch()} />}
         {!!playlists.data?.data.length && (
           <Shelf title="Playlist">
             {playlists.data.data.map((p) => (
@@ -26,13 +35,28 @@ export default function Genre() {
             ))}
           </Shelf>
         )}
-        <Shelf title="Artis" loading={artists.isLoading}>
-          {(artists.data?.data ?? []).map((a) => (
-            <MediaCard key={a.id} title={a.name} subtitle={a.city ?? 'Artis'} image={a.image_url} href={`/app/artist/${a.slug}`} round onPlay={() => play({ id: a.id, kind: 'artist' })} />
-          ))}
-        </Shelf>
-        {!artists.isLoading && !artists.data?.data.length && !playlists.data?.data.length && <EmptyState title="Belum ada konten di kategori ini" />}
+        {(browse.isLoading || !!d?.artists.length) && (
+          <Shelf title="Artis" loading={browse.isLoading}>
+            {(d?.artists ?? []).map((a) => (
+              <MediaCard key={a.id} title={a.name} subtitle={a.city ?? 'Artis'} image={a.image_url} href={`/app/artist/${a.slug}`} round onPlay={() => play({ id: a.id, kind: 'artist' })} />
+            ))}
+          </Shelf>
+        )}
+        {!!d?.releases.length && (
+          <Shelf title="Rilis">
+            {d.releases.map((r) => (
+              <MediaCard key={r.id} title={r.title} subtitle={`${r.release_date?.slice(0, 4)} · ${r.artist.name}`} image={r.cover_url} href={`/app/album/${r.id}`} onPlay={() => play({ id: r.id, kind: 'release' })} />
+            ))}
+          </Shelf>
+        )}
       </div>
+      {!!d?.tracks.length && (
+        <section className="mt-6">
+          <h2 className="mb-3 px-4 text-2xl font-bold md:px-8">Lagu populer</h2>
+          <TrackTable tracks={d.tracks} />
+        </section>
+      )}
+      {empty && <EmptyState title="Belum ada konten di kategori ini" />}
     </div>
   );
 }

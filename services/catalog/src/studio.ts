@@ -1,5 +1,7 @@
-import { writeFileSync } from 'node:fs';
+import { open, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { finished, Readable, Transform, type TransformCallback } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
 import { validateShares } from '@gema/domain';
 import {
@@ -12,6 +14,7 @@ import {
   notFound,
   publish,
   requireAuth,
+  settings,
   unprocessable,
   uuidv7,
   z,
@@ -20,7 +23,7 @@ import {
 } from '@gema/service-kit';
 import { isUuid, releaseFull } from './queries.js';
 import { canManageArtist } from './routes.js';
-import { imageSize, UPLOAD_DIR, wavInfo } from './storage.js';
+import { imageSize, UPLOAD_DIR, uploadsBytes, wavInfo } from './storage.js';
 import { publishArtist } from './artists.js';
 
 const trackInput = z.object({
@@ -52,6 +55,55 @@ const splitInput = z.object({ party_name: z.string().trim().min(1).max(120), ema
 
 const EDITABLE = ['DRAFT', 'REJECTED'];
 
+/** Header yang ditahan di memori untuk validasi (WAV fmt/data, dimensi PNG/JPEG). */
+const HEAD_BYTES = 512 * 1024;
+
+/** Hitung byte yang lewat (tolak bila melebihi batas, walau content-length hilang/bohong) dan simpan potongan awal. */
+class UploadMeter extends Transform {
+  bytes = 0;
+  private parts: Buffer[] = [];
+  private headLen = 0;
+  constructor(private max: number, private maxMb: number) {
+    super();
+  }
+  _transform(chunk: Buffer, _enc: BufferEncoding, cb: TransformCallback) {
+    this.bytes += chunk.length;
+    if (this.bytes > this.max) return cb(unprocessable(`Ukuran file melebihi batas ${this.maxMb} MB`));
+    if (this.headLen < HEAD_BYTES) {
+      const part = Buffer.from(chunk.subarray(0, HEAD_BYTES - this.headLen)); // salin: jangan menahan chunk besar
+      this.parts.push(part);
+      this.headLen += part.length;
+    }
+    cb(null, chunk);
+  }
+  head() {
+    return Buffer.concat(this.parts);
+  }
+}
+
+/**
+ * Alirkan body request ke file sementara tanpa buffering penuh.
+ * Sumber tidak ikut di-destroy saat batas terlampaui (agar respons 422 tetap terkirim; koneksi ditutup setelahnya).
+ */
+async function receiveUpload(src: Readable, path: string, maxMb: number) {
+  const meter = new UploadMeter(maxMb * 1024 * 1024, maxMb);
+  // Buka file lebih dulu (bukan open async di dalam stream) agar rm() pemanggil tidak kalah balapan dengan pembuatan file.
+  const fh = await open(path, 'w');
+  const done = pipeline(meter, fh.createWriteStream());
+  // Klien putus di tengah upload → hentikan pipeline (file .part dibersihkan pemanggil).
+  const stop = finished(src, (err) => {
+    if (err) meter.destroy(err);
+  });
+  src.pipe(meter);
+  try {
+    await done;
+  } finally {
+    stop();
+    src.unpipe(meter);
+  }
+  return { bytes: meter.bytes, head: meter.head() };
+}
+
 /** GEMA sebagai pendaftar ISRC bila artis tidak punya (REQ-STU-01). Format ID-GM1-YY-NNNNN. */
 async function generateIsrc(tx: Client) {
   const yy = String(new Date().getFullYear()).slice(2);
@@ -82,11 +134,6 @@ async function splitsOf(db: { query: (s: string, p?: unknown[]) => Promise<any[]
 
 export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
   const { db } = ctx;
-
-  // Body biner untuk upload (audio/artwork).
-  for (const ct of ['application/octet-stream', /^audio\//, /^image\//] as const) {
-    app.addContentTypeParser(ct, { parseAs: 'buffer', bodyLimit: 60 * 1024 * 1024 }, (_req, body, done) => done(null, body));
-  }
 
   app.register(async (s) => {
     s.addHook('preHandler', requireAuth);
@@ -249,11 +296,15 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
           kind: z.enum(['audio', 'artwork']),
           filename: z.string().min(1).max(200),
           content_type: z.string().min(3).max(100),
-          size: z.number().int().positive().max(60 * 1024 * 1024),
+          size: z.number().int().positive(),
         })
         .parse(req.body);
-      const okType = b.kind === 'audio' ? /^audio\/(wav|x-wav|wave|flac|x-flac|mpeg|mp3|mp4|x-m4a)$/ : /^image\/(jpeg|png|webp)$/;
-      if (!okType.test(b.content_type)) throw unprocessable(`Tipe file ${b.content_type} tidak didukung untuk ${b.kind}`);
+      // Kebijakan upload dari pengaturan platform (Super Admin → Storage & Retensi).
+      const maxMb = settings.num('storage.max_upload_mb');
+      if (b.size > maxMb * 1024 * 1024) throw unprocessable(`Ukuran file melebihi batas ${maxMb} MB`);
+      const allowed = settings.get<string[]>(b.kind === 'audio' ? 'storage.allowed_audio_types' : 'storage.allowed_image_types');
+      if (!allowed.includes(b.content_type.toLowerCase())) throw unprocessable(`Tipe file ${b.content_type} tidak diizinkan untuk ${b.kind} (diizinkan: ${allowed.join(', ')})`);
+      if ((await uploadsBytes(db)) + b.size > settings.num('storage.quota_uploads_gb') * 1024 ** 3) throw unprocessable('Kuota penyimpanan upload platform penuh. Hubungi admin GEMA.');
       const id = uuidv7();
       const ext = (b.filename.match(/\.[a-z0-9]{2,5}$/i)?.[0] ?? (b.kind === 'audio' ? '.wav' : '.jpg')).toLowerCase();
       const stored = `${id}${ext}`;
@@ -270,36 +321,75 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       return { upload_id: id, upload_url: `/v1/studio/uploads/${id}`, public_url: `/v1/catalog/media/${stored}` };
     });
 
-    s.put('/v1/studio/uploads/:id', { bodyLimit: 60 * 1024 * 1024 }, async (req) => {
-      const { id } = req.params as { id: string };
-      if (!isUuid(id)) throw notFound('Upload');
-      const u = await db.one(`SELECT * FROM uploads WHERE id = $1 AND user_id = $2`, [id, req.user!.sub]);
-      if (!u) throw notFound('Upload');
-      const body = req.body as Buffer;
-      if (!Buffer.isBuffer(body) || !body.length) throw badRequest('Body biner kosong (kirim dengan content-type audio/* atau image/*)');
-      const warnings: string[] = [];
-      let meta: Record<string, unknown> = {};
-      if (u.kind === 'artwork') {
-        const dim = imageSize(body);
-        if (!dim) throw unprocessable('Artwork harus JPEG/PNG yang valid');
-        meta = dim;
-        if (dim.width !== dim.height) warnings.push('Artwork sebaiknya persegi (1:1)');
-        if (dim.width < 3000) warnings.push(`Resolusi ${dim.width}×${dim.height} di bawah standar 3000×3000 px`);
-      } else {
-        const w = wavInfo(body);
-        if (w) {
-          meta = w;
-          if (w.sampleRate < 44100 || w.bitDepth < 16) throw unprocessable(`Master minimal 16-bit/44,1 kHz (diterima ${w.bitDepth}-bit/${w.sampleRate} Hz)`);
-          if (w.bitDepth < 24) warnings.push('Disarankan master 24-bit');
-        } else if (!/flac|mpeg|mp3|mp4|m4a/.test(u.content_type)) {
-          throw unprocessable('File audio tidak dikenali');
-        } else if (/mpeg|mp3|mp4|m4a/.test(u.content_type)) {
-          warnings.push('Format lossy hanya untuk dev; produksi wajib WAV/FLAC');
-        }
+    // Body biner upload (audio/artwork) diteruskan sebagai stream mentah — parser hanya berlaku di scope ini, rute JSON lain tidak terpengaruh.
+    s.register(async (up) => {
+      for (const ct of ['application/octet-stream', /^audio\//, /^image\//] as const) {
+        up.addContentTypeParser(ct, (_req, payload, done) => done(null, payload));
       }
-      writeFileSync(join(UPLOAD_DIR, u.stored_name), body);
-      await db.query(`UPDATE uploads SET completed_at = now(), size = $2 WHERE id = $1`, [id, body.length]);
-      return { public_url: `/v1/catalog/media/${u.stored_name}`, meta, warnings };
+
+      up.put(
+        '/v1/studio/uploads/:id',
+        {
+          // Tolak sebelum body dibaca bila content-length sudah melebihi batas pengaturan.
+          // bodyLimit Fastify tidak berlaku untuk parser stream → batas sebenarnya ditegakkan UploadMeter.
+          onRequest: async (req) => {
+            const len = Number(req.headers['content-length']);
+            const maxMb = settings.num('storage.max_upload_mb');
+            if (Number.isFinite(len) && len > maxMb * 1024 * 1024) throw unprocessable(`Ukuran file melebihi batas ${maxMb} MB`);
+          },
+        },
+        async (req, reply) => {
+          const src = req.body;
+          try {
+            const { id } = req.params as { id: string };
+            if (!isUuid(id)) throw notFound('Upload');
+            const u = await db.one(`SELECT * FROM uploads WHERE id = $1 AND user_id = $2`, [id, req.user!.sub]);
+            if (!u) throw notFound('Upload');
+            // URL media disajikan immutable & bisa sudah lolos QC: file yang selesai tidak boleh ditimpa — buat upload baru.
+            if (u.completed_at) throw conflict('Upload ini sudah selesai; buat upload baru untuk mengganti file');
+            if (!(src instanceof Readable)) throw badRequest('Body biner kosong (kirim dengan content-type audio/* atau image/*)');
+            src.on('error', () => {}); // error socket ditangani lewat finished(); cegah crash bila muncul setelahnya
+            const part = join(UPLOAD_DIR, `${u.stored_name}.${uuidv7()}.part`);
+            const warnings: string[] = [];
+            let meta: Record<string, unknown> = {};
+            let size = 0;
+            try {
+              const { bytes, head } = await receiveUpload(src, part, settings.num('storage.max_upload_mb'));
+              size = bytes;
+              if (!bytes) throw badRequest('Body biner kosong (kirim dengan content-type audio/* atau image/*)');
+              if (u.kind === 'artwork') {
+                const dim = imageSize(head);
+                if (!dim) throw unprocessable('Artwork harus JPEG/PNG yang valid');
+                meta = dim;
+                if (dim.width !== dim.height) warnings.push('Artwork sebaiknya persegi (1:1)');
+                if (dim.width < 3000) warnings.push(`Resolusi ${dim.width}×${dim.height} di bawah standar 3000×3000 px`);
+              } else {
+                // Durasi WAV dari ukuran chunk data di header (bukan panjang buffer).
+                const w = wavInfo(head);
+                if (w) {
+                  meta = w;
+                  if (w.sampleRate < 44100 || w.bitDepth < 16) throw unprocessable(`Master minimal 16-bit/44,1 kHz (diterima ${w.bitDepth}-bit/${w.sampleRate} Hz)`);
+                  if (w.bitDepth < 24) warnings.push('Disarankan master 24-bit');
+                } else if (!/flac|mpeg|mp3|mp4|m4a/.test(u.content_type)) {
+                  throw unprocessable('File audio tidak dikenali');
+                } else if (/mpeg|mp3|mp4|m4a/.test(u.content_type)) {
+                  warnings.push('Format lossy hanya untuk dev; produksi wajib WAV/FLAC');
+                }
+              }
+              await rename(part, join(UPLOAD_DIR, u.stored_name)); // atomik: file final tidak pernah setengah jadi
+            } catch (e) {
+              await rm(part, { force: true }).catch(() => {});
+              throw e;
+            }
+            await db.query(`UPDATE uploads SET completed_at = now(), size = $2 WHERE id = $1`, [id, size]);
+            return { public_url: `/v1/catalog/media/${u.stored_name}`, meta, warnings };
+          } catch (e) {
+            // Body belum habis dibaca (ditolak lebih awal) → tutup koneksi setelah respons, jangan menguras sisa upload.
+            if (src instanceof Readable && !src.readableEnded) reply.header('connection', 'close');
+            throw e;
+          }
+        },
+      );
     });
 
     // ---------- Submit → IN_REVIEW (validasi §7.4) ----------

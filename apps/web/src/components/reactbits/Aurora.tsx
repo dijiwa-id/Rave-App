@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Renderer, Program, Mesh, Color, Triangle } from 'ogl';
 
 const VERT = `#version 300 es
@@ -128,10 +128,25 @@ interface AuroraProps {
   lightMode?: boolean;
 }
 
+/** Hex → [r,g,b] 0..1 (dihitung sekali per perubahan props, bukan tiap frame). */
+function toStops(stops: string[]): number[][] {
+  return stops.map((hex) => {
+    const c = new Color(hex);
+    return [c.r, c.g, c.b];
+  });
+}
+
 export default function Aurora(props: AuroraProps) {
   const { colorStops = ['#5227FF', '#7cff67', '#5227FF'], amplitude = 1.0, blend = 0.5, lightMode = false } = props;
   const propsRef = useRef<AuroraProps>(props);
   propsRef.current = props;
+  const stopsKey = colorStops.join(',');
+  // Kunci string: array literal baru dari pemanggil tiap render tidak memicu hitung ulang.
+  const stops = useMemo(() => toStops(colorStops), [stopsKey]);
+  const stopsRef = useRef(stops);
+  stopsRef.current = stops;
+  /** Gambar satu frame (dipakai mode reduced-motion saat props berubah). */
+  const drawRef = useRef<(() => void) | null>(null);
 
   const ctnDom = useRef<HTMLDivElement>(null);
 
@@ -139,10 +154,12 @@ export default function Aurora(props: AuroraProps) {
     const ctn = ctnDom.current;
     if (!ctn) return;
 
+    // dpr eksplisit 1 (default ogl) — shader layar penuh; resolusi lebih tinggi tak terlihat di efek blur ini.
     const renderer = new Renderer({
       alpha: true,
       premultipliedAlpha: true,
-      antialias: true
+      antialias: true,
+      dpr: 1,
     });
     const gl = renderer.gl;
     gl.clearColor(0, 0, 0, 0);
@@ -151,27 +168,12 @@ export default function Aurora(props: AuroraProps) {
     gl.canvas.style.backgroundColor = 'transparent';
 
     let program: Program | undefined;
-
-    function resize() {
-      if (!ctn) return;
-      const width = ctn.offsetWidth;
-      const height = ctn.offsetHeight;
-      renderer.setSize(width, height);
-      if (program) {
-        program.uniforms.uResolution.value = [width, height];
-      }
-    }
-    window.addEventListener('resize', resize);
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
     const geometry = new Triangle(gl);
     if (geometry.attributes.uv) {
       delete geometry.attributes.uv;
     }
-
-    const colorStopsArray = colorStops.map(hex => {
-      const c = new Color(hex);
-      return [c.r, c.g, c.b];
-    });
 
     program = new Program(gl, {
       vertex: VERT,
@@ -179,7 +181,7 @@ export default function Aurora(props: AuroraProps) {
       uniforms: {
         uTime: { value: 0 },
         uAmplitude: { value: amplitude },
-        uColorStops: { value: colorStopsArray },
+        uColorStops: { value: stopsRef.current },
         uResolution: { value: [ctn.offsetWidth, ctn.offsetHeight] },
         uBlend: { value: blend },
         uLightMode: { value: lightMode ? 1 : 0 }
@@ -189,36 +191,77 @@ export default function Aurora(props: AuroraProps) {
     const mesh = new Mesh(gl, { geometry, program });
     ctn.appendChild(gl.canvas);
 
-    let animateId = 0;
-    const update = (t: number) => {
-      animateId = requestAnimationFrame(update);
+    const draw = (t: number) => {
       const { time = t * 0.01, speed = 1.0 } = propsRef.current;
       if (program) {
         program.uniforms.uTime.value = time * speed * 0.1;
         program.uniforms.uAmplitude.value = propsRef.current.amplitude ?? 1.0;
         program.uniforms.uBlend.value = propsRef.current.blend ?? blend;
         program.uniforms.uLightMode.value = (propsRef.current.lightMode ?? lightMode) ? 1 : 0;
-        const stops = propsRef.current.colorStops ?? colorStops;
-        program.uniforms.uColorStops.value = stops.map((hex: string) => {
-          const c = new Color(hex);
-          return [c.r, c.g, c.b];
-        });
+        program.uniforms.uColorStops.value = stopsRef.current;
         renderer.render({ scene: mesh });
       }
     };
-    animateId = requestAnimationFrame(update);
+    // Frame statis untuk reduced-motion (waktu tetap agar bentuk aurora tetap terlihat).
+    const STATIC_T = 4000;
+    drawRef.current = reduced ? () => draw(STATIC_T) : null;
+
+    function resize() {
+      if (!ctn) return;
+      const width = ctn.offsetWidth;
+      const height = ctn.offsetHeight;
+      renderer.setSize(width, height);
+      if (program) {
+        program.uniforms.uResolution.value = [width, height];
+      }
+      if (reduced) draw(STATIC_T);
+    }
+    window.addEventListener('resize', resize);
+
+    // Loop rAF hanya jalan saat kanvas terlihat di viewport dan tab aktif.
+    let animateId = 0;
+    let visible = true;
+    const update = (t: number) => {
+      animateId = requestAnimationFrame(update);
+      draw(t);
+    };
+    const sync = () => {
+      const run = !reduced && visible && document.visibilityState === 'visible';
+      if (run && !animateId) animateId = requestAnimationFrame(update);
+      else if (!run && animateId) {
+        cancelAnimationFrame(animateId);
+        animateId = 0;
+      }
+    };
+    const io = typeof IntersectionObserver !== 'undefined'
+      ? new IntersectionObserver(([entry]) => {
+          visible = entry.isIntersecting;
+          sync();
+        })
+      : null;
+    io?.observe(ctn);
+    document.addEventListener('visibilitychange', sync);
 
     resize();
+    sync();
 
     return () => {
       cancelAnimationFrame(animateId);
+      io?.disconnect();
+      document.removeEventListener('visibilitychange', sync);
       window.removeEventListener('resize', resize);
+      drawRef.current = null;
       if (ctn && gl.canvas.parentNode === ctn) {
         ctn.removeChild(gl.canvas);
       }
       gl.getExtension('WEBGL_lose_context')?.loseContext();
     };
   }, [amplitude]);
+
+  // Mode statis: gambar ulang sekali bila warna/blend/mode berubah.
+  useEffect(() => {
+    drawRef.current?.();
+  }, [stops, blend, lightMode]);
 
   return <div ref={ctnDom} className="w-full h-full" />;
 }

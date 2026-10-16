@@ -1,4 +1,5 @@
 import { useAuth } from '@/stores/auth';
+import { queryClient } from '@/lib/queryClient';
 
 /** Error RFC 9457 dari gateway/service. */
 export class ApiError extends Error {
@@ -6,8 +7,16 @@ export class ApiError extends Error {
     public status: number,
     public problem: { title?: string; detail?: string; errors?: { path: string; message: string }[]; [k: string]: unknown },
   ) {
-    super(problem.detail ?? problem.title ?? `HTTP ${status}`);
+    super(problemMessage(status, problem));
   }
+}
+
+/** Pesan jelas untuk 503 dari gateway saat mode pemeliharaan / modul dimatikan Super Admin (docs/API.md §9). */
+function problemMessage(status: number, p: { title?: string; detail?: string; [k: string]: unknown }) {
+  const type = typeof p.type === 'string' ? p.type : '';
+  if (status === 503 && type.endsWith('/maintenance')) return `Sedang pemeliharaan — ${p.detail ?? 'transaksi ditutup sementara. Coba lagi nanti.'}`;
+  if (status === 503 && type.endsWith('/module-disabled')) return `Fitur ini sedang dinonaktifkan sementara oleh admin.${p.detail ? ' ' + p.detail : ''}`;
+  return p.detail ?? p.title ?? `HTTP ${status}`;
 }
 
 type Opts = {
@@ -18,32 +27,51 @@ type Opts = {
   idempotencyKey?: string | true;
   auth?: boolean; // default true bila ada token
   raw?: boolean;
+  /** Teruskan ke fetch: permintaan tetap terkirim saat halaman ditutup (flush event pagehide). */
+  keepalive?: boolean;
 };
 
 let refreshing: Promise<boolean> | null = null;
 
+/** Satu refresh pada satu waktu di SEMUA tab (Web Locks); tanpa dukungan → per tab saja. */
+function withRefreshLock(fn: () => Promise<boolean>): Promise<boolean> {
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+  return locks?.request ? (locks.request('gema-auth-refresh', fn) as unknown as Promise<boolean>) : fn();
+}
+
+/**
+ * Perbarui access token. Refresh token berotasi dan pemakaian ulang dianggap pencurian (IAM mencabut seluruh family),
+ * jadi: (1) dikunci lintas tab, (2) token terbaru dibaca ulang dari storage — bila tab lain baru saja menyegarkan,
+ * hasilnya yang dipakai, bukan menukar token lama, (3) sesi hanya dihapus bila server menolak tokennya (400/401/403);
+ * gangguan sementara (5xx, 429, jaringan) membiarkan sesi tetap ada.
+ */
 async function refreshToken(): Promise<boolean> {
-  const { refreshToken: rt, setSession, clear } = useAuth.getState();
-  if (!rt) return false;
-  refreshing ??= (async () => {
+  if (!useAuth.getState().refreshToken) return false;
+  refreshing ??= withRefreshLock(async () => {
+    const before = useAuth.getState().refreshToken;
+    await useAuth.persist.rehydrate();
+    const rt = useAuth.getState().refreshToken;
+    if (!rt) return false;
+    if (rt !== before) return true; // tab lain sudah menyegarkan sesi
     try {
       const res = await fetch('/v1/auth/token', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: rt }),
       });
-      if (!res.ok) {
-        clear();
+      if (res.status === 400 || res.status === 401 || res.status === 403) {
+        useAuth.getState().clear();
+        // Sesi berakhir: buang data milik pengguna sebelumnya dari cache.
+        queryClient.clear();
         return false;
       }
-      setSession(await res.json());
+      if (!res.ok) return false;
+      useAuth.getState().setSession(await res.json());
       return true;
     } catch {
       return false;
-    } finally {
-      setTimeout(() => (refreshing = null), 0);
     }
-  })();
+  }).finally(() => setTimeout(() => (refreshing = null), 0));
   return refreshing;
 }
 
@@ -62,6 +90,7 @@ export async function api<T = any>(path: string, opts: Opts = {}): Promise<T> {
       method: opts.method ?? (opts.body !== undefined ? 'POST' : 'GET'),
       headers,
       body: opts.body === undefined ? undefined : opts.body instanceof Blob ? opts.body : JSON.stringify(opts.body),
+      keepalive: opts.keepalive,
     });
   };
   // Idempotency key harus sama saat retry setelah refresh token.

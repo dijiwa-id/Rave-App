@@ -1,19 +1,20 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Lock, PlusCircle } from 'lucide-react';
+import { Lock } from 'lucide-react';
 import { api, fmt } from '@/lib/api';
 import type { Episode, Show } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
+import { useShallow } from 'zustand/react/shallow';
 import { usePlayer } from '@/stores/player';
 import { colorFor, DarkError, PlayFab } from '@/components/fan';
-import { PageLoader, toast } from '@/components/ui';
+import { PageLoader } from '@/components/ui';
 import { episodeToPlayable } from './ShowPage';
 
 /** Episode (mockup Spotify 7 & 10): header warna, tombol play hijau, deskripsi, paywall premium. */
 export default function EpisodePage() {
   const { id = '' } = useParams();
   const user = useAuth((s) => s.user);
-  const { current, playing, toggle, playOne, error } = usePlayer();
+  const { current, playing, toggle, playOne, error } = usePlayer(useShallow((s) => ({ current: s.current, playing: s.playing, toggle: s.toggle, playOne: s.playOne, error: s.error })));
   const q = useQuery({ queryKey: ['episode', id], queryFn: () => api<Episode & { show: Show }>(`/v1/catalog/episodes/${id}`) });
   if (q.isLoading) return <PageLoader />;
   if (q.isError || !q.data) return <DarkError error={q.error} retry={() => q.refetch()} />;
@@ -48,9 +49,6 @@ export default function EpisodePage() {
           ) : (
             <PlayFab size="lg" playing={isCurrent && playing} onClick={() => (isCurrent ? toggle() : playOne(episodeToPlayable(e, e.show)))} />
           )}
-          <button onClick={() => toast.success('Disimpan ke Episode Kamu')} aria-label="Simpan episode" className="text-gema-muted hover:text-white">
-            <PlusCircle className="size-8" />
-          </button>
         </div>
         {(locked || (isCurrent && error?.includes('Premium'))) && (
           <div className="mt-8 max-w-2xl rounded-xl bg-gradient-to-r from-[#1e70e0] to-[#7c3aed] p-6">

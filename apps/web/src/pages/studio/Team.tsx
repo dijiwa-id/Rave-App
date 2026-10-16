@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
-import { api, fmt } from '@/lib/api';
+import { api, fmt, forceRefresh } from '@/lib/api';
+import type { Me } from '@/lib/types';
 import { Badge, Button, Card, Field, Input, PageHeader, Select, toast } from '@/components/ui';
 import { QueryState, Table, useCurrentArtist } from '@/components/b2b/common';
+import { KycForm } from '@/components/b2b/OrgOnboarding';
+import { useModule } from '@/components/ModuleGate';
+import { managementOrgs, useAuth } from '@/stores/auth';
 
 interface OrgDetail {
   id: string;
@@ -11,6 +15,77 @@ interface OrgDetail {
   type: string;
   verified: boolean;
   members: { user_id?: string; id?: string; display_name?: string; email: string; role: string; joined_at?: string; created_at?: string }[];
+  managed_by?: { id: string; name: string }[];
+}
+
+/**
+ * Manajemen artis (REQ-IAM-03): daftar manajemen yang mengelola artis ini + tautkan ke roster.
+ * Backend mensyaratkan requester OWNER manajemen sekaligus OWNER/ADMIN org artis — alurnya: artis mengundang
+ * manajer sebagai Admin di panel Anggota, lalu manajer menautkan dari sini.
+ */
+function ManagementPanel({ orgId, myRole }: { orgId: string; myRole?: string }) {
+  const qc = useQueryClient();
+  const user = useAuth((s) => s.user);
+  const q = useQuery({ queryKey: ['org', orgId], queryFn: () => api<OrgDetail>(`/v1/orgs/${orgId}`) });
+  const linked = new Set((q.data?.managed_by ?? []).map((m) => m.id));
+  const candidates = managementOrgs(user).filter((m) => !linked.has(m.id));
+  const [mgmt, setMgmt] = useState('');
+  const [busy, setBusy] = useState(false);
+  const canLink = ['OWNER', 'ADMIN'].includes(myRole ?? '');
+  async function link() {
+    setBusy(true);
+    try {
+      await api(`/v1/orgs/${mgmt || candidates[0].id}/manage-artist`, { body: { artist_org_id: orgId } });
+      await forceRefresh();
+      useAuth.getState().setUser(await api<Me>('/v1/me'));
+      qc.invalidateQueries({ queryKey: ['org', orgId] });
+      toast.success('Artis masuk roster manajemen');
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card title="Manajemen">
+      <QueryState q={q}>
+        {q.data?.managed_by?.length ? (
+          <ul className="space-y-1 text-sm">
+            {q.data.managed_by.map((m) => (
+              <li key={m.id} className="flex items-center justify-between">
+                <span className="font-semibold">{m.name}</span>
+                <Badge tone="purple">Mengelola artis ini</Badge>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-b2b-muted">Artis ini belum dikelola manajemen.</p>
+        )}
+      </QueryState>
+      {canLink && candidates.length > 0 ? (
+        <div className="mt-4 flex flex-wrap items-end gap-2">
+          <div className="min-w-56 flex-1">
+            <Field label="Tautkan ke roster manajemen Anda">
+              <Select value={mgmt || candidates[0].id} onChange={(e) => setMgmt(e.target.value)}>
+                {candidates.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <Button variant="ink" loading={busy} onClick={link}>
+            Tautkan
+          </Button>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-b2b-muted">
+          Ingin dikelola manajemen? Undang manajer Anda sebagai <strong>Admin</strong> di panel Anggota; manajer lalu menautkan artis ini ke rosternya dari halaman ini.
+        </p>
+      )}
+    </Card>
+  );
 }
 
 /** Anggota organisasi + undangan (REQ-IAM-03). */
@@ -131,12 +206,15 @@ function FeeSplits({ artistId }: { artistId: string }) {
 
 export default function StudioTeam() {
   const artist = useCurrentArtist()!;
+  const booking = useModule('booking');
   return (
     <div>
-      <PageHeader title="Tim & Split Fee" subtitle="Satu manajemen dapat mengelola banyak artis; satu artis dapat punya manajemen dan label." />
+      <PageHeader title="Tim, Split Fee & KYC" subtitle="Satu manajemen dapat mengelola banyak artis; satu artis dapat punya manajemen dan label." />
       <div className="grid gap-6 lg:grid-cols-2">
         <TeamPanel orgId={artist.id} myRole={artist.role} />
-        <FeeSplits artistId={artist.artist_id!} />
+        {booking && <FeeSplits artistId={artist.artist_id!} />}
+        <ManagementPanel orgId={artist.id} myRole={artist.role} />
+        <KycForm compact orgId={artist.id} nextLink={null} />
       </div>
     </div>
   );

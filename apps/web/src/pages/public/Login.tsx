@@ -5,9 +5,10 @@ import { AppleLogo, Facebook } from '@/components/fan/BrandIcons';
 import CodeSlots, { type CodeSlotsStatus } from '@/components/reactbits/CodeSlots';
 import { api } from '@/lib/api';
 import type { TokenResponse } from '@/lib/types';
-import { useAuth } from '@/stores/auth';
+import { isSuperAdmin, useAuth } from '@/stores/auth';
 import { GemaLogo } from '@/components/ui/GemaLogo';
 import { toast } from '@/components/ui';
+import { setting, usePlatformConfig } from '@/lib/platform';
 
 const DEMO = [
   ['fan@gema.id', 'Fan'],
@@ -15,6 +16,7 @@ const DEMO = [
   ['manajer@gema.id', 'Manajer'],
   ['promotor@gema.id', 'Promotor'],
   ['admin@gema.id', 'Admin'],
+  ['superadmin@gema.id', 'Super Admin'],
 ] as const;
 
 function GoogleG() {
@@ -32,7 +34,9 @@ export default function Login() {
   const [params] = useSearchParams();
   const nav = useNavigate();
   const setSession = useAuth((s) => s.setSession);
-  const signup = params.get('signup') === '1';
+  // Super Admin bisa menutup pendaftaran (general.registrations_open) — IAM menolak akun baru, jadi jangan menjanjikannya.
+  const registrationsOpen = setting(usePlatformConfig(), 'general.registrations_open', true);
+  const signup = params.get('signup') === '1' && registrationsOpen;
   const [step, setStep] = useState<'email' | 'otp'>('email');
   const [email, setEmail] = useState('');
   const [devCode, setDevCode] = useState<string | null>(null);
@@ -43,7 +47,9 @@ export default function Login() {
   function done(t: TokenResponse) {
     setSession(t);
     const next = params.get('next');
-    nav(!t.user.onboarded ? `/onboarding${next ? `?next=${encodeURIComponent(next)}` : ''}` : next || '/app', { replace: true });
+    // Tanpa ?next: Super Admin → dasbor platform, admin → Back Office, lainnya → aplikasi dengar.
+    const home = isSuperAdmin(t.user) ? '/admin/platform' : t.user.roles.includes('admin') ? '/admin' : '/app';
+    nav(!t.user.onboarded ? `/onboarding?next=${encodeURIComponent(next || home)}` : next || home, { replace: true });
   }
 
   async function requestOtp(dest: string) {
@@ -137,9 +143,11 @@ export default function Login() {
                   className="h-12 w-full rounded border border-neutral-400 px-3.5 focus:border-black focus:outline-none"
                 />
               </label>
-              <p className="text-xs text-neutral-500">Kami akan mengirim kode 6 digit ke email ini. Belum punya akun? Akun dibuat otomatis saat pertama masuk.</p>
+              <p className="text-xs text-neutral-500">Kami akan mengirim kode 6 digit ke email ini.{' '}
+                {registrationsOpen ? 'Belum punya akun? Akun dibuat otomatis saat pertama masuk.' : 'Pendaftaran akun baru sedang ditutup — hanya akun yang sudah terdaftar yang bisa masuk.'}
+              </p>
               <div className="flex justify-end">
-                <button disabled={busy} className="h-12 rounded-full bg-gema-green px-10 text-sm font-bold tracking-[0.1em] text-black uppercase transition hover:scale-105 disabled:opacity-60">
+                <button disabled={busy} className="h-12 rounded-full bg-gema-primary px-10 text-sm font-bold tracking-[0.1em] text-white uppercase transition hover:scale-105 disabled:opacity-60">
                   {busy ? 'Mengirim…' : 'Kirim kode'}
                 </button>
               </div>
@@ -178,7 +186,7 @@ export default function Login() {
                 status={status}
                 autoFocus
                 disabled={busy}
-                accentColor="#1ed760"
+                accentColor="#DA1C5C"
                 inkColor="#111111"
                 slotColor="#f2f2f2"
                 ariaLabel="Kode OTP"

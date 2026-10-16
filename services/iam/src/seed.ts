@@ -39,6 +39,9 @@ export async function seed({ db, log }: ServiceContext) {
     await user(tx, U.manager, E.manager, 'Dimas Manajer', { city: 'Jakarta', onboarded: true });
     await user(tx, U.promotor, E.promotor, 'Laras Promotor', { city: 'Jakarta', onboarded: true });
     await user(tx, U.admin, E.admin, 'Admin GEMA', { city: 'Jakarta', onboarded: true, is_admin: true });
+    await user(tx, U.superadmin, E.superadmin, 'Super Admin GEMA', { city: 'Jakarta', onboarded: true, is_admin: true });
+    await tx.query(`UPDATE users SET admin_role = 'OPS' WHERE id = $1 AND admin_role IS NULL`, [U.admin]);
+    await tx.query(`UPDATE users SET admin_role = 'SUPER_ADMIN' WHERE id = $1`, [U.superadmin]);
 
     if (fanNew) {
       const follow = [SEED.artists[0].id, SEED.artists[1].id, SEED.artists[5].id];
@@ -93,5 +96,5 @@ export async function seed({ db, log }: ServiceContext) {
     for (const p of ['personalization', 'aggregate_sharing'])
       await tx.query(`INSERT INTO consents (user_id, purpose, policy_version, granted) VALUES ($1,$2,'v1-2026-10',true) ON CONFLICT DO NOTHING`, [U.fan, p]);
   });
-  log.info('seed iam: 5 user, 11 org');
+  log.info('seed iam: 6 user (termasuk super admin), 11 org');
 }

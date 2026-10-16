@@ -6,8 +6,10 @@ import SlideCommit from '@/components/reactbits/SlideCommit';
 import { api, fmt } from '@/lib/api';
 import type { EventDetail as EventDetailT, Invoice, Order } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
-import { DarkError } from '@/components/fan';
+import { colorFor, DarkError } from '@/components/fan';
 import { cx, Modal, PageLoader, toast } from '@/components/ui';
+import { EventLiveCard } from '@/components/live/EventLiveCard';
+import { setting, usePlatformConfig } from '@/lib/platform';
 
 const METHODS = [
   ['QRIS', 'QRIS'],
@@ -62,7 +64,7 @@ function Checkout({ order, invoice, onClose }: { order: Order; invoice: Invoice;
         <legend className="mb-2 text-sm font-bold">Metode pembayaran</legend>
         <div className="grid grid-cols-2 gap-2">
           {METHODS.map(([v, l]) => (
-            <button key={v} type="button" onClick={() => setMethod(v)} aria-pressed={method === v} className={cx('rounded-lg border px-3 py-2.5 text-sm font-bold', method === v ? 'border-gema-green bg-gema-green/10 text-gema-green' : 'border-white/20 hover:border-white/50')}>
+            <button key={v} type="button" onClick={() => setMethod(v)} aria-pressed={method === v} className={cx('rounded-lg border px-3 py-2.5 text-sm font-bold', method === v ? 'border-gema-primary bg-gema-primary/10 text-gema-primary-text' : 'border-white/20 hover:border-white/50')}>
               {l}
             </button>
           ))}
@@ -82,15 +84,30 @@ function Checkout({ order, invoice, onClose }: { order: Order; invoice: Invoice;
           }}
           onError={(e) => toast.error(e)}
           width={340}
-          handleColor="#1ed760"
-          successColor="#1ed760"
+          handleColor="#DA1C5C"
+          successColor="#DA1C5C"
         />
       </div>
       <p className="flex items-start gap-2 text-xs text-gema-muted">
-        <ShieldCheck className="size-4 shrink-0 text-gema-green" />
+        <ShieldCheck className="size-4 shrink-0 text-gema-primary-text" />
         Sandbox pembayaran (dev). Dana tiket ditahan dan dicairkan ke promotor setelah acara selesai.
       </p>
     </div>
+  );
+}
+
+/** Ringkasan kebijakan refund platform (`refund.*`) — ditampilkan sebelum pembeli membayar. */
+function RefundPolicyNote() {
+  const cfg = usePlatformConfig();
+  const buyer = setting<boolean>(cfg, 'refund.buyer_request_enabled', false);
+  const pct = setting<number>(cfg, 'refund.buyer_refund_pct', 80);
+  const days = setting<number>(cfg, 'refund.buyer_deadline_days', 7);
+  const sla = setting<number>(cfg, 'refund.event_cancel_sla_days', 14);
+  return (
+    <p className="mt-3 text-xs leading-relaxed text-gema-muted">
+      {buyer ? `Refund ${pct}% harga tiket bisa diajukan sampai H-${days}. ` : 'Tiket tidak dapat direfund atas permintaan sendiri. '}
+      Event batal atau jadwal berubah: refund penuh termasuk biaya layanan, maks. {sla} hari. QR dinamis tidak dapat di-screenshot.
+    </p>
   );
 }
 
@@ -132,10 +149,21 @@ export default function EventDetail() {
   return (
     <div className="min-h-full pb-12">
       <header className="relative overflow-hidden px-4 pt-24 pb-10 md:px-8">
-        <img src={e.poster_url ?? `https://picsum.photos/seed/gema-ev-${e.id}/1200/600`} alt="" className="absolute inset-0 size-full scale-110 object-cover opacity-40 blur-2xl" />
+        {/* Tanpa poster: gradien lokal deterministik (bukan gambar eksternal). */}
+        {e.poster_url ? (
+          <img src={e.poster_url} alt="" className="absolute inset-0 size-full scale-110 object-cover opacity-40 blur-2xl" />
+        ) : (
+          <div className="absolute inset-0 opacity-60" style={{ background: `linear-gradient(135deg, ${colorFor(e.id)}, ${colorFor(e.slug)}66)` }} />
+        )}
         <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#121212]" />
         <div className="relative flex flex-col gap-8 md:flex-row md:items-end">
-          <img src={e.poster_url ?? `https://picsum.photos/seed/gema-ev-${e.id}/600/600`} alt={`Poster ${e.title}`} className="size-56 rounded-lg object-cover shadow-2xl md:size-72" />
+          {e.poster_url ? (
+            <img src={e.poster_url} alt={`Poster ${e.title}`} className="size-56 rounded-lg object-cover shadow-2xl md:size-72" />
+          ) : (
+            <div role="img" aria-label={`Poster ${e.title}`} className="grid size-56 shrink-0 place-items-center rounded-lg shadow-2xl md:size-72" style={{ background: `linear-gradient(135deg, ${colorFor(e.id)}, ${colorFor(e.slug)})` }}>
+              <Ticket className="size-16 text-white/70" />
+            </div>
+          )}
           <div>
             <p className="text-sm font-bold">Event</p>
             <h1 className="my-3 text-4xl font-black tracking-tighter md:text-6xl">{e.title}</h1>
@@ -175,7 +203,7 @@ export default function EventDetail() {
             <div className="rounded-lg bg-white/5 p-5">
               <p className="font-bold">{e.venue_name}</p>
               <p className="text-sm text-gema-muted">{e.venue_address}</p>
-              <a href={`https://www.google.com/maps/search/${encodeURIComponent(`${e.venue_name} ${e.venue_address} ${e.city}`)}`} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-bold text-gema-green hover:underline">
+              <a href={`https://www.google.com/maps/search/${encodeURIComponent(`${e.venue_name} ${e.venue_address} ${e.city}`)}`} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-bold text-gema-primary-text hover:underline">
                 Buka di peta →
               </a>
             </div>
@@ -191,10 +219,21 @@ export default function EventDetail() {
         </div>
 
         <aside className="lg:sticky lg:top-20 lg:self-start">
+          <EventLiveCard eventId={e.id} />
           <div className="rounded-xl bg-gema-elevated p-5">
             <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
               <Ticket className="size-5" /> Tiket
             </h2>
+            {e.status !== 'PUBLISHED' ? (
+              <p className="text-sm text-gema-muted">
+                {e.status === 'CANCELLED'
+                  ? 'Event ini dibatalkan penyelenggara. Pemegang tiket menerima refund penuh secara otomatis.'
+                  : e.status === 'COMPLETED'
+                    ? 'Event ini sudah selesai.'
+                    : 'Penjualan tiket belum dibuka.'}
+              </p>
+            ) : (
+            <>
             {!e.ticket_types.length && <p className="text-sm text-gema-muted">Penjualan tiket belum dibuka.</p>}
             <ul className="space-y-3">
               {e.ticket_types.map((t) => {
@@ -208,7 +247,7 @@ export default function EventDetail() {
                       <div>
                         <p className="font-bold">
                           {t.name}
-                          {t.presale && <span className="ml-2 rounded bg-gema-green/20 px-1.5 py-0.5 text-[10px] font-bold text-gema-green uppercase">Presale fan</span>}
+                          {t.presale && <span className="ml-2 rounded bg-gema-primary/20 px-1.5 py-0.5 text-[10px] font-bold text-gema-primary-text uppercase">Presale fan</span>}
                         </p>
                         <p className="text-sm">{fmt.idr(t.price)}</p>
                         <p className="text-xs text-gema-muted">
@@ -235,10 +274,12 @@ export default function EventDetail() {
               <span className="text-sm text-gema-muted">{count} tiket</span>
               <span className="text-lg font-black">{fmt.idr(total)}</span>
             </div>
-            <button disabled={!count || busy} onClick={order} className="mt-4 w-full rounded-full bg-gema-green py-3.5 font-bold text-black transition hover:scale-[1.02] disabled:opacity-40">
+            <button disabled={!count || busy} onClick={order} className="mt-4 w-full rounded-full bg-gema-primary py-3.5 font-bold text-white transition hover:scale-[1.02] disabled:opacity-40">
               {busy ? 'Menahan kuota…' : token ? 'Beli tiket' : 'Masuk untuk membeli'}
             </button>
-            <p className="mt-3 text-xs text-gema-muted">Kebijakan refund mengikuti promotor dan ditampilkan sebelum pembayaran. Tiket QR dinamis tidak dapat di-screenshot.</p>
+            <RefundPolicyNote />
+            </>
+            )}
           </div>
         </aside>
       </div>

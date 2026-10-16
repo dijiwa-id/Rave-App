@@ -34,7 +34,7 @@ export default function Discover() {
           e.preventDefault();
           setApplied(f);
         }}
-        className="mb-6 grid gap-3 rounded-xl border border-b2b-line bg-white p-4 sm:grid-cols-3 lg:grid-cols-7 lg:items-end"
+        className="mb-6 grid gap-3 rounded-xl border border-b2b-line bg-b2b-card p-4 sm:grid-cols-3 lg:grid-cols-7 lg:items-end"
       >
         <Field label="Kota acara">
           <Select value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })}>
@@ -91,10 +91,10 @@ export default function Discover() {
       <QueryState q={q} empty={q.data && !rows.length ? <Empty title="Tidak ada artis yang cocok" body="Longgarkan filter budget atau tanggal." /> : undefined}>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {rows.map((r) => (
-            <SpotlightCard key={r.artist.id} className="rounded-2xl! border-b2b-line! bg-white! p-0!" spotlightColor="rgba(30, 215, 96, 0.14)">
+            <SpotlightCard key={r.artist.id} className="rounded-2xl! border-b2b-line! bg-b2b-card! p-0!" spotlightColor="rgba(218, 28, 92, 0.14)">
               <div className="p-5">
                 <div className="flex items-start gap-4">
-                  {r.artist.image_url ? <img src={r.artist.image_url} alt="" className="size-16 rounded-xl object-cover" /> : <div className="size-16 rounded-xl bg-b2b-bg" />}
+                  {r.artist.image_url ? <img src={r.artist.image_url} alt="" loading="lazy" decoding="async" width={64} height={64} className="size-16 rounded-xl object-cover" /> : <div className="size-16 rounded-xl bg-b2b-bg" />}
                   <div className="min-w-0 flex-1">
                     <Link to={`/promotor/artists/${r.artist.id}`} className="flex items-center gap-1 text-lg font-extrabold text-b2b-ink hover:underline">
                       <span className="truncate">{r.artist.name}</span>

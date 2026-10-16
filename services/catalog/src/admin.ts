@@ -1,13 +1,18 @@
 import type { FastifyInstance } from 'fastify';
-import { audit, conflict, forbidden, notFound, publish, requireRole, unauthorized, z, type Client, type Job, type ServiceContext } from '@gema/service-kit';
+import { audit, conflict, forbidden, notFound, publish, requirePermission, unauthorized, z, type Client, type Job, type ServiceContext } from '@gema/service-kit';
 import { isUuid, releaseFull } from './queries.js';
 
 /** Tanggal hari ini di WIB (rilis default 00:00 WIB, §7.4). */
 const todayWib = () => new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
 
 export async function goLive(tx: Client, releaseId: string) {
-  const r = await tx.query(`UPDATE releases SET status = 'LIVE', published_at = now(), updated_at = now() WHERE id = $1 RETURNING id, artist_id, title`, [releaseId]);
+  // Kondisional pada status: replika lain / klik ganda tidak menayangkan (dan mengumumkan) rilis yang sama dua kali.
+  const r = await tx.query(
+    `UPDATE releases SET status = 'LIVE', published_at = now(), updated_at = now() WHERE id = $1 AND status IN ('SCHEDULED','IN_REVIEW') RETURNING id, artist_id, title`,
+    [releaseId],
+  );
   const rel = r.rows[0];
+  if (!rel) return false;
   const t = await tx.query(`SELECT id FROM tracks WHERE release_id = $1 ORDER BY track_number`, [releaseId]);
   await publish(tx, 'catalog.release.published', releaseId, {
     releaseId,
@@ -15,12 +20,13 @@ export async function goLive(tx: Client, releaseId: string) {
     title: rel.title,
     trackIds: t.rows.map((x) => x.id),
   });
+  return true;
 }
 
 export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) {
   // ---------- QC konten (REQ-ADM-02) ----------
   app.register(async (s) => {
-    s.addHook('preHandler', requireRole('admin'));
+    s.addHook('preHandler', requirePermission('qc.review'));
 
     s.get('/v1/admin/qc/releases', async (req) => {
       const { status = 'IN_REVIEW' } = req.query as { status?: string };
@@ -101,6 +107,21 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
       return e;
     });
 
+    // File di bucket uploads yang masih dipakai (panel storage Super Admin → deteksi file yatim).
+    // Upload < 24 jam dianggap dipakai: mungkin masih dalam draf yang sedang disusun.
+    s.get('/internal/media/references', async () => {
+      const rows = await db.query(
+        `SELECT u FROM (
+           SELECT image_url AS u FROM artists UNION ALL SELECT cover_url FROM artists
+           UNION ALL SELECT cover_url FROM releases UNION ALL SELECT audio_url FROM tracks
+           UNION ALL SELECT cover_url FROM shows UNION ALL SELECT audio_url FROM episodes UNION ALL SELECT cover_url FROM episodes
+           UNION ALL SELECT image_url FROM categories
+         ) x WHERE u LIKE '%/v1/catalog/media/%'
+         UNION SELECT '/v1/catalog/media/' || stored_name FROM uploads WHERE created_at > now() - interval '24 hours'`,
+      );
+      return { files: [...new Set(rows.map((r) => String(r.u).split('/v1/catalog/media/')[1].split(/[?#]/)[0]))] };
+    });
+
     s.get('/internal/artists/:id', async (req) => {
       const { id } = req.params as { id: string };
       const a = await db.one(`SELECT id, org_id, slug, name, image_url, city, genres, verified, monthly_listeners, followers FROM artists WHERE id = $1`, [id]);
@@ -117,8 +138,7 @@ export const scheduledReleaseJob: Job = {
   async run({ db, log }) {
     const due = await db.query(`SELECT id FROM releases WHERE status = 'SCHEDULED' AND release_date <= $1::date`, [todayWib()]);
     for (const { id } of due) {
-      await db.tx((tx) => goLive(tx, id));
-      log.info({ releaseId: id }, 'rilis terjadwal tayang');
+      if (await db.tx((tx) => goLive(tx, id))) log.info({ releaseId: id }, 'rilis terjadwal tayang');
     }
   },
 };

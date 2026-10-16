@@ -25,6 +25,12 @@ const svc = createService({
   migrationsDir: new URL('../migrations/', import.meta.url),
   routes,
   consumers,
+  stats: async ({ db }) => (await db.one(
+    `SELECT (SELECT count(*) FROM playlists)::int AS playlists,
+              (SELECT count(*) FROM likes)::int AS likes,
+              (SELECT count(*) FROM follows)::int AS follows,
+              (SELECT count(*) FROM listening_history WHERE played_at > now() - interval '1 day')::int AS history_24h`,
+  )) ?? {},
   seed,
 });
 

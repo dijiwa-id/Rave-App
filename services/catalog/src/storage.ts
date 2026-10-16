@@ -1,10 +1,17 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { Db } from '@gema/service-kit';
 
 /** Penyimpanan upload dev (<root>/storage/uploads). Produksi: bucket quarantine via presigned URL (TDD §11.3). */
 export const UPLOAD_DIR = process.env.UPLOAD_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'storage', 'uploads');
 mkdirSync(UPLOAD_DIR, { recursive: true });
+
+/** Total byte upload selesai (untuk kuota) — dari tabel uploads, bukan readdir/stat seluruh bucket. Produksi: metrik object storage. */
+export async function uploadsBytes(db: Db): Promise<number> {
+  const r = await db.one<{ b: string }>(`SELECT coalesce(sum(size), 0)::bigint AS b FROM uploads WHERE completed_at IS NOT NULL`);
+  return Number(r?.b ?? 0);
+}
 
 /** Baca dimensi PNG/JPEG dari header (validasi artwork REQ-STU-01) tanpa dependensi. */
 export function imageSize(buf: Buffer): { width: number; height: number } | null {

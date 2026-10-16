@@ -5,10 +5,13 @@ import { BadgeCheck, CalendarDays, ExternalLink, MapPin } from 'lucide-react';
 import { api, fmt } from '@/lib/api';
 import type { Artist, EventSummary, Paged } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
+import { useShallow } from 'zustand/react/shallow';
 import { trackToPlayable, usePlayer } from '@/stores/player';
 import { DarkError, MediaCard, PlayFab, Shelf, TrackTable } from '@/components/fan';
 import { usePlayMedia } from '@/components/fan/usePlayMedia';
 import { cx, PageLoader, toast } from '@/components/ui';
+import { LivePill, liveHref, useLiveSettings, useLiveStreams } from '@/components/live/common';
+import { useModule } from '@/components/ModuleGate';
 
 export default function ArtistPage() {
   const { idOrSlug = '', slug } = useParams();
@@ -16,13 +19,16 @@ export default function ArtistPage() {
   const token = useAuth((s) => s.accessToken);
   const user = useAuth((s) => s.user);
   const qc = useQueryClient();
-  const { playQueue, current, playing, toggle } = usePlayer();
+  const { playQueue, current, playing, toggle } = usePlayer(useShallow((s) => ({ playQueue: s.playQueue, current: s.current, playing: s.playing, toggle: s.toggle })));
   const play = usePlayMedia();
   const [showAll, setShowAll] = useState(false);
   const q = useQuery({ queryKey: ['artist', key], queryFn: () => api<Artist>(`/v1/catalog/artists/${key}`) });
   const a = q.data;
   const follow = useQuery({ queryKey: ['follow', a?.id], queryFn: () => api<{ following: boolean }>(`/v1/library/follows/${a!.id}`), enabled: !!a && !!token });
-  const events = useQuery({ queryKey: ['events', 'artist', a?.id], queryFn: () => api<Paged<EventSummary>>('/v1/ticketing/events', { query: { artist_id: a!.id } }), enabled: !!a });
+  const liveOn = useLiveSettings().enabled;
+  const live = useLiveStreams({ status: 'live', artist_id: a?.id, limit: 1 }, { enabled: liveOn && !!a });
+  const ticketing = useModule('ticketing');
+  const events = useQuery({ queryKey: ['events', 'artist', a?.id], queryFn: () => api<Paged<EventSummary>>('/v1/ticketing/events', { query: { artist_id: a!.id } }), enabled: !!a && ticketing });
 
   if (q.isLoading) return <PageLoader />;
   if (q.isError || !a) return <DarkError error={q.error} retry={() => q.refetch()} />;
@@ -75,6 +81,17 @@ export default function ArtistPage() {
         </Link>
       </div>
 
+      {live.data?.data[0] && (
+        <Link to={liveHref(live.data.data[0])} className="mx-4 mb-8 flex items-center gap-4 rounded-xl bg-gradient-to-r from-red-700 to-red-900 p-4 transition hover:brightness-110 md:mx-8">
+          <LivePill viewers={live.data.data[0].viewers} interrupted={live.data.data[0].status === 'INTERRUPTED'} />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold tracking-widest uppercase">{a.name} LIVE sekarang</p>
+            <p className="truncate font-bold">{live.data.data[0].title}</p>
+          </div>
+          <span className="shrink-0 rounded-full bg-white px-4 py-1.5 text-sm font-bold text-black">Tonton</span>
+        </Link>
+      )}
+
       {near.length > 0 && (
         <section className="mx-4 mb-8 rounded-xl bg-gradient-to-r from-gema-pink/80 to-gema-purple/80 p-5 md:mx-8">
           <p className="text-xs font-bold tracking-widest uppercase">Manggung dekatmu</p>
@@ -106,6 +123,7 @@ export default function ArtistPage() {
           ))}
         </Shelf>
 
+        {ticketing && (
         <section className="mb-10">
           <h2 className="mb-4 text-2xl font-bold">Jadwal manggung</h2>
           {allEvents.length ? (
@@ -114,7 +132,7 @@ export default function ArtistPage() {
                 <li key={e.id}>
                   <Link to={`/app/events/${e.slug}`} className="flex items-center gap-4 rounded-md px-2 py-3 hover:bg-white/5">
                     <div className="w-14 shrink-0 rounded-md bg-white/10 py-1.5 text-center">
-                      <p className="text-xs font-bold text-gema-green uppercase">{new Date(e.starts_at).toLocaleDateString('id-ID', { month: 'short' })}</p>
+                      <p className="text-xs font-bold text-gema-primary-text uppercase">{new Date(e.starts_at).toLocaleDateString('id-ID', { month: 'short' })}</p>
                       <p className="text-xl font-black">{new Date(e.starts_at).getDate()}</p>
                     </div>
                     <div className="min-w-0 flex-1">
@@ -132,6 +150,7 @@ export default function ArtistPage() {
             <p className="text-gema-muted">Belum ada jadwal manggung terdekat.</p>
           )}
         </section>
+        )}
 
         {a.bio && (
           <section className="mb-10 max-w-3xl">

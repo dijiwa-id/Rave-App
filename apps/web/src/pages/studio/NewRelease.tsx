@@ -5,10 +5,12 @@ import { Plus, Trash2, Upload } from 'lucide-react';
 import Stepper, { Step } from '@/components/reactbits/Stepper';
 import { api, ApiError, fmt } from '@/lib/api';
 import type { Release } from '@/lib/types';
-import { Button, Field, Input, PageHeader, Select, toast } from '@/components/ui';
+import { Field, Input, PageHeader, Select, toast } from '@/components/ui';
 import { GENRES, useCurrentArtist } from '@/components/b2b/common';
 
+/** `key` = id stabil baris: unggahan yang selesai belakangan ditulis ke baris yang benar walau baris lain dihapus. */
 interface TrackDraft {
+  key: string;
   title: string;
   audio_url: string;
   duration_ms?: number;
@@ -16,6 +18,7 @@ interface TrackDraft {
   explicit: boolean;
   uploading?: boolean;
 }
+const newTrack = (): TrackDraft => ({ key: crypto.randomUUID(), title: '', audio_url: '', isrc: '', explicit: false });
 interface ShareDraft {
   party_name: string;
   email: string;
@@ -30,13 +33,21 @@ export async function uploadFile(file: File, kind: 'audio' | 'artwork'): Promise
   return r?.public_url ?? u.public_url;
 }
 
-function audioDuration(file: File): Promise<number | undefined> {
+export function audioDuration(file: File): Promise<number | undefined> {
   return new Promise((res) => {
     const a = new Audio();
     a.preload = 'metadata';
-    a.onloadedmetadata = () => res(Number.isFinite(a.duration) ? Math.round(a.duration * 1000) : undefined);
-    a.onerror = () => res(undefined);
-    a.src = URL.createObjectURL(file);
+    const src = URL.createObjectURL(file);
+    // Lepas object URL setelah metadata terbaca / gagal (cegah bocor memori).
+    a.onloadedmetadata = () => {
+      URL.revokeObjectURL(src);
+      res(Number.isFinite(a.duration) ? Math.round(a.duration * 1000) : undefined);
+    };
+    a.onerror = () => {
+      URL.revokeObjectURL(src);
+      res(undefined);
+    };
+    a.src = src;
   });
 }
 
@@ -75,7 +86,7 @@ export default function NewRelease() {
   const qc = useQueryClient();
   const [step, setStep] = useState(1);
   const [meta, setMeta] = useState({ title: '', type: 'SINGLE' as 'SINGLE' | 'EP' | 'ALBUM', release_date: new Date(Date.now() + 8 * 86400_000).toISOString().slice(0, 10), genre: GENRES[0], label: '', explicit: false });
-  const [tracks, setTracks] = useState<TrackDraft[]>([{ title: '', audio_url: '', isrc: '', explicit: false }]);
+  const [tracks, setTracks] = useState<TrackDraft[]>(() => [newTrack()]);
   const [cover, setCover] = useState({ url: '', uploading: false, warn: '' });
   const [master, setMaster] = useState<ShareDraft[]>([{ party_name: artist.name, email: '', pct: 100 }]);
   const [publishing, setPublishing] = useState<ShareDraft[]>([{ party_name: artist.name, email: '', pct: 100 }]);
@@ -91,23 +102,30 @@ export default function NewRelease() {
     5: true,
   };
 
-  async function onAudio(i: number, file: File) {
-    setTracks((t) => t.map((x, j) => (j === i ? { ...x, uploading: true, title: x.title || file.name.replace(/\.[^.]+$/, '') } : x)));
+  async function onAudio(key: string, file: File) {
+    setTracks((t) => t.map((x) => (x.key === key ? { ...x, uploading: true, title: x.title || file.name.replace(/\.[^.]+$/, '') } : x)));
     try {
       const [url, dur] = await Promise.all([uploadFile(file, 'audio'), audioDuration(file)]);
-      setTracks((t) => t.map((x, j) => (j === i ? { ...x, audio_url: url, duration_ms: dur, uploading: false } : x)));
+      setTracks((t) => t.map((x) => (x.key === key ? { ...x, audio_url: url, duration_ms: dur, uploading: false } : x)));
     } catch (e) {
       toast.error(e);
-      setTracks((t) => t.map((x, j) => (j === i ? { ...x, uploading: false } : x)));
+      setTracks((t) => t.map((x) => (x.key === key ? { ...x, uploading: false } : x)));
     }
   }
   async function onCover(file: File) {
     setCover({ url: '', uploading: true, warn: '' });
     const dims = await new Promise<number>((res) => {
       const im = new Image();
-      im.onload = () => res(Math.min(im.naturalWidth, im.naturalHeight));
-      im.onerror = () => res(0);
-      im.src = URL.createObjectURL(file);
+      const src = URL.createObjectURL(file);
+      im.onload = () => {
+        URL.revokeObjectURL(src);
+        res(Math.min(im.naturalWidth, im.naturalHeight));
+      };
+      im.onerror = () => {
+        URL.revokeObjectURL(src);
+        res(0);
+      };
+      im.src = src;
     });
     try {
       const url = await uploadFile(file, 'artwork');
@@ -161,14 +179,14 @@ export default function NewRelease() {
       <Stepper
         key={stepperKey}
         className="flex w-full flex-col"
-        stepCircleContainerClassName="max-w-3xl! bg-white border-b2b-line! shadow-none!"
+        stepCircleContainerClassName="max-w-3xl! bg-b2b-card border-b2b-line! shadow-none!"
         initialStep={stepperKey ? 5 : 1}
         onStepChange={setStep}
         onFinalStepCompleted={submit}
         backButtonText="Kembali"
         nextButtonText="Lanjut"
         disableStepIndicators
-        nextButtonProps={{ disabled: !valid[step] || submitting, className: 'rounded-full bg-b2b-ink px-5 py-2 text-sm font-bold text-white disabled:opacity-40' }}
+        nextButtonProps={{ disabled: !valid[step] || submitting, className: 'rounded-full bg-b2b-ink px-5 py-2 text-sm font-bold text-b2b-on-ink disabled:opacity-40' }}
       >
         <Step>
           <h2 className="mb-4 text-lg font-extrabold">1. Metadata</h2>
@@ -208,7 +226,7 @@ export default function NewRelease() {
           <h2 className="mb-4 text-lg font-extrabold">2. Lagu</h2>
           <div className="space-y-3">
             {tracks.map((t, i) => (
-              <div key={i} className="rounded-xl border border-b2b-line p-3">
+              <div key={t.key} className="rounded-xl border border-b2b-line p-3">
                 <div className="grid gap-2 sm:grid-cols-[32px_1fr_160px_32px] sm:items-center">
                   <span className="text-sm font-bold text-b2b-muted">{i + 1}</span>
                   <Input placeholder="Judul lagu" value={t.title} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} />
@@ -220,7 +238,7 @@ export default function NewRelease() {
                 <div className="mt-2 flex flex-wrap items-center gap-2 sm:pl-10">
                   <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-b2b-line px-3 py-1.5 text-xs font-bold hover:border-b2b-ink">
                     <Upload className="size-3.5" /> {t.uploading ? 'Mengunggah…' : 'Unggah master'}
-                    <input type="file" accept="audio/*,.wav,.flac" className="hidden" onChange={(e) => e.target.files?.[0] && void onAudio(i, e.target.files[0])} />
+                    <input type="file" accept="audio/*,.wav,.flac" className="hidden" onChange={(e) => e.target.files?.[0] && void onAudio(t.key, e.target.files[0])} />
                   </label>
                   <span className="text-xs text-b2b-muted">atau URL</span>
                   <Input className="max-w-sm py-1.5! text-xs" placeholder="https://…/master.flac" value={t.audio_url} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, audio_url: e.target.value } : x)))} />
@@ -233,7 +251,7 @@ export default function NewRelease() {
             ))}
           </div>
           {meta.type !== 'SINGLE' || tracks.length < 1 ? (
-            <button type="button" onClick={() => setTracks([...tracks, { title: '', audio_url: '', isrc: '', explicit: false }])} className="mt-3 flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
+            <button type="button" onClick={() => setTracks([...tracks, newTrack()])} className="mt-3 flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
               <Plus className="size-4" /> Tambah lagu
             </button>
           ) : null}
@@ -243,7 +261,7 @@ export default function NewRelease() {
           <div className="flex flex-wrap items-start gap-6">
             {cover.url ? <img src={cover.url} alt="Artwork" className="size-48 rounded-lg object-cover shadow" /> : <div className="grid size-48 place-items-center rounded-lg bg-b2b-bg text-sm text-b2b-muted">{cover.uploading ? 'Mengunggah…' : 'Belum ada artwork'}</div>}
             <div className="space-y-3">
-              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-b2b-ink px-4 py-2 text-sm font-bold text-white">
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-b2b-ink px-4 py-2 text-sm font-bold text-b2b-on-ink">
                 <Upload className="size-4" /> Unggah gambar
                 <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && void onCover(e.target.files[0])} />
               </label>

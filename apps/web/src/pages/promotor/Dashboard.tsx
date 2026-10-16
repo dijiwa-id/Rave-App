@@ -30,7 +30,7 @@ export function KycBanner() {
 
 function Num({ label, value, prefix }: { label: string; value?: number; prefix?: string }) {
   return (
-    <div className="rounded-xl border border-b2b-line bg-white p-4">
+    <div className="rounded-xl border border-b2b-line bg-b2b-card p-4">
       <p className="text-xs font-semibold tracking-wide text-b2b-muted uppercase">{label}</p>
       <p className="mt-1 text-2xl font-extrabold tabular-nums">
         {prefix}

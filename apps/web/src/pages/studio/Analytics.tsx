@@ -35,9 +35,9 @@ export default function Analytics() {
         subtitle="Diperbarui maksimal tiap 24 jam (hari ini near real-time). Data agregat — segmen < 50 pendengar digabung ke “Lainnya”."
         actions={
           <>
-            <div className="flex rounded-full border border-b2b-line bg-white p-0.5" role="radiogroup" aria-label="Rentang waktu">
+            <div className="flex rounded-full border border-b2b-line bg-b2b-card p-0.5" role="radiogroup" aria-label="Rentang waktu">
               {[7, 28, 90].map((d) => (
-                <button key={d} role="radio" aria-checked={days === d} onClick={() => setDays(d)} className={cx('rounded-full px-3 py-1.5 text-xs font-bold', days === d ? 'bg-b2b-ink text-white' : 'text-b2b-muted')}>
+                <button key={d} role="radio" aria-checked={days === d} onClick={() => setDays(d)} className={cx('rounded-full px-3 py-1.5 text-xs font-bold', days === d ? 'bg-b2b-ink text-b2b-on-ink' : 'text-b2b-muted')}>
                   {d} hari
                 </button>
               ))}
@@ -65,7 +65,7 @@ export default function Analytics() {
                 <div className="flex items-center gap-2">
                   <div className="flex rounded-full border border-b2b-line p-0.5">
                     {(['streams', 'listeners'] as const).map((m) => (
-                      <button key={m} onClick={() => setMetric(m)} aria-pressed={metric === m} className={cx('rounded-full px-3 py-1 text-xs font-bold', metric === m ? 'bg-b2b-ink text-white' : 'text-b2b-muted')}>
+                      <button key={m} onClick={() => setMetric(m)} aria-pressed={metric === m} className={cx('rounded-full px-3 py-1 text-xs font-bold', metric === m ? 'bg-b2b-ink text-b2b-on-ink' : 'text-b2b-muted')}>
                         {m === 'streams' ? 'Stream' : 'Pendengar'}
                       </button>
                     ))}

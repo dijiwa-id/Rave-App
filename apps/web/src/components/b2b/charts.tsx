@@ -78,8 +78,8 @@ export function LineChart({
           const y = pad.t + (1 - t / max) * (H - pad.t - pad.b);
           return (
             <g key={t}>
-              <line x1={pad.l} x2={W - pad.r} y1={y} y2={y} stroke="#e7e5e4" strokeWidth="1" />
-              <text x={pad.l - 8} y={y + 4} textAnchor="end" fontSize="11" fill="#6b6b6b">
+              <line x1={pad.l} x2={W - pad.r} y1={y} y2={y} stroke="var(--color-b2b-line)" strokeWidth="1" />
+              <text x={pad.l - 8} y={y + 4} textAnchor="end" fontSize="11" fill="var(--color-b2b-muted)">
                 {fmt.compact(t)}
               </text>
             </g>
@@ -87,7 +87,7 @@ export function LineChart({
         })}
         {data.map((d, i) =>
           i % labelEvery === 0 ? (
-            <text key={d.x} x={pts[i].x} y={H - 8} textAnchor="middle" fontSize="11" fill="#6b6b6b">
+            <text key={d.x} x={pts[i].x} y={H - 8} textAnchor="middle" fontSize="11" fill="var(--color-b2b-muted)">
               {fmt.date(d.x, { day: 'numeric', month: 'short' })}
             </text>
           ) : null,
@@ -96,14 +96,14 @@ export function LineChart({
         <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
         {h && (
           <>
-            <line x1={h.x} x2={h.x} y1={pad.t} y2={H - pad.b} stroke="#111" strokeOpacity="0.25" strokeWidth="1" />
-            <circle cx={h.x} cy={h.y} r="5" fill={color} stroke="#fff" strokeWidth="2" />
+            <line x1={h.x} x2={h.x} y1={pad.t} y2={H - pad.b} stroke="var(--color-b2b-ink)" strokeOpacity="0.25" strokeWidth="1" />
+            <circle cx={h.x} cy={h.y} r="5" fill={color} stroke="var(--color-b2b-card)" strokeWidth="2" />
           </>
         )}
       </svg>
       {h && hover != null && (
         <div
-          className="pointer-events-none absolute top-0 rounded-lg border border-b2b-line bg-white px-3 py-2 text-xs shadow-lg"
+          className="pointer-events-none absolute top-0 rounded-lg border border-b2b-line bg-b2b-card px-3 py-2 text-xs shadow-lg"
           style={{ left: `${(h.x / W) * 100}%`, transform: `translateX(${h.x > W * 0.7 ? '-105%' : '8px'})` }}
         >
           <p className="text-sm font-extrabold text-b2b-ink">{format(data[hover].y)}</p>

@@ -1,5 +1,6 @@
 import { createService, config, type ServiceContext } from '@gema/service-kit';
 import type { FastifyInstance } from 'fastify';
+import { aggFlushJob } from './aggregates.js';
 import { analyticsRoutes, uniquesJob } from './analytics.js';
 import { consumers } from './consumers.js';
 import { eventRoutes } from './events.js';
@@ -19,7 +20,13 @@ const svc = createService({
   migrationsDir: new URL('../migrations/', import.meta.url),
   routes,
   consumers,
-  jobs: [uniquesJob],
+  jobs: [aggFlushJob, uniquesJob],
+  stats: async ({ db }) => (await db.one(
+    `SELECT (SELECT count(*) FROM qualified_streams WHERE NOT suspicious AND at >= date_trunc('day', now()))::int AS streams_today,
+              (SELECT count(*) FROM qualified_streams WHERE NOT suspicious AND at > now() - interval '28 days')::int AS streams_28d,
+              (SELECT count(*) FROM qualified_streams WHERE suspicious AND at > now() - interval '28 days')::int AS fraud_28d,
+              (SELECT count(*) FROM sessions WHERE expires_at > now())::int AS sessions_active`,
+  )) ?? {},
   seed,
 });
 

@@ -81,20 +81,21 @@ export const CITIES = ['Jakarta', 'Bandung', 'Yogyakarta', 'Surabaya', 'Malang',
 export const GENRES = ['indie-pop', 'folk', 'akustik', 'rock', 'post-punk', 'indie-rock', 'r-n-b', 'soul', 'shoegaze', 'dream-pop', 'hip-hop', 'pop', 'electronic', 'jazz'];
 
 // ---------- Query wrapper ----------
-export function QueryState({ q, children, empty }: { q: { isLoading: boolean; error: unknown; refetch: () => unknown }; children: ReactNode; empty?: ReactNode }) {
+export function QueryState({ q, children, empty }: { q: { isLoading: boolean; error: unknown; data?: unknown; refetch: () => unknown }; children: ReactNode; empty?: ReactNode }) {
   if (q.isLoading)
     return (
       <div className="grid place-items-center py-12">
         <Spinner />
       </div>
     );
-  if (q.error) return <ErrorState error={q.error} retry={() => q.refetch()} />;
+  // Refetch latar belakang yang gagal (polling) tetap menyimpan data lama — tampilkan data itu, bukan galat.
+  if (q.error && q.data === undefined) return <ErrorState error={q.error} retry={() => q.refetch()} />;
   return <>{empty ?? children}</>;
 }
 
 export function Table({ head, children, className }: { head: ReactNode[]; children: ReactNode; className?: string }) {
   return (
-    <div className={cx('overflow-x-auto rounded-xl border border-b2b-line bg-white', className)}>
+    <div className={cx('overflow-x-auto rounded-xl border border-b2b-line bg-b2b-card', className)}>
       <table className="w-full text-left text-sm">
         <thead className="border-b border-b2b-line bg-b2b-bg/60 text-xs font-bold tracking-wide text-b2b-muted uppercase">
           <tr>
@@ -113,7 +114,7 @@ export function Table({ head, children, className }: { head: ReactNode[]; childr
 
 export function Empty({ title, body, action }: { title: string; body?: string; action?: ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed border-b2b-line bg-white px-6 py-12 text-center">
+    <div className="rounded-xl border border-dashed border-b2b-line bg-b2b-card px-6 py-12 text-center">
       <p className="font-bold text-b2b-ink">{title}</p>
       {body && <p className="mx-auto mt-1 max-w-md text-sm text-b2b-muted">{body}</p>}
       {action && <div className="mt-4">{action}</div>}

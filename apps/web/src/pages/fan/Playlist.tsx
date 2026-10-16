@@ -36,7 +36,7 @@ function AddTracks({ playlistId, onAdded }: { playlistId: string; onAdded: () =>
       <ul className="mt-4 max-w-3xl">
         {(res.data?.tracks ?? []).slice(0, 8).map((t) => (
           <li key={t.id} className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-white/10">
-            {t.release.cover_url && <img src={t.release.cover_url} alt="" className="size-10 rounded" />}
+            {t.release.cover_url && <img src={t.release.cover_url} alt="" loading="lazy" decoding="async" width={40} height={40} className="size-10 rounded" />}
             <div className="min-w-0 flex-1">
               <p className="truncate">{t.title}</p>
               <p className="truncate text-sm text-gema-muted">{t.artist.name}</p>
@@ -85,6 +85,18 @@ export default function Playlist() {
   async function remove(i: number) {
     try {
       await api(`/v1/library/playlists/${id}/items/${p.items[i].item_id}`, { method: 'DELETE' });
+      refresh();
+    } catch (e) {
+      toast.error(e);
+    }
+  }
+  /** Pindah satu langkah: `after_item_id` = item sebelum posisi tujuan (null = paling atas). */
+  async function move(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= p.items.length) return;
+    const after = dir === -1 ? (p.items[i - 2]?.item_id ?? null) : p.items[i + 1].item_id;
+    try {
+      await api(`/v1/library/playlists/${id}/items/${p.items[i].item_id}/move`, { body: { after_item_id: after } });
       refresh();
     } catch (e) {
       toast.error(e);
@@ -141,7 +153,7 @@ export default function Playlist() {
             </>
           )}
         </ActionBar>
-        {tracks.length ? <TrackTable tracks={tracks} onRemove={mine ? remove : undefined} /> : <EmptyState title="Playlist masih kosong" body={mine ? 'Tambahkan lagu lewat pencarian di bawah.' : undefined} />}
+        {tracks.length ? <TrackTable tracks={tracks} onRemove={mine ? remove : undefined} onMove={mine ? move : undefined} /> : <EmptyState title="Playlist masih kosong" body={mine ? 'Tambahkan lagu lewat pencarian di bawah.' : undefined} />}
         {mine && <AddTracks playlistId={id} onAdded={refresh} />}
       </div>
       <Modal open={edit} onClose={() => setEdit(false)} title="Ubah detail" theme="dark">

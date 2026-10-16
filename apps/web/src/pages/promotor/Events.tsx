@@ -1,13 +1,181 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, ScanLine, Trash2 } from 'lucide-react';
+import { Ban, Pencil, Plus, ScanLine, Trash2 } from 'lucide-react';
 import { api, fmt } from '@/lib/api';
 import type { ArtistSummary, BookingSummary, EventDetail, EventSummary } from '@/lib/types';
-import { Badge, Button, Card, Field, Input, PageHeader, Select, Textarea, toast } from '@/components/ui';
+import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Textarea, toast } from '@/components/ui';
 import { CITIES, Empty, QueryState, Table, useCurrentPromotor } from '@/components/b2b/common';
+import { setting, usePlatformConfig } from '@/lib/platform';
 
 type OrgEvent = EventSummary & { sold: number; revenue: number; checked_in: number };
+
+/** ISO → nilai input datetime-local (waktu lokal browser). */
+const toLocalInput = (iso: string | null | undefined) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+};
+
+/** Ubah detail event (PATCH /v1/ticketing/events/:id). Kategori tiket tetap dari formulir pembuatan. */
+function EditEvent({ id, onClose }: { id: string; onClose: () => void }) {
+  const optOutDays = setting<number>(usePlatformConfig(), 'refund.reschedule_opt_out_days', 7);
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['event', id], queryFn: () => api<EventDetail>(`/v1/ticketing/events/${id}`) });
+  const [f, setF] = useState<null | { title: string; description: string; city: string; venue_name: string; venue_address: string; starts_at: string; ends_at: string; poster_url: string; rules: string }>(null);
+  const [busy, setBusy] = useState(false);
+  const e = q.data;
+  if (e && !f)
+    setF({
+      title: e.title,
+      description: e.description ?? '',
+      city: e.city,
+      venue_name: e.venue_name,
+      venue_address: e.venue_address ?? '',
+      starts_at: toLocalInput(e.starts_at),
+      ends_at: toLocalInput(e.ends_at),
+      poster_url: e.poster_url ?? '',
+      rules: e.rules ?? '',
+    });
+  async function save(ev: React.FormEvent) {
+    ev.preventDefault();
+    if (!f) return;
+    if (new Date(f.ends_at) <= new Date(f.starts_at)) return toast.error('Waktu selesai harus setelah waktu mulai');
+    setBusy(true);
+    try {
+      await api(`/v1/ticketing/events/${id}`, {
+        method: 'PATCH',
+        body: { ...f, starts_at: new Date(f.starts_at).toISOString(), ends_at: new Date(f.ends_at).toISOString(), poster_url: f.poster_url || null, rules: f.rules || null },
+      });
+      toast.success('Event diperbarui');
+      qc.invalidateQueries({ queryKey: ['org-events'] });
+      qc.invalidateQueries({ queryKey: ['event', id] });
+      onClose();
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal open onClose={onClose} title="Ubah event" wide>
+      <QueryState q={q}>
+        {f && (
+          <form onSubmit={save} className="grid gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <Field label="Judul">
+                <Input required minLength={3} value={f.title} onChange={(x) => setF({ ...f, title: x.target.value })} />
+              </Field>
+            </div>
+            <div className="sm:col-span-2">
+              <Field label="Deskripsi">
+                <Textarea value={f.description} onChange={(x) => setF({ ...f, description: x.target.value })} />
+              </Field>
+            </div>
+            <Field label="Kota">
+              <Select value={f.city} onChange={(x) => setF({ ...f, city: x.target.value })}>
+                {[...new Set([f.city, ...CITIES])].map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Venue">
+              <Input required minLength={2} value={f.venue_name} onChange={(x) => setF({ ...f, venue_name: x.target.value })} />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="Alamat venue">
+                <Input value={f.venue_address} onChange={(x) => setF({ ...f, venue_address: x.target.value })} />
+              </Field>
+            </div>
+            <Field label="Mulai">
+              <Input type="datetime-local" required value={f.starts_at} onChange={(x) => setF({ ...f, starts_at: x.target.value })} />
+            </Field>
+            <Field label="Selesai">
+              <Input type="datetime-local" required value={f.ends_at} onChange={(x) => setF({ ...f, ends_at: x.target.value })} />
+            </Field>
+            <div className="sm:col-span-2">
+              <Field label="URL poster">
+                <Input type="url" value={f.poster_url} onChange={(x) => setF({ ...f, poster_url: x.target.value })} placeholder="https://…" />
+              </Field>
+            </div>
+            <div className="sm:col-span-2">
+              <Field label="Aturan masuk">
+                <Textarea value={f.rules} onChange={(x) => setF({ ...f, rules: x.target.value })} />
+              </Field>
+            </div>
+            {e && e.status !== 'DRAFT' && (
+              <p className="text-xs text-b2b-muted sm:col-span-2">
+                Event sudah dipublikasikan. Mengubah tanggal, kota, atau venue akan mengabari semua pemegang tiket dan memberi mereka hak refund penuh selama {optOutDays} hari.
+              </p>
+            )}
+            <div className="flex gap-2 sm:col-span-2">
+              <Button variant="ink" type="submit" loading={busy}>
+                Simpan perubahan
+              </Button>
+              <Button variant="outline-ink" type="button" onClick={onClose}>
+                Batal
+              </Button>
+            </div>
+          </form>
+        )}
+      </QueryState>
+    </Modal>
+  );
+}
+
+const STATUS_LABEL: Record<string, string> = { DRAFT: 'Draf', PUBLISHED: 'Dipublikasikan', CANCELLED: 'Dibatalkan', COMPLETED: 'Selesai' };
+
+/** Batalkan event: semua pembeli direfund penuh (termasuk biaya layanan) — tidak dapat diurungkan. */
+function CancelEvent({ event, onClose }: { event: OrgEvent; onClose: () => void }) {
+  const qc = useQueryClient();
+  const sla = setting<number>(usePlatformConfig(), 'refund.event_cancel_sla_days', 14);
+  const [reason, setReason] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const ok = reason.trim().length >= 10 && confirm.trim().toUpperCase() === 'BATALKAN';
+  async function submit() {
+    setBusy(true);
+    try {
+      const r = await api<{ refunds: { requested: number; queued: number } }>(`/v1/ticketing/events/${event.id}/cancel`, { body: { reason: reason.trim() } });
+      const n = r.refunds.requested + r.refunds.queued;
+      toast.success(n ? `Event dibatalkan — refund ${fmt.num(n)} order sedang diproses` : 'Event dibatalkan');
+      qc.invalidateQueries({ queryKey: ['org-events'] });
+      onClose();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal open onClose={onClose} title="Batalkan event">
+      <div className="space-y-4 text-sm">
+        <p>
+          <strong>{event.title}</strong> · {fmt.dateTime(event.starts_at)}
+        </p>
+        <ul className="list-disc space-y-1 rounded-xl border border-red-500/30 bg-red-500/5 p-4 pl-8 text-b2b-ink">
+          <li>{event.sold ? `${fmt.num(event.sold)} tiket terjual akan direfund penuh, termasuk biaya layanan.` : 'Belum ada tiket terjual.'}</li>
+          <li>Dana kembali ke pembeli paling lambat {sla} hari, dan pembeli dikabari otomatis.</li>
+          <li>Penjualan dan reservasi yang sedang berjalan dihentikan. Pembatalan tidak dapat diurungkan.</li>
+        </ul>
+        <Field label="Alasan pembatalan" hint="Ditampilkan ke tim GEMA dan dicatat di audit log">
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Mis. venue tidak dapat digunakan karena …" />
+        </Field>
+        <Field label='Ketik "BATALKAN" untuk konfirmasi'>
+          <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        </Field>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline-ink" onClick={onClose}>
+            Kembali
+          </Button>
+          <Button variant="danger" loading={busy} disabled={!ok} onClick={submit}>
+            Batalkan event
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 export function useOrgEvents() {
   const org = useCurrentPromotor()!;
@@ -18,6 +186,8 @@ export function PromotorEvents() {
   const q = useOrgEvents();
   const qc = useQueryClient();
   const [busy, setBusy] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState<OrgEvent | null>(null);
   async function publish(id: string) {
     setBusy(id);
     try {
@@ -60,17 +230,28 @@ export function PromotorEvents() {
               </td>
               <td className="px-4 py-3 whitespace-nowrap">{fmt.dateTime(e.starts_at)}</td>
               <td className="px-4 py-3">
-                <Badge tone={e.status === 'PUBLISHED' ? 'green' : e.status === 'CANCELLED' ? 'red' : 'neutral'}>{e.status}</Badge>
+                <Badge tone={e.status === 'PUBLISHED' ? 'green' : e.status === 'CANCELLED' ? 'red' : 'neutral'}>{STATUS_LABEL[e.status] ?? e.status}</Badge>
               </td>
               <td className="px-4 py-3 tabular-nums">{fmt.num(e.sold)}</td>
               <td className="px-4 py-3 tabular-nums">{fmt.idrShort(e.revenue)}</td>
               <td className="px-4 py-3 tabular-nums">{fmt.num(e.checked_in)}</td>
-              <td className="px-4 py-3 text-right whitespace-nowrap">
-                {e.status === 'DRAFT' ? (
+              <td className="space-x-3 px-4 py-3 text-right whitespace-nowrap">
+                {(e.status === 'DRAFT' || e.status === 'PUBLISHED') && (
+                  <button onClick={() => setEditing(e.id)} aria-label={`Ubah ${e.title}`} className="inline-flex items-center gap-1 align-middle text-sm font-bold text-b2b-muted hover:text-b2b-ink">
+                    <Pencil className="size-4" /> Ubah
+                  </button>
+                )}
+                {(e.status === 'DRAFT' || e.status === 'PUBLISHED') && (
+                  <button onClick={() => setCancelling(e)} aria-label={`Batalkan ${e.title}`} className="inline-flex items-center gap-1 align-middle text-sm font-bold text-red-600 hover:text-red-700">
+                    <Ban className="size-4" /> Batalkan
+                  </button>
+                )}
+                {e.status === 'DRAFT' && (
                   <Button size="sm" variant="ink" loading={busy === e.id} onClick={() => publish(e.id)}>
                     Publikasikan
                   </Button>
-                ) : (
+                )}
+                {e.status === 'PUBLISHED' && (
                   <Link to={`/promotor/events/${e.id}/checkin`} className="inline-flex items-center gap-1 text-sm font-bold underline">
                     <ScanLine className="size-4" /> Check-in
                   </Link>
@@ -80,6 +261,8 @@ export function PromotorEvents() {
           ))}
         </Table>
       </QueryState>
+      {editing && <EditEvent id={editing} onClose={() => setEditing(null)} />}
+      {cancelling && <CancelEvent event={cancelling} onClose={() => setCancelling(null)} />}
     </div>
   );
 }

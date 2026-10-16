@@ -22,6 +22,16 @@ const svc = createService({
       },
     },
   ],
+  stats: async ({ db }) =>
+    (await db.one(
+      `SELECT (SELECT count(*) FROM users WHERE deleted_at IS NULL)::int AS users_total,
+              (SELECT count(*) FROM users WHERE deleted_at IS NULL AND created_at > now() - interval '7 days')::int AS users_7d,
+              (SELECT count(*) FROM orgs)::int AS orgs,
+              (SELECT count(*) FROM kyc_submissions WHERE status = 'PENDING')::int AS kyc_pending,
+              (SELECT count(*) FROM users WHERE admin_role IS NOT NULL AND deleted_at IS NULL)::int AS admins,
+              (SELECT count(*) FROM users WHERE suspended_at IS NOT NULL)::int AS suspended,
+              (SELECT count(*) FROM waitlist)::int AS waitlist`,
+    )) ?? {},
   seed,
 });
 

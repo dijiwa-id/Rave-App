@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { QUALIFIED_STREAM_MS } from '@gema/domain';
-import { publish, z, type Client, type ServiceContext } from '@gema/service-kit';
+import { config, publish, settings, z, type Client, type ServiceContext } from '@gema/service-kit';
+import { insertDeltas, type AggDelta, type ArtistCounter } from './aggregates.js';
 import { todayWib, UNKNOWN } from './util.js';
 
 const evt = z
@@ -15,23 +15,30 @@ const evt = z
   })
   .passthrough();
 
-/** Aturan fraud sederhana (REQ-ADM-03). Produksi: model + fitur device/IP/ASN di pipeline streaming. */
-export const FRAUD = { maxQualifiedPerHour: 120, loopWindow: 5, loopMaxPlayedMs: 35_000 };
+/**
+ * played_ms klien tidak boleh melebihi waktu nyata sejak sesi dibuat (+ toleransi buffering/jam) — tanpa ini
+ * satu event `progress` instan dengan played_ms besar langsung menjadi qualified stream (dasar royalti).
+ * Jam dipercepat dev (GEMA_FAST_CLOCK, default aktif di non-produksi; ditolak di produksi) melewati batas ini untuk e2e.
+ */
+const FAST_CLOCK = (process.env.GEMA_FAST_CLOCK ?? (config.isDev ? '1' : '0')) === '1';
+const CLOCK_TOLERANCE_MS = 10_000;
 
-async function bump(tx: Client, artistId: string, date: string, col: 'starts' | 'skips' | 'completes' | 'saves' | 'followers_gained') {
-  await tx.query(
-    `INSERT INTO agg_artist_daily (artist_id, date, ${col}) VALUES ($1,$2,1)
-     ON CONFLICT (artist_id, date) DO UPDATE SET ${col} = agg_artist_daily.${col} + 1`,
-    [artistId, date],
-  );
-}
-export { bump as bumpArtistDaily };
+/** Aturan fraud sederhana (REQ-ADM-03). Produksi: model + fitur device/IP/ASN di pipeline streaming. */
+export const FRAUD = { loopWindow: 5, loopMaxPlayedMs: 35_000 };
+
+// Re-ekspor kompat (counter harian kini lewat delta, lihat aggregates.ts).
+export { bumpArtistDaily } from './aggregates.js';
 
 /** Deteksi pola mencurigakan sebelum stream dihitung. */
 async function fraudCheck(tx: Client, userId: string): Promise<string | null> {
-  const rate = await tx.query(`SELECT count(*)::int AS n FROM qualified_streams WHERE user_id = $1 AND at > now() - interval '1 hour'`, [userId]);
-  if (rate.rows[0].n >= FRAUD.maxQualifiedPerHour) return 'RATE_LIMIT';
-  // Pola loop "31 detik": sesi-sesi terakhir berhenti tepat setelah ambang qualified.
+  // Hitungan dibatasi ambang (LIMIT) → cukup scan indeks qualified_user_at_idx sampai ambang, bukan seluruh jam.
+  const max = settings.num('streaming.fraud_max_streams_per_hour');
+  const rate = await tx.query(
+    `SELECT count(*)::int AS n FROM (SELECT 1 FROM qualified_streams WHERE user_id = $1 AND at > now() - interval '1 hour' LIMIT $2) x`,
+    [userId, Number.isFinite(max) ? Math.max(0, Math.ceil(max)) : null],
+  );
+  if (rate.rows[0].n >= max) return 'RATE_LIMIT';
+  // Pola loop "31 detik": sesi-sesi terakhir berhenti tepat setelah ambang qualified (indeks parsial sessions_user_qualified_idx).
   const recent = await tx.query(
     `SELECT max_played_ms FROM sessions WHERE user_id = $1 AND qualified_at IS NOT NULL ORDER BY created_at DESC LIMIT $2`,
     [userId, FRAUD.loopWindow],
@@ -40,7 +47,8 @@ async function fraudCheck(tx: Client, userId: string): Promise<string | null> {
   return null;
 }
 
-async function qualify(tx: Client, s: any, playedMs: number): Promise<boolean> {
+/** Qualified stream (≥30 dtk): tetap di tx request (per sesi, dasar royalti); agregatnya hanya berupa delta. */
+async function qualify(tx: Client, s: any, playedMs: number, deltas: AggDelta[]): Promise<boolean> {
   const reason = await fraudCheck(tx, s.user_id);
   const now = new Date();
   await tx.query(`UPDATE sessions SET qualified_at = $2 WHERE id = $1`, [s.id, now]);
@@ -52,37 +60,24 @@ async function qualify(tx: Client, s: any, playedMs: number): Promise<boolean> {
   if (reason) return false;
 
   const date = todayWib();
-  const city = s.city || UNKNOWN;
-  await tx.query(
-    `INSERT INTO agg_artist_daily (artist_id, date, streams) VALUES ($1,$2,1) ON CONFLICT (artist_id, date) DO UPDATE SET streams = agg_artist_daily.streams + 1`,
-    [s.artist_id, date],
-  );
-  await tx.query(
-    `INSERT INTO agg_track_daily (artist_id, track_id, date, streams) VALUES ($1,$2,$3,1) ON CONFLICT (track_id, date) DO UPDATE SET streams = agg_track_daily.streams + 1`,
-    [s.artist_id, s.track_id, date],
-  );
+  // daily_listeners = sumber dedup pendengar unik (kunci per user, bukan baris panas) → tetap sinkron.
   const newListener = await tx.query(`INSERT INTO daily_listeners (artist_id, date, user_id, city) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [
     s.artist_id,
     date,
     s.user_id,
     s.city,
   ]);
-  const l = newListener.rowCount ? 1 : 0;
-  if (l) await tx.query(`UPDATE agg_artist_daily SET listeners = listeners + 1 WHERE artist_id = $1 AND date = $2`, [s.artist_id, date]);
-  await tx.query(
-    `INSERT INTO agg_city_daily (artist_id, date, city, listeners, streams) VALUES ($1,$2,$3,$4,1)
-     ON CONFLICT (artist_id, date, city) DO UPDATE SET streams = agg_city_daily.streams + 1, listeners = agg_city_daily.listeners + $4`,
-    [s.artist_id, date, city, l],
-  );
-  // Usia tidak dikumpulkan di token → "Tidak diketahui" sampai profil demografis (consent) tersedia.
-  await tx.query(
-    `INSERT INTO agg_age_daily (artist_id, date, age_group, streams) VALUES ($1,$2,$3,1) ON CONFLICT (artist_id, date, age_group) DO UPDATE SET streams = agg_age_daily.streams + 1`,
-    [s.artist_id, date, UNKNOWN],
-  );
-  await tx.query(
-    `INSERT INTO agg_source_daily (artist_id, date, source, streams) VALUES ($1,$2,$3,1) ON CONFLICT (artist_id, date, source) DO UPDATE SET streams = agg_source_daily.streams + 1`,
-    [s.artist_id, date, s.source],
-  );
+  deltas.push({
+    artist_id: s.artist_id,
+    date,
+    track_id: s.track_id,
+    city: s.city || UNKNOWN,
+    // Usia tidak dikumpulkan di token → "Tidak diketahui" sampai profil demografis (consent) tersedia.
+    age_group: UNKNOWN,
+    source: s.source,
+    streams: 1,
+    listeners: newListener.rowCount ? 1 : 0,
+  });
   await publish(tx, 'playback.stream.qualified', s.track_id, {
     userId: s.user_id,
     trackId: s.track_id,
@@ -94,49 +89,80 @@ async function qualify(tx: Client, s: any, playedMs: number): Promise<boolean> {
   return true;
 }
 
+const COUNTER: Partial<Record<string, ArtistCounter>> = { start: 'starts', skip: 'skips', complete: 'completes' };
+
 export async function eventRoutes(app: FastifyInstance, { db }: ServiceContext) {
-  /** Batch play events dari klien (start, progress tiap 15 dtk, complete, skip). Event offline dikirim saat online. */
+  /**
+   * Batch play events dari klien (start, progress tiap 15 dtk, complete, skip). Event offline dikirim saat online.
+   * Sesi dikunci sekali, terurut id (bebas deadlock antar batch); play_events & delta agregat ditulis bulk.
+   */
   app.post('/v1/events/play', async (req) => {
     const { events } = z.object({ events: z.array(evt).min(1).max(200) }).parse(req.body);
     const uid = req.user && !req.user.roles.includes('service') ? req.user.sub : null;
     let accepted = 0;
     let qualified = 0;
     await db.tx(async (tx) => {
-      const cache = new Map<string, any>();
+      const ids = [...new Set(events.map((e) => e.session_id.toLowerCase()))];
+      const rows = (await tx.query(`SELECT * FROM sessions WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`, [ids])).rows;
+      const sessions = new Map<string, any>(rows.map((r) => [r.id, r]));
+      const pe: { s: any; e: z.infer<typeof evt> }[] = [];
+      const maxChanged = new Set<any>();
+      const toQualify: { s: any; played: number }[] = [];
+      const deltas: AggDelta[] = [];
+      // Urutan event klien tetap dihormati (max_played_ms & momen qualified dihitung berurutan di memori).
       for (const e of events) {
-        let s = cache.get(e.session_id);
-        if (s === undefined) {
-          s = (await tx.query(`SELECT * FROM sessions WHERE id = $1 FOR UPDATE`, [e.session_id])).rows[0] ?? null;
-          cache.set(e.session_id, s);
-        }
+        const s = sessions.get(e.session_id.toLowerCase());
         if (!s) continue;
         // Event harus berasal dari pemilik sesi (mencegah pemalsuan play untuk user lain).
         if ((s.user_id ?? null) !== uid) continue;
         if (e.track_id && e.track_id !== s.track_id) continue;
         if (e.episode_id && e.episode_id !== s.episode_id) continue;
 
-        await tx.query(
-          `INSERT INTO play_events (session_id, user_id, track_id, episode_id, type, position_ms, played_ms, client_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [s.id, s.user_id, s.track_id, s.episode_id, e.type, e.position_ms, e.played_ms, e.at ?? null],
-        );
+        pe.push({ s, e });
         accepted++;
         // played_ms dibatasi durasi lagu + toleransi agar tidak bisa digelembungkan.
-        const played = Math.min(e.played_ms, (s.duration_ms || e.played_ms) + 5000);
+        const elapsedCap = FAST_CLOCK ? Infinity : Date.now() - new Date(s.created_at).getTime() + CLOCK_TOLERANCE_MS;
+        const played = Math.max(0, Math.min(e.played_ms, (s.duration_ms || e.played_ms) + 5000, elapsedCap));
         if (played > s.max_played_ms) {
           s.max_played_ms = played;
-          await tx.query(`UPDATE sessions SET max_played_ms = $2 WHERE id = $1`, [s.id, played]);
+          maxChanged.add(s);
         }
         if (s.track_id && s.artist_id) {
-          const date = todayWib();
-          if (e.type === 'start') await bump(tx, s.artist_id, date, 'starts');
-          if (e.type === 'skip') await bump(tx, s.artist_id, date, 'skips');
-          if (e.type === 'complete') await bump(tx, s.artist_id, date, 'completes');
-          if (s.user_id && !s.preview_only && !s.qualified_at && played >= QUALIFIED_STREAM_MS) {
+          const c = COUNTER[e.type];
+          if (c) deltas.push({ artist_id: s.artist_id, date: todayWib(), [c]: 1 });
+          // Ambang royalti dari Super Admin (default 30 dtk = QUALIFIED_STREAM_MS di domain).
+          if (s.user_id && !s.preview_only && !s.qualified_at && played >= settings.num('royalty.qualified_stream_seconds') * 1000) {
             s.qualified_at = new Date();
-            if (await qualify(tx, s, played)) qualified++;
+            toQualify.push({ s, played });
           }
         }
       }
+      if (pe.length) {
+        await tx.query(
+          `INSERT INTO play_events (session_id, user_id, track_id, episode_id, type, position_ms, played_ms, client_at)
+           SELECT * FROM unnest($1::uuid[], $2::uuid[], $3::uuid[], $4::uuid[], $5::text[], $6::int[], $7::int[], $8::timestamptz[])`,
+          [
+            pe.map((x) => x.s.id),
+            pe.map((x) => x.s.user_id),
+            pe.map((x) => x.s.track_id),
+            pe.map((x) => x.s.episode_id),
+            pe.map((x) => x.e.type),
+            pe.map((x) => x.e.position_ms),
+            pe.map((x) => x.e.played_ms),
+            pe.map((x) => x.e.at ?? null),
+          ],
+        );
+      }
+      if (maxChanged.size) {
+        const ss = [...maxChanged];
+        await tx.query(`UPDATE sessions s SET max_played_ms = v.m FROM unnest($1::uuid[], $2::int[]) AS v(id, m) WHERE s.id = v.id`, [
+          ss.map((x) => x.id),
+          ss.map((x) => x.max_played_ms),
+        ]);
+      }
+      // Setelah max_played_ms tersimpan → fraudCheck (pola loop) melihat state sesi yang sama seperti sebelumnya.
+      for (const q of toQualify) if (await qualify(tx, q.s, q.played, deltas)) qualified++;
+      await insertDeltas(tx, deltas);
     });
     return { accepted, qualified };
   });

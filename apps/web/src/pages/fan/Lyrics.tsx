@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Mic2, Share2 } from 'lucide-react';
@@ -8,10 +8,17 @@ import { colorFor } from '@/components/fan';
 import { cx, EmptyState, toast } from '@/components/ui';
 import type { Lyrics as LyricsT } from './Track';
 
+/** Indeks baris aktif (-1 = belum ada / lirik tidak tersinkron). */
+function activeLine(lines: { time_ms: number }[], synced: boolean, pos: number): number {
+  if (!synced) return -1;
+  let idx = -1;
+  for (let i = 0; i < lines.length; i++) if (lines[i].time_ms <= pos + 150) idx = i;
+  return idx;
+}
+
 /** Lirik tersinkron layar penuh (REQ-STR-03): highlight baris aktif, auto-scroll, mode karaoke. */
 export default function Lyrics() {
   const current = usePlayer((s) => s.current);
-  const pos = usePlayer((s) => s.positionMs);
   const seek = usePlayer((s) => s.seek);
   const [karaoke, setKaraoke] = useState(false);
   const isTrack = current?.kind === 'track';
@@ -22,12 +29,9 @@ export default function Lyrics() {
     retry: false,
   });
   const lines = q.data?.lines ?? [];
-  const active = useMemo(() => {
-    if (!q.data?.synced) return -1;
-    let idx = -1;
-    for (let i = 0; i < lines.length; i++) if (lines[i].time_ms <= pos + 150) idx = i;
-    return idx;
-  }, [pos, lines, q.data?.synced]);
+  const synced = !!q.data?.synced;
+  // Berlangganan indeks turunan (primitif), bukan positionMs → render ulang hanya saat baris berganti.
+  const active = usePlayer((s) => activeLine(lines, synced, s.positionMs));
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   useEffect(() => {
     refs.current[active]?.scrollIntoView({ block: 'center', behavior: 'smooth' });

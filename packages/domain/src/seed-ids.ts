@@ -23,6 +23,12 @@ export const SEED = {
     admin: 'admin@gema.id',
     superadmin: 'superadmin@gema.id',
   },
+  /** Siaran live demo (service live). */
+  liveStreams: {
+    demo: '01900000-0000-7000-8000-000000000801',
+    tourBandung: '01900000-0000-7000-8000-000000000802',
+    pastSession: '01900000-0000-7000-8000-000000000803',
+  },
   orgs: {
     senjaArtist: '01900000-0000-7000-8000-000000000101',
     nadaManagement: '01900000-0000-7000-8000-000000000102',

@@ -99,8 +99,17 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
         : [],
       want('track')
         ? db.query(
-            `${TRACK_SELECT} LEFT JOIN lyrics ly ON ly.track_id = t.id
-             WHERE ${LIVE} AND (${match('t.title')} OR ${match('a.name')} OR ly.plain ILIKE '%' || $1 || '%')
+            // Kandidat per kolom lebih dulu (masing-masing memakai indeks trigramnya, dibatasi), baru digabung & diurutkan —
+            // OR lintas tabel hasil join tidak bisa memakai indeks dan memindai semua lagu LIVE per ketikan.
+            `WITH cand AS (
+               (SELECT t.id FROM tracks t WHERE ${match('t.title')} LIMIT 200)
+               UNION
+               (SELECT t.id FROM tracks t WHERE t.artist_id IN (SELECT a2.id FROM artists a2 WHERE ${match('a2.name')} LIMIT 50) LIMIT 200)
+               UNION
+               (SELECT l.track_id FROM lyrics l WHERE l.plain ILIKE '%' || $1 || '%' LIMIT 200)
+             )
+             ${TRACK_SELECT.trim()} LEFT JOIN lyrics ly ON ly.track_id = t.id
+             WHERE t.id IN (SELECT id FROM cand) AND ${LIVE}
              ORDER BY greatest(${score('t.title')}, ${score('a.name')} * 0.8, CASE WHEN ly.plain ILIKE '%' || $1 || '%' THEN 0.5 ELSE 0 END) DESC, t.play_count DESC
              LIMIT 20`,
             [term],

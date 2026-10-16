@@ -7,3 +7,7 @@ dist/
 coverage/
 .vite/
 storage/
+
+# Artefak lokal Claude Code / tooling
+.claude/scheduled_tasks.lock
+*.tsbuildinfo

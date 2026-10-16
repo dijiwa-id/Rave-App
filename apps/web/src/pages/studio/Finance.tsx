@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, fmt } from '@/lib/api';
 import type { OrgClaim, Wallet } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
+import { setting, usePlatformConfig } from '@/lib/platform';
 import { Button, Card, Field, Input, Modal, PageHeader, Select, Stat, toast } from '@/components/ui';
 import { Empty, QueryState, Table, useCurrentArtist } from '@/components/b2b/common';
 
@@ -13,6 +14,8 @@ export function WalletPanel({ parties, title = 'Keuangan' }: { parties: { id: st
   const [partyId, setPartyId] = useState(parties[0]?.id);
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['wallet', partyId], queryFn: () => api<Wallet>(`/v1/finance/wallets/${partyId}`), enabled: !!partyId });
+  // Minimum penarikan dari Super Admin (`payout.min_amount_idr`, juga ditegakkan finance).
+  const minPayout = setting<number>(usePlatformConfig(), 'payout.min_amount_idr', 50_000);
   const [payout, setPayout] = useState<null | { amount: number; bank: string; number: string; holder: string }>(null);
   const [busy, setBusy] = useState(false);
   const party = parties.find((p) => p.id === partyId);
@@ -90,8 +93,8 @@ export function WalletPanel({ parties, title = 'Keuangan' }: { parties: { id: st
       <Modal open={!!payout} onClose={() => setPayout(null)} title="Tarik saldo">
         {payout && (
           <div className="space-y-3">
-            <Field label="Jumlah (Rp)">
-              <Input type="number" min={50000} max={b?.total} value={payout.amount} onChange={(e) => setPayout({ ...payout, amount: Number(e.target.value) })} />
+            <Field label="Jumlah (Rp)" hint={`Minimal ${fmt.idr(minPayout)}`}>
+              <Input type="number" min={minPayout} max={b?.total} value={payout.amount} onChange={(e) => setPayout({ ...payout, amount: Number(e.target.value) })} />
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Bank">
@@ -109,7 +112,7 @@ export function WalletPanel({ parties, title = 'Keuangan' }: { parties: { id: st
               <Input value={payout.holder} onChange={(e) => setPayout({ ...payout, holder: e.target.value })} />
             </Field>
             <p className="text-xs text-b2b-muted">Nama pemilik divalidasi (account name inquiry). Perubahan rekening baru aktif setelah masa tunggu 24 jam.</p>
-            <Button variant="ink" loading={busy} disabled={!payout.number || payout.amount <= 0} onClick={submit}>
+            <Button variant="ink" loading={busy} disabled={!payout.number || payout.amount < minPayout} onClick={submit}>
               Ajukan penarikan
             </Button>
           </div>

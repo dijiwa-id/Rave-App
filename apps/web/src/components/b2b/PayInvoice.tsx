@@ -24,7 +24,7 @@ export function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () 
   const [method, setMethod] = useState<(typeof METHODS)[number]['id']>('VA');
   const qc = useQueryClient();
   return (
-    <div className="rounded-xl border border-b2b-line bg-white p-4">
+    <div className="rounded-xl border border-b2b-line bg-b2b-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="text-xs font-bold tracking-wide text-b2b-muted uppercase">{PURPOSE[invoice.purpose] ?? invoice.purpose}</p>
@@ -46,7 +46,7 @@ export function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () 
                 role="radio"
                 aria-checked={method === m.id}
                 onClick={() => setMethod(m.id)}
-                className={cx('rounded-full border px-3 py-1.5 text-xs font-bold', method === m.id ? 'border-b2b-ink bg-b2b-ink text-white' : 'border-b2b-line text-b2b-muted')}
+                className={cx('rounded-full border px-3 py-1.5 text-xs font-bold', method === m.id ? 'border-b2b-ink bg-b2b-ink text-b2b-on-ink' : 'border-b2b-line text-b2b-muted')}
               >
                 {m.label}
               </button>
@@ -64,7 +64,7 @@ export function PayInvoice({ invoice, onPaid }: { invoice: Invoice; onPaid?: () 
             errorLabel="Gagal, coba lagi"
             width={320}
             trackColor="#111111"
-            handleColor="#1ed760"
+            handleColor="#DA1C5C"
             onConfirm={() => api(`/v1/finance/invoices/${invoice.id}/simulate-pay`, { body: { method }, idempotencyKey: true })}
             onDone={() => {
               toast.success('Pembayaran berhasil masuk escrow');

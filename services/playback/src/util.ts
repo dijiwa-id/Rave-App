@@ -25,5 +25,4 @@ export const CODEC_LABEL: Record<Quality, string> = {
   lossless: 'FLAC 16/44.1',
 };
 
-export const PREVIEW_MS = 30_000;
 export const UNKNOWN = 'Tidak diketahui';

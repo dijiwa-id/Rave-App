@@ -7,4 +7,5 @@ export * from './events.js';
 export * from './analytics.js';
 export * from './seed-ids.js';
 export * from './settings.js';
+export * from './ads.js';
 export * from './contract.js';

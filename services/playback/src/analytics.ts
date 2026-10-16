@@ -4,6 +4,8 @@ import { callService, forbidden, isAdmin, managedArtistIds, requireAuth, unautho
 import { todayWib, UNKNOWN } from './util.js';
 
 const OTHERS = 'Lainnya';
+/** Batas id per panggilan batch EPK (selaras batas kandidat discovery di booking). */
+export const EPK_BATCH_MAX = 200;
 
 function dateMinus(date: string, days: number) {
   const d = new Date(`${date}T00:00:00Z`);
@@ -13,19 +15,36 @@ function dateMinus(date: string, days: number) {
 
 /** Pendengar unik 28 hari (base impor/sintetis + real) pada tanggal tertentu. */
 async function uniquesAt(db: Db, artistId: string, date: string): Promise<number> {
-  const r = await db.one(`SELECT base + real AS n FROM agg_uniques_28d WHERE artist_id = $1 AND date <= $2 ORDER BY date DESC LIMIT 1`, [artistId, date]);
-  return r?.n ?? 0;
+  return (await uniquesAtMany(db, [artistId], date)).get(artistId) ?? 0;
+}
+
+/** Versi batch: satu query DISTINCT ON untuk banyak artis. */
+async function uniquesAtMany(db: Db, artistIds: string[], date: string): Promise<Map<string, number>> {
+  const rows = await db.query(
+    `SELECT DISTINCT ON (artist_id) artist_id, base + real AS n FROM agg_uniques_28d
+     WHERE artist_id = ANY($1::uuid[]) AND date <= $2 ORDER BY artist_id, date DESC`,
+    [artistIds, date],
+  );
+  return new Map(rows.map((r) => [r.artist_id, r.n]));
+}
+
+/** Kelompokkan baris hasil GROUP BY artist_id menjadi Map per artis (urutan baris dipertahankan). */
+function byArtist<T extends { artist_id: string }>(rows: T[]): Map<string, T[]> {
+  const m = new Map<string, T[]>();
+  for (const r of rows) {
+    const arr = m.get(r.artist_id);
+    if (arr) arr.push(r);
+    else m.set(r.artist_id, [r]);
+  }
+  return m;
 }
 
 /**
  * Estimasi pendengar unik per kota: distribusi pendengar harian per kota diskalakan ke total unik.
  * k-anonimitas (UU PDP §8.2): kota < K_ANONYMITY_MIN digabung ke "Lainnya".
+ * `rows` harus terurut listeners menurun.
  */
-async function topCities(db: Db, artistId: string, from: string, to: string, uniques: number, limit = 10) {
-  const rows = await db.query(
-    `SELECT city, sum(listeners)::int AS l FROM agg_city_daily WHERE artist_id = $1 AND date BETWEEN $2 AND $3 GROUP BY city ORDER BY l DESC`,
-    [artistId, from, to],
-  );
+function cityShares(rows: { city: string; l: number }[], uniques: number, limit = 10) {
   const total = rows.reduce((s, r) => s + r.l, 0);
   if (!total) return [];
   const out: { city: string; listeners: number }[] = [];
@@ -39,13 +58,81 @@ async function topCities(db: Db, artistId: string, from: string, to: string, uni
   return out;
 }
 
-async function pctBreakdown(db: Db, table: 'agg_age_daily' | 'agg_source_daily', col: 'age_group' | 'source', artistId: string, from: string, to: string) {
-  const rows = await db.query(
-    `SELECT ${col} AS k, sum(streams)::int AS n FROM ${table} WHERE artist_id = $1 AND date BETWEEN $2 AND $3 GROUP BY ${col} ORDER BY ${col}`,
-    [artistId, from, to],
+/** Baris kota per artis (agregat rentang tanggal), terurut listeners menurun. */
+async function cityRows(db: Db, artistIds: string[], from: string, to: string) {
+  return byArtist(
+    await db.query<{ artist_id: string; city: string; l: number }>(
+      `SELECT artist_id, city, sum(listeners)::int AS l FROM agg_city_daily
+       WHERE artist_id = ANY($1::uuid[]) AND date BETWEEN $2 AND $3 GROUP BY artist_id, city ORDER BY artist_id, l DESC, city`,
+      [artistIds, from, to],
+    ),
   );
+}
+
+async function topCities(db: Db, artistId: string, from: string, to: string, uniques: number, limit = 10) {
+  return cityShares((await cityRows(db, [artistId], from, to)).get(artistId) ?? [], uniques, limit);
+}
+
+const pcts = (rows: { k: string; n: number }[]) => {
   const total = rows.reduce((s, r) => s + r.n, 0);
   return rows.map((r) => ({ k: r.k, pct: total ? Math.round((r.n / total) * 1000) / 10 : 0 }));
+};
+
+async function pctBreakdownMany(db: Db, table: 'agg_age_daily' | 'agg_source_daily', col: 'age_group' | 'source', artistIds: string[], from: string, to: string) {
+  const rows = await db.query<{ artist_id: string; k: string; n: number }>(
+    `SELECT artist_id, ${col} AS k, sum(streams)::int AS n FROM ${table}
+     WHERE artist_id = ANY($1::uuid[]) AND date BETWEEN $2 AND $3 GROUP BY artist_id, ${col} ORDER BY artist_id, ${col}`,
+    [artistIds, from, to],
+  );
+  return new Map([...byArtist(rows)].map(([id, rs]) => [id, pcts(rs)]));
+}
+
+async function pctBreakdown(db: Db, table: 'agg_age_daily' | 'agg_source_daily', col: 'age_group' | 'source', artistId: string, from: string, to: string) {
+  return (await pctBreakdownMany(db, table, col, [artistId], from, to)).get(artistId) ?? [];
+}
+
+export interface EpkStats {
+  monthly_listeners: number;
+  growth_90d_pct: number;
+  top_cities: { city: string; listeners: number }[];
+  age_groups: { group: string; pct: number }[];
+  engagement_rate: number;
+  streams_28d: number;
+}
+
+/** Statistik EPK untuk banyak artis sekaligus (query ber-GROUP BY, bukan N×6 query). Hasil per artis identik dengan versi tunggal. */
+export async function epkStatsMany(db: Db, artistIds: string[]): Promise<Map<string, EpkStats>> {
+  const ids = [...new Set(artistIds)];
+  const out = new Map<string, EpkStats>();
+  if (!ids.length) return out;
+  const to = todayWib();
+  const from28 = dateMinus(to, 27);
+  const [now, then, aggRows, cities, ages] = await Promise.all([
+    uniquesAtMany(db, ids, to),
+    uniquesAtMany(db, ids, dateMinus(to, 90)),
+    db.query(
+      `SELECT artist_id, coalesce(sum(streams),0)::int AS streams, coalesce(sum(starts),0)::int AS starts, coalesce(sum(completes),0)::int AS completes
+       FROM agg_artist_daily WHERE artist_id = ANY($1::uuid[]) AND date BETWEEN $2 AND $3 GROUP BY artist_id`,
+      [ids, from28, to],
+    ),
+    cityRows(db, ids, from28, to),
+    pctBreakdownMany(db, 'agg_age_daily', 'age_group', ids, from28, to),
+  ]);
+  const agg = new Map(aggRows.map((r) => [r.artist_id, r]));
+  for (const id of ids) {
+    const n = now.get(id) ?? 0;
+    const t = then.get(id) ?? 0;
+    const a = agg.get(id) ?? { streams: 0, starts: 0, completes: 0 };
+    out.set(id, {
+      monthly_listeners: n,
+      growth_90d_pct: t ? Math.round(((n - t) / t) * 1000) / 10 : 0,
+      top_cities: cityShares(cities.get(id) ?? [], n),
+      age_groups: (ages.get(id) ?? []).map((x) => ({ group: x.k, pct: x.pct })),
+      engagement_rate: a.starts ? Math.round((a.completes / a.starts) * 1000) / 1000 : 0,
+      streams_28d: a.streams,
+    });
+  }
+  return out;
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -153,23 +240,17 @@ export async function analyticsRoutes(app: FastifyInstance, ctx: ServiceContext)
 
     s.get('/internal/analytics/artists/:artistId/epk', async (req) => {
       const { artistId } = req.params as { artistId: string };
-      const to = todayWib();
-      const now = await uniquesAt(db, artistId, to);
-      const then = await uniquesAt(db, artistId, dateMinus(to, 90));
-      const from28 = dateMinus(to, 27);
-      const agg = await db.one(
-        `SELECT coalesce(sum(streams),0)::int AS streams, coalesce(sum(starts),0)::int AS starts, coalesce(sum(completes),0)::int AS completes, coalesce(sum(saves),0)::int AS saves
-         FROM agg_artist_daily WHERE artist_id = $1 AND date BETWEEN $2 AND $3`,
-        [artistId, from28, to],
-      );
-      return {
-        monthly_listeners: now,
-        growth_90d_pct: then ? Math.round(((now - then) / then) * 1000) / 10 : 0,
-        top_cities: await topCities(db, artistId, from28, to, now),
-        age_groups: (await pctBreakdown(db, 'agg_age_daily', 'age_group', artistId, from28, to)).map((x) => ({ group: x.k, pct: x.pct })),
-        engagement_rate: agg.starts ? Math.round((agg.completes / agg.starts) * 1000) / 1000 : 0,
-        streams_28d: agg.streams,
-      };
+      const { id } = z.object({ id: z.string().uuid() }).parse({ id: artistId });
+      return (await epkStatsMany(db, [id])).get(id)!;
+    });
+
+    // Batch EPK (discovery booking): `?ids=a,b,c` → { data: (EpkStats & { artist_id })[] } sesuai urutan ids.
+    s.get('/internal/analytics/epk', async (req) => {
+      const { ids } = z
+        .object({ ids: z.string().transform((v) => v.split(',').filter(Boolean)).pipe(z.array(z.string().uuid()).max(EPK_BATCH_MAX)) })
+        .parse(req.query);
+      const stats = await epkStatsMany(db, ids);
+      return { data: [...new Set(ids)].map((id) => ({ artist_id: id, ...stats.get(id)! })) };
     });
 
     // Estimasi pendengar unik 28 hari per artis di satu kota (bahan Audience Match). Angka mentah — pemanggil wajib kSafe saat menampilkan.
@@ -193,20 +274,41 @@ export async function analyticsRoutes(app: FastifyInstance, ctx: ServiceContext)
   });
 }
 
-/** Snapshot pendengar unik 28 hari untuk hari ini (base dibawa dari hari sebelumnya + real terhitung). */
+/** Rekomputasi penuh berkala sebagai jaring pengaman (mis. seed/impor yang menulis agg_uniques_28d langsung). */
+const UNIQUES_FULL_EVERY_MS = 3600_000;
+let uniquesFullDay = '';
+let uniquesFullAt = 0;
+
+/**
+ * Snapshot pendengar unik 28 hari untuk hari ini (base dibawa dari hari sebelumnya + real terhitung).
+ * Inkremental: hanya artis di agg_uniques_dirty (ditandai job flush saat ada pendengar harian baru).
+ * Rekomputasi penuh hanya saat start, ganti hari (jendela 28 hari bergeser untuk semua artis) dan tiap jam.
+ */
 export const uniquesJob: Job = {
   name: 'uniques-28d',
   everyMs: 60_000,
   async run({ db }) {
     const today = todayWib();
-    await db.query(
-      `INSERT INTO agg_uniques_28d (artist_id, date, base, real)
-       SELECT a.artist_id, $1::date,
-         coalesce((SELECT base FROM agg_uniques_28d u WHERE u.artist_id = a.artist_id AND u.date <= $1::date ORDER BY date DESC LIMIT 1), 0),
-         (SELECT count(DISTINCT user_id) FROM daily_listeners d WHERE d.artist_id = a.artist_id AND d.date > $1::date - 28)
-       FROM (SELECT DISTINCT artist_id FROM agg_uniques_28d UNION SELECT DISTINCT artist_id FROM daily_listeners) a
-       ON CONFLICT (artist_id, date) DO UPDATE SET real = EXCLUDED.real`,
-      [today],
-    );
+    const upsert = (artists: string) => `
+      INSERT INTO agg_uniques_28d (artist_id, date, base, real)
+      SELECT a.artist_id, $1::date,
+        coalesce((SELECT base FROM agg_uniques_28d u WHERE u.artist_id = a.artist_id AND u.date <= $1::date ORDER BY date DESC LIMIT 1), 0),
+        (SELECT count(DISTINCT user_id) FROM daily_listeners d WHERE d.artist_id = a.artist_id AND d.date > $1::date - 28)
+      FROM (${artists}) a
+      ON CONFLICT (artist_id, date) DO UPDATE SET real = EXCLUDED.real`;
+    if (today !== uniquesFullDay || Date.now() - uniquesFullAt >= UNIQUES_FULL_EVERY_MS) {
+      // Penanda dirty dibersihkan dalam statement yang sama (sudah tercakup rekomputasi penuh).
+      // Artis dengan daily_listeners > 28 hari lalu sudah punya baris agg_uniques_28d dari run sebelumnya.
+      await db.query(
+        `WITH clr AS (DELETE FROM agg_uniques_dirty) ${upsert(
+          `SELECT DISTINCT artist_id FROM agg_uniques_28d UNION SELECT DISTINCT artist_id FROM daily_listeners WHERE date > $1::date - 28`,
+        )}`,
+        [today],
+      );
+      uniquesFullDay = today;
+      uniquesFullAt = Date.now();
+      return;
+    }
+    await db.query(`WITH dirty AS (DELETE FROM agg_uniques_dirty RETURNING artist_id) ${upsert('SELECT artist_id FROM dirty')}`, [today]);
   },
 };

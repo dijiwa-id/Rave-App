@@ -83,3 +83,22 @@ Kalender dijaga **exclusion constraint** PostgreSQL (`btree_gist`) sehingga dua 
 | PG, PSrE, KYC, WA | Adapter sandbox/mock | Vendor belum dipilih (Bab 18) | Implementasi adapter per provider di service terkait. |
 | Uang BIGINT sen | BIGINT rupiah utuh | IDR tidak memakai pecahan; mengurangi bug konversi ×100 | Lihat `docs/adr/0003-money.md`. |
 | Mobile (React Native) & Check-in app | Belum; check-in tersedia di web Promotor Hub | Fokus Fase 0–1 web | `apps/mobile` (Expo) memakai `packages/domain` & kontrak API yang sama. |
+
+## 6. Menjalankan beberapa replika per service
+
+Semua service boleh dijalankan >1 replika di belakang load balancer biasa — **sticky session tidak diperlukan**.
+
+| Aspek | Mekanisme |
+|---|---|
+| Identitas | `INSTANCE_ID` (`host-pid-acak`, bisa di-override env) muncul di log (`instance`) dan `GET /internal/stats`. |
+| Pengaturan platform | `applyChanges` mengirim `pg_notify('gema_settings', versi)` di transaksi yang sama; **setiap** replika (termasuk platform & gateway) LISTEN dan me-refresh ≤ ~1 dtk. Event `platform.settings.updated` (consumer group → satu replika per service) & refresh berkala (60 dtk service, 30 dtk gateway) tetap ada sebagai jaring pengaman; snapshot berversi sehingga jalur yang datang belakangan tidak menimpa versi lebih baru. |
+| Event bus | Driver `pg`: consumer group = nama service, offset dikunci `FOR UPDATE SKIP LOCKED` → tiap event diproses sekali per service. Driver `kafka`: groupId = nama service → Kafka membagi partisi antar-replika; idempotensi via `processed_events`. Relay outbox aman paralel (`SKIP LOCKED`). |
+| Rate limit gateway | `RATE_LIMIT_STORE=pg` → hitungan fixed window bersama di tabel UNLOGGED `gateway.rate_limits` (dibuat saat start, satu upsert atomik per permintaan, pool kecil, timeout pendek). DB bermasalah → **fail open** (diizinkan + log warn dibatasi). Default `memory` (per replika, dev). |
+| Live | Registri `live.instances` (heartbeat 5 dtk, mati bila > 15 dtk). `streams.owner_instance` = replika yang memegang publisher & transcoder; watchdog hanya mengurus siaran miliknya atau mengambil alih (UPDATE bersyarat) siaran yang pemiliknya mati. `live.max_concurrent` dihitung global di DB. Potongan ingest browser yang mendarat di replika lain diteruskan ke `LIVE_INTERNAL_URL` pemilik (token service) atau 409 bila pemilik mati. Kanal demo hanya di satu replika (kunci advisory sesi `gema.live.demo`). |
+
+Syarat deploy:
+- **`LIVE_DIR` harus volume bersama** (NFS/EFS/RWX PVC) untuk semua replika live — segmen HLS ditulis pemilik dan dilayani replika mana pun. (Produksi besar: ganti dengan object storage + CDN.)
+- Setiap replika live butuh `LIVE_INTERNAL_URL` yang bisa dijangkau replika lain (mis. IP pod: `http://$(POD_IP):4010`; default `http://127.0.0.1:$LIVE_PORT` hanya cocok untuk satu host) dan port RTMP sendiri bila satu host (`LIVE_RTMP_PORT`). RTMP di belakang LB TCP (L4) cukup; encoder yang menyambung ulang ke replika lain mengambil alih siaran INTERRUPTED.
+- Gateway: set `RATE_LIMIT_STORE=pg` (sudah di `docker-compose.yml`).
+- Koneksi Postgres per replika ≈ `DB_POOL_MAX` + 1 LISTEN bus + 1 LISTEN pengaturan (+ 5 pool rate limit di gateway, + 1 kunci demo di live). Hitung terhadap `max_connections` (atau pasang PgBouncer mode session untuk koneksi LISTEN).
+- Job berkala (`jobs`) berjalan di setiap replika; job yang ada idempoten/aman paralel (kunci baris / `SKIP LOCKED` / UPDATE bersyarat).

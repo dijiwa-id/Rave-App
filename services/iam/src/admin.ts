@@ -1,14 +1,34 @@
 import type { FastifyInstance } from 'fastify';
-import { audit, conflict, nextCursor, notFound, pageParams, publish, requireRole, z, type ServiceContext } from '@gema/service-kit';
-import { buildMe, type Q } from './core.js';
+import { ADMIN_ROLES } from '@gema/domain/settings';
+import { audit, conflict, forbidden, nextCursor, notFound, pageParams, publish, requirePermission, requireRole, requireService, requireSuperAdmin, z, type ServiceContext } from '@gema/service-kit';
+import { buildMe } from './core.js';
 import { kycOut } from './routes.js';
+
+const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 /** Back office IAM (REQ-ADM-01, REQ-IAM-04). */
 export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) {
+  // Internal: profil org untuk service lain (mis. live menyimpan nama org pemilik siaran).
+  app.get('/internal/orgs/:id', { preHandler: requireService }, async (req) => {
+    const { id } = req.params as { id: string };
+    if (!isUuid(id)) throw notFound('Organisasi');
+    const o = await db.one(`SELECT id, type, name, slug, verified, artist_id FROM orgs WHERE id = $1`, [id]);
+    if (!o) throw notFound('Organisasi');
+    return o;
+  });
+
+  // Internal: persetujuan pengguna (service iklan memeriksa consent `ads` untuk penargetan — UU PDP).
+  app.get('/internal/users/:id/consents', { preHandler: requireService }, async (req) => {
+    const { id } = req.params as { id: string };
+    if (!isUuid(id)) throw notFound('Pengguna');
+    const rows = await db.query(`SELECT purpose, granted FROM consents WHERE user_id = $1`, [id]);
+    return { consents: Object.fromEntries(rows.map((r) => [r.purpose, r.granted])) };
+  });
+
   app.register(async (a) => {
     a.addHook('preHandler', requireRole('admin'));
 
-    a.get('/v1/admin/iam/kyc', async (req) => {
+    a.get('/v1/admin/iam/kyc', { preHandler: requirePermission('kyc.review') }, async (req) => {
       const q = req.query as { status?: string };
       const rows = await db.query(
         `SELECT k.*, u.email, u.display_name, o.name AS org_name FROM kyc_submissions k
@@ -19,7 +39,7 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
       return { data: rows.map((r) => ({ ...kycOut(r), email: r.email, display_name: r.display_name, org_name: r.org_name })) };
     });
 
-    a.post('/v1/admin/iam/kyc/:id/decision', async (req) => {
+    a.post('/v1/admin/iam/kyc/:id/decision', { preHandler: requirePermission('kyc.review') }, async (req) => {
       const { id } = req.params as { id: string };
       const b = z.object({ approve: z.boolean(), reason: z.string().max(500).optional().nullable() }).parse(req.body);
       return db.tx(async (tx) => {
@@ -44,7 +64,7 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
       });
     });
 
-    a.get('/v1/admin/iam/users', async (req) => {
+    a.get('/v1/admin/iam/users', { preHandler: requirePermission('users.view') }, async (req) => {
       const q = req.query as { q?: string; cursor?: string; limit?: string };
       const { limit, offset } = pageParams(q);
       const ids = await db.query(
@@ -52,11 +72,63 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
          ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
         [q.q || null, limit, offset],
       );
-      const data = await Promise.all(ids.map((r) => buildMe(db.pool as unknown as Q, r.id)));
+      // Satu koneksi, berurutan: Promise.all ratusan buildMe menguras pool IAM (login & refresh ikut tertahan).
+      const data = await db.tx(async (tx) => {
+        const out = [];
+        for (const r of ids) out.push(await buildMe(tx, r.id));
+        return out;
+      });
       return { data, next_cursor: nextCursor(offset, limit, ids.length) };
     });
 
-    a.get('/v1/admin/iam/audit-logs', async (req) => {
+    // ---- Tim admin (Super Admin) ----
+    a.get('/v1/admin/iam/admins', { preHandler: requireSuperAdmin }, async () => {
+      const ids = await db.query(`SELECT id FROM users WHERE deleted_at IS NULL AND (admin_role IS NOT NULL OR is_admin) ORDER BY admin_role = 'SUPER_ADMIN' DESC, created_at LIMIT 500`);
+      const data = await db.tx(async (tx) => {
+        const out = [];
+        for (const r of ids) out.push(await buildMe(tx, r.id));
+        return out;
+      });
+      return { data };
+    });
+
+    a.patch('/v1/admin/iam/users/:id', { preHandler: requireSuperAdmin }, async (req) => {
+      const { id } = req.params as { id: string };
+      const b = z
+        .object({
+          admin_role: z.enum(ADMIN_ROLES).nullable().optional(),
+          suspended: z.boolean().optional(),
+          reason: z.string().trim().min(5, 'Alasan minimal 5 karakter').max(500),
+        })
+        .parse(req.body);
+      if (!isUuid(id)) throw notFound('Pengguna');
+      return db.tx(async (tx) => {
+        const u = (await tx.query(`SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [id])).rows[0];
+        if (!u) throw notFound('Pengguna');
+        const self = u.id === req.user!.sub;
+        if (b.admin_role !== undefined && b.admin_role !== u.admin_role) {
+          if (u.admin_role === 'SUPER_ADMIN') {
+            if (self) throw forbidden('Tidak dapat mengubah peran Super Admin milik sendiri');
+            // Kunci SEMUA Super Admin dulu: dua Super Admin yang saling mencabut bersamaan tidak sama-sama lolos cek.
+            await tx.query(`SELECT id FROM users WHERE admin_role = 'SUPER_ADMIN' AND deleted_at IS NULL ORDER BY id FOR UPDATE`);
+            const others = (await tx.query(`SELECT count(*)::int AS n FROM users WHERE admin_role = 'SUPER_ADMIN' AND suspended_at IS NULL AND deleted_at IS NULL AND id <> $1`, [u.id])).rows[0].n;
+            if (!others) throw conflict('Tidak dapat mencabut Super Admin terakhir');
+          }
+          await tx.query(`UPDATE users SET admin_role = $2::text, is_admin = $2::text IS NOT NULL, updated_at = now() WHERE id = $1`, [u.id, b.admin_role]);
+          await audit(tx, { actorId: req.user!.sub, action: 'admin.role.change', entity: 'user', entityId: u.id, data: { from: u.admin_role, to: b.admin_role, reason: b.reason } });
+        }
+        if (b.suspended !== undefined && b.suspended !== !!u.suspended_at) {
+          if (self) throw forbidden('Tidak dapat menangguhkan akun sendiri');
+          await tx.query(`UPDATE users SET suspended_at = ${b.suspended ? 'now()' : 'NULL'}, updated_at = now() WHERE id = $1`, [u.id]);
+          // Tangguhkan = cabut semua sesi; access token yang tersisa kedaluwarsa ≤ 15 menit.
+          if (b.suspended) await tx.query(`UPDATE refresh_tokens SET revoked_at = coalesce(revoked_at, now()) WHERE user_id = $1`, [u.id]);
+          await audit(tx, { actorId: req.user!.sub, action: b.suspended ? 'user.suspend' : 'user.unsuspend', entity: 'user', entityId: u.id, data: { reason: b.reason } });
+        }
+        return buildMe(tx, u.id);
+      });
+    });
+
+    a.get('/v1/admin/iam/audit-logs', { preHandler: requirePermission('audit.view') }, async (req) => {
       const q = req.query as { cursor?: string; limit?: string; entity?: string };
       const { limit, offset } = pageParams(q);
       const rows = await db.query(

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { callService, HttpError, notFound, uuidv7, z, type ServiceContext } from '@gema/service-kit';
-import { CODEC_LABEL, PREVIEW_MS, signStream, verifyStream, type Quality } from './util.js';
+import { callService, HttpError, notFound, settings, uuidv7, z, type ServiceContext } from '@gema/service-kit';
+import { CODEC_LABEL, signStream, verifyStream, type Quality } from './util.js';
 
 const body = z
   .object({
@@ -36,10 +36,11 @@ export async function sessionRoutes(app: FastifyInstance, { db, name }: ServiceC
     }
 
     const id = uuidv7();
-    const previewOnly = !user; // REQ-WEB-04: anonim mendapat pratinjau 30 detik
+    const previewOnly = !user; // REQ-WEB-04: anonim mendapat pratinjau (durasi: streaming.preview_seconds)
     const ttlSec = Math.max(15 * 60, Math.ceil(media.duration_ms / 1000) + 10 * 60);
     const exp = Math.floor(Date.now() / 1000) + ttlSec;
-    const quality = b.quality as Quality;
+    // D-03: lossless gratis bisa dimatikan Super Admin → turunkan ke AAC 320.
+    const quality = (b.quality === 'lossless' && !settings.bool('streaming.lossless_enabled') ? 'high' : b.quality) as Quality;
     await db.tx(async (tx) => {
       await tx.query(
         `INSERT INTO sessions (id, user_id, track_id, episode_id, artist_id, quality, codec_label, city, source, preview_only, audio_url, duration_ms, expires_at)
@@ -73,7 +74,7 @@ export async function sessionRoutes(app: FastifyInstance, { db, name }: ServiceC
       codec_label: CODEC_LABEL[quality],
       loudness_gain_db: Number(media.loudness_gain_db ?? 0),
       preview_only: previewOnly,
-      preview_ms: previewOnly ? PREVIEW_MS : null,
+      preview_ms: previewOnly ? settings.num('streaming.preview_seconds') * 1000 : null,
       duration_ms: media.duration_ms,
     };
   });

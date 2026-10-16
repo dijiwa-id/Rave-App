@@ -84,7 +84,7 @@ export default function RateCardPage() {
                 </div>
               </div>
             </Card>
-            <div className="overflow-x-auto rounded-xl border border-b2b-line bg-white">
+            <div className="overflow-x-auto rounded-xl border border-b2b-line bg-b2b-card">
               <table className="w-full min-w-[960px] text-sm">
                 <thead className="border-b border-b2b-line bg-b2b-bg/60 text-left text-xs font-bold text-b2b-muted uppercase">
                   <tr>

@@ -24,9 +24,9 @@ export function EpkView({ epk }: { epk: Epk }) {
   const rider = (epk.rider ?? {}) as any;
   return (
     <div className="space-y-6">
-      <div className="overflow-hidden rounded-2xl border border-b2b-line bg-white">
-        <div className="flex flex-wrap items-center gap-5 bg-gradient-to-r from-stone-900 to-stone-700 p-6 text-white">
-          {epk.artist.image_url ? <img src={epk.artist.image_url} alt="" className="size-28 rounded-2xl object-cover ring-4 ring-white/20" /> : <div className="size-28 rounded-2xl bg-white/10" />}
+      <div className="overflow-hidden rounded-2xl border border-b2b-line bg-b2b-card">
+        <div className="flex flex-wrap items-center gap-5 bg-gradient-to-r from-[#1c1917] to-[#44403c] p-6 text-white">
+          {epk.artist.image_url ? <img src={epk.artist.image_url} alt="" className="size-28 rounded-2xl object-cover ring-4 ring-white/20" /> : <div className="size-28 rounded-2xl bg-b2b-card/10" />}
           <div className="min-w-0 flex-1">
             <p className="text-xs font-bold tracking-[0.2em] text-white/60 uppercase">Electronic Press Kit</p>
             <h2 className="flex items-center gap-2 text-3xl font-extrabold tracking-tight">
@@ -78,7 +78,7 @@ export function EpkView({ epk }: { epk: Epk }) {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {epk.press_photos.map((p) => (
               <a key={p} href={p} target="_blank" rel="noreferrer">
-                <img src={p} alt="Foto press" className="aspect-square w-full rounded-lg object-cover" />
+                <img src={p} alt="Foto press" loading="lazy" decoding="async" className="aspect-square w-full rounded-lg object-cover" />
               </a>
             ))}
           </div>

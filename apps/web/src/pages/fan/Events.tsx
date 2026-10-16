@@ -5,7 +5,7 @@ import { MapPin, Search } from 'lucide-react';
 import { api, fmt } from '@/lib/api';
 import type { EventSummary, Paged } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
-import { CardSkeleton, DarkError, FanPage } from '@/components/fan';
+import { CardSkeleton, colorFor, DarkError, FanPage } from '@/components/fan';
 import { cx, EmptyState } from '@/components/ui';
 
 const CITIES = ['Semua', 'Jakarta', 'Bandung', 'Yogyakarta', 'Surabaya', 'Malang', 'Bali', 'Medan', 'Semarang'];
@@ -14,9 +14,13 @@ export function EventCard({ e }: { e: EventSummary }) {
   return (
     <Link to={`/app/events/${e.slug}`} className="media-card block">
       <div className="relative mb-4">
-        <img src={e.poster_url ?? `https://picsum.photos/seed/gema-ev-${e.id}/500/500`} alt="" loading="lazy" className="aspect-square w-full rounded-md object-cover" />
+        {e.poster_url ? (
+          <img src={e.poster_url} alt="" loading="lazy" decoding="async" className="aspect-square w-full rounded-md object-cover" />
+        ) : (
+          <div className="aspect-square w-full rounded-md" style={{ background: `linear-gradient(135deg, ${colorFor(e.id)}, ${colorFor(e.slug)})` }} />
+        )}
         <div className="absolute top-2 left-2 rounded-md bg-black/80 px-2 py-1 text-center">
-          <p className="text-[10px] font-bold text-gema-green uppercase">{new Date(e.starts_at).toLocaleDateString('id-ID', { month: 'short' })}</p>
+          <p className="text-[10px] font-bold text-gema-primary-text uppercase">{new Date(e.starts_at).toLocaleDateString('id-ID', { month: 'short' })}</p>
           <p className="text-lg leading-none font-black">{new Date(e.starts_at).getDate()}</p>
         </div>
       </div>
