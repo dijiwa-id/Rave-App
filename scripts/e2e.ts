@@ -1,6 +1,10 @@
 // Smoke test end-to-end lewat API Gateway dengan token asli (login OTP).
 // Prasyarat: `npm run seed` lalu `npm run dev:services`. Jalankan: `npx tsx scripts/e2e.ts`
-import { SEED } from '@gema/domain';
+import { spawn } from 'node:child_process';
+import { createHmac } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { deflateSync } from 'node:zlib';
+import { SEED, seedId } from '@gema/domain';
 
 const BASE = process.env.GATEWAY ?? 'http://127.0.0.1:8080';
 let passed = 0;
@@ -44,12 +48,42 @@ async function login(email: string) {
   return tok.data as { access_token: string; refresh_token: string; user: any };
 }
 
+/** PNG persegi minimal (RGBA solid) untuk uji unggah branding. */
+function pngSquare(n: number): Buffer {
+  const crcTable = Array.from({ length: 256 }, (_, i) => {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (b: Buffer) => {
+    let c = 0xffffffff;
+    for (const x of b) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type), data]);
+    const c = Buffer.alloc(4);
+    c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(n, 0);
+  ihdr.writeUInt32BE(n, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  const raw = Buffer.alloc((n * 4 + 1) * n);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) raw.writeUInt32BE(0x1ed760ff, y * (n * 4 + 1) + 1 + x * 4);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-async function until<T>(fn: () => Promise<T>, ok: (v: T) => boolean, ms = 20000): Promise<T> {
+async function until<T>(fn: () => Promise<T>, ok: (v: T) => boolean, ms = 20000, every = 500): Promise<T> {
   const end = Date.now() + ms;
   let v = await fn();
   while (!ok(v) && Date.now() < end) {
-    await wait(500);
+    await wait(every);
     v = await fn();
   }
   return v;
@@ -206,6 +240,26 @@ const self = await call(M, 'POST', `/v1/booking/bookings/${B}/accept`);
 check('tidak bisa menerima offer sendiri', self.status === 409 || self.status === 403, self.status);
 const acc = await call(P, 'POST', `/v1/booking/bookings/${B}/accept`);
 check('promotor terima → kontrak terbit (CONTRACT_SENT)', acc.data?.status === 'CONTRACT_SENT' && acc.data?.contract?.sha256?.length === 64, acc.data?.status);
+// ---- Generated Contract: PDF draf, signed URL privat, RBAC, verifikasi publik ----
+const KID = acc.data?.contract?.id;
+const prev = await until(
+  () => call(P, 'GET', `/v1/booking/contracts/${KID}/preview-url`),
+  (r) => r.status === 200,
+  60000,
+  1000,
+);
+check('PDF draf kontrak dirender (preview-url)', prev.status === 200 && prev.data?.kind === 'DRAFT' && prev.data?.sha256?.length === 64, prev.data);
+const pdfRes = await fetch(BASE + prev.data.url);
+const pdfBuf = Buffer.from(await pdfRes.arrayBuffer());
+check('signed URL mengunduh PDF dengan hash cocok', pdfRes.status === 200 && pdfBuf.subarray(0, 5).toString() === '%PDF-' && (await import('node:crypto')).createHash('sha256').update(pdfBuf).digest('hex') === prev.data.sha256, [pdfRes.status, pdfBuf.length]);
+const tamperedPdf = await call(null, 'GET', prev.data.url.slice(0, -3) + 'abc');
+check('signed URL dimanipulasi ditolak (403)', tamperedPdf.status === 403, tamperedPdf.status);
+const outsider = await call(fan.access_token, 'GET', `/v1/booking/contracts/${KID}/preview-url`);
+check('pihak luar tidak bisa meminta pratinjau (403)', outsider.status === 403, outsider.status);
+const vfy = await call(null, 'GET', `/v1/booking/verify/${KID}`);
+check('verifikasi publik: status & hash tanpa data sensitif', vfy.status === 200 && vfy.data?.sha256 === prev.data.sha256 && !JSON.stringify(vfy.data).match(/nik|npwp|rekening|bank|\*{4}/i), vfy.data);
+const vers = await call(M, 'GET', `/v1/booking/contracts/${KID}/versions`);
+check('riwayat versi memuat v1', vers.data?.data?.length === 1 && vers.data.data[0].version === 1, vers.data);
 await call(P, 'POST', `/v1/booking/bookings/${B}/sign`, { signer_name: 'Promotor E2E' }, true);
 const signed = await call(M, 'POST', `/v1/booking/bookings/${B}/sign`, { signer_name: 'Manajer E2E' }, true);
 check('tanda tangan kedua pihak (SIGNED)', signed.data?.status === 'SIGNED', signed.data?.status);
@@ -256,6 +310,413 @@ const fanAdmin = await call(F, 'GET', '/v1/admin/finance/reconciliation');
 check('fan tidak bisa akses back office (403)', fanAdmin.status === 403, fanAdmin.status);
 const audit = await call(admin.access_token, 'GET', '/v1/admin/iam/audit-logs');
 check('audit log tersedia', audit.status === 200);
+
+console.log('\n▶ Super Admin: pengaturan, storage, backup, event bus');
+const sa = await login(SEED.emails.superadmin);
+check('super admin: klaim superadmin + admin_role SUPER_ADMIN', sa.user.roles.includes('superadmin') && sa.user.admin_role === 'SUPER_ADMIN', [sa.user.roles, sa.user.admin_role]);
+const S = sa.access_token;
+const ov = await call(S, 'GET', '/v1/admin/platform/overview');
+check('overview: semua service ok + KPI terisi', ov.status === 200 && ov.data.services.every((x: any) => x.ok) && ov.data.kpis.users_total > 0 && ov.data.kpis.artists > 0, ov.data?.services?.filter((x: any) => !x.ok));
+const opsPut = await call(admin.access_token, 'PUT', '/v1/admin/platform/settings', { changes: { 'general.announcement': 'x' }, reason: 'uji akses' });
+const opsGet = await call(admin.access_token, 'GET', '/v1/admin/platform/settings');
+check('area Platform khusus Super Admin: OPS tidak bisa baca maupun ubah (403)', opsPut.status === 403 && opsGet.status === 403, [opsGet.status, opsPut.status]);
+const badSet = await call(S, 'PUT', '/v1/admin/platform/settings', { changes: { 'booking.default_dp_pct': 5 }, reason: 'uji validasi' });
+check('validasi registri: DP 5% ditolak (400 + errors per kunci)', badSet.status === 400 && badSet.data?.errors?.[0]?.path === 'booking.default_dp_pct', badSet.data);
+const maint = await call(S, 'PUT', '/v1/admin/platform/settings', { changes: { 'maintenance.enabled': true }, reason: 'uji pemeliharaan e2e' });
+check('aktifkan mode pemeliharaan (versi naik)', maint.status === 200 && maint.data.values['maintenance.enabled'] === true, maint.data);
+const blocked = await until(
+  () => call(P, 'POST', '/v1/booking/inquiries', { ...inqBody, event_name: 'Saat maintenance' }, true),
+  (r) => r.status === 503,
+  12_000,
+);
+check('gateway menolak transaksi saat pemeliharaan (503)', blocked.status === 503 && String(blocked.data?.type).endsWith('/maintenance'), [blocked.status, blocked.data]);
+const readOk = await call(F, 'GET', '/v1/catalog/home');
+const liveDuringMaint = await call(null, 'GET', '/v1/live/streams?status=live');
+const pbDuringMaint = liveDuringMaint.data?.data?.[0] ? await call(null, 'POST', `/v1/live/streams/${liveDuringMaint.data.data[0].id}/playback`) : { status: 200 };
+check('menonton live tetap jalan saat pemeliharaan (POST playback tidak diblok)', pbDuringMaint.status === 200, pbDuringMaint.status);
+check('baca/streaming tetap jalan saat pemeliharaan', readOk.status === 200, readOk.status);
+const cfg = await call(null, 'GET', '/v1/platform/config');
+check('config publik memuat status pemeliharaan', cfg.data?.settings?.['maintenance.enabled'] === true, cfg.data);
+const reset = await call(S, 'POST', '/v1/admin/platform/settings/reset', { keys: ['maintenance.enabled'], reason: 'selesai uji e2e' });
+check('reset ke default', reset.data?.values?.['maintenance.enabled'] === false, reset.data?.values?.['maintenance.enabled']);
+const setHist = await call(S, 'GET', '/v1/admin/platform/settings/history?key=maintenance.enabled');
+check('riwayat perubahan tercatat', setHist.data?.data?.length >= 2, setHist.data?.data?.length);
+const stor = await call(S, 'GET', '/v1/admin/platform/storage');
+check('storage: disk, bucket, ukuran DB per schema', stor.data?.disk?.total_bytes > 0 && ['uploads', 'backups', 'branding'].every((n) => stor.data.buckets.some((b: any) => b.name === n)) && stor.data.database.schemas.some((x: any) => x.schema === 'catalog'), stor.data?.disk);
+const scan = await call(S, 'POST', '/v1/admin/platform/storage/buckets/uploads/orphans/scan');
+check('pindai file yatim', scan.status === 200 && Array.isArray(scan.data.orphans), scan.data);
+const mnt = await call(S, 'POST', '/v1/admin/platform/storage/maintenance', { action: 'prune_idempotency' });
+check('maintenance prune_idempotency', mnt.status === 200 && mnt.data.action === 'prune_idempotency', mnt.data);
+const bk = await call(S, 'POST', '/v1/admin/platform/backups', { note: 'e2e' }, true);
+check('backup dibuat (202 RUNNING)', bk.status === 202 && bk.data.status === 'RUNNING', [bk.status, bk.data]);
+const bkDone = await until(
+  () => call(S, 'GET', '/v1/admin/platform/backups'),
+  (r) => r.data?.data?.find((x: any) => x.id === bk.data.id)?.status !== 'RUNNING',
+  60_000,
+);
+const bkRow = bkDone.data?.data?.find((x: any) => x.id === bk.data.id);
+check('backup selesai (pg_dump + gzip + sha256)', bkRow?.status === 'COMPLETED' && bkRow.size_bytes > 0 && bkRow.sha256?.length === 64, bkRow);
+if (bkRow?.status === 'COMPLETED') {
+  const del = await call(S, 'DELETE', `/v1/admin/platform/backups/${bk.data.id}`);
+  check('hapus backup', del.data?.deleted === true, del.data);
+}
+const busOv = await call(S, 'GET', '/v1/admin/platform/bus');
+check('event bus: topik & consumer group', busOv.data?.topics?.length > 0 && busOv.data.consumers.length > 0, busOv.data?.topics?.length);
+console.log('\n▶ Super Admin: branding & tema');
+async function upload(token: string, slot: string, type: string, body: Buffer) {
+  const res = await fetch(`${BASE}/v1/admin/platform/branding?slot=${slot}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': type }, body: new Uint8Array(body) });
+  return { status: res.status, data: await res.json().catch(() => null) };
+}
+const goodSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="30" fill="#1ed760"/></svg>');
+const evilSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" onload="alert(1)"><script>alert(2)</script></svg>');
+const wideSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 50"><rect width="200" height="50"/></svg>');
+const opsUp = await upload(admin.access_token, 'icon', 'image/svg+xml', goodSvg);
+check('admin OPS tidak boleh unggah branding (403)', opsUp.status === 403, opsUp.status);
+const evil = await upload(S, 'icon', 'image/svg+xml', evilSvg);
+check('SVG berisi skrip/on* ditolak (422)', evil.status === 422, [evil.status, evil.data?.detail]);
+const wide = await upload(S, 'icon', 'image/svg+xml', wideSvg);
+check('ikon non-persegi ditolak', wide.status === 422, [wide.status, wide.data?.detail]);
+const tinyPng = pngSquare(16);
+const tiny = await upload(S, 'icon', 'image/png', tinyPng);
+check('PNG ikon < 64 px ditolak', tiny.status === 422, [tiny.status, tiny.data?.detail]);
+const icon = await upload(S, 'icon', 'image/svg+xml', goodSvg);
+check('unggah ikon SVG (201, path bucket branding)', icon.status === 201 && /^\/v1\/platform\/branding\/icon-[0-9a-f]{16}\.svg$/.test(icon.data?.url), icon.data);
+const logo = await upload(S, 'logo', 'image/png', pngSquare(128));
+check('unggah logo PNG (201)', logo.status === 201 && logo.data?.url?.endsWith('.png') && logo.data.width === 128, logo.data);
+const extUrl = await call(S, 'PUT', '/v1/admin/platform/settings', { changes: { 'branding.logo_url': 'https://evil.example/logo.png' }, reason: 'uji url eksternal' });
+check('URL logo eksternal ditolak registri (400)', extUrl.status === 400, extUrl.status);
+const ghost = await call(S, 'PUT', '/v1/admin/platform/settings', { changes: { 'branding.logo_url': '/v1/platform/branding/logo-0000000000000000.png' }, reason: 'uji file hilang' });
+check('path file yang belum diunggah ditolak (400)', ghost.status === 400 && ghost.data?.errors?.[0]?.path === 'branding.logo_url', ghost.data?.errors);
+const brandSave = await call(S, 'PUT', '/v1/admin/platform/settings', {
+  changes: { 'branding.icon_url': icon.data?.url, 'branding.logo_url': logo.data?.url, 'appearance.dashboard_theme': 'dark', 'appearance.allow_user_theme': false },
+  reason: 'uji branding & tema e2e',
+});
+check('simpan branding + tema gelap terkunci', brandSave.status === 200 && brandSave.data.values['appearance.dashboard_theme'] === 'dark', brandSave.data);
+const pubCfg = await call(null, 'GET', '/v1/platform/config');
+check('config publik memuat ikon, logo & tema', pubCfg.data?.settings?.['branding.icon_url'] === icon.data?.url && pubCfg.data.settings['appearance.dashboard_theme'] === 'dark' && pubCfg.data.settings['appearance.allow_user_theme'] === false, pubCfg.data?.settings);
+const iconFile = await fetch(BASE + icon.data?.url);
+check('file ikon publik: image/svg+xml + CSP sandbox + nosniff', iconFile.status === 200 && iconFile.headers.get('content-type') === 'image/svg+xml' && /sandbox/.test(iconFile.headers.get('content-security-policy') ?? '') && iconFile.headers.get('x-content-type-options') === 'nosniff', [iconFile.status, iconFile.headers.get('content-type')]);
+const brandFiles = await call(S, 'GET', '/v1/admin/platform/storage/buckets/branding/files');
+check('bucket branding: file terpakai ditandai', brandFiles.data?.data?.some((f: any) => f.referenced === true) , brandFiles.data?.data);
+const delUsed = await call(S, 'DELETE', `/v1/admin/platform/storage/buckets/branding/files/${icon.data?.url.split('/').pop()}?force=true`);
+check('file branding yang dipakai tidak bisa dihapus (409)', delUsed.status === 409, delUsed.status);
+const brandReset = await call(S, 'POST', '/v1/admin/platform/settings/reset', { keys: ['branding.icon_url', 'branding.logo_url', 'appearance.dashboard_theme', 'appearance.allow_user_theme'], reason: 'kembalikan branding bawaan' });
+check('reset branding & tema ke bawaan', brandReset.data?.values?.['branding.icon_url'] === '' && brandReset.data.values['appearance.dashboard_theme'] === 'light', brandReset.data?.values);
+for (const f of [icon, logo]) await call(S, 'DELETE', `/v1/admin/platform/storage/buckets/branding/files/${f.data?.url?.split('/').pop()}`);
+
+const admins = await call(S, 'GET', '/v1/admin/iam/admins');
+check('daftar tim admin', admins.data?.data?.some((u: any) => u.admin_role === 'SUPER_ADMIN'), admins.data?.data?.map((u: any) => u.admin_role));
+const selfDemote = await call(S, 'PATCH', `/v1/admin/iam/users/${SEED.users.superadmin}`, { admin_role: null, reason: 'uji proteksi' });
+check('tidak bisa mencabut Super Admin milik sendiri', selfDemote.status === 403 || selfDemote.status === 409, selfDemote.status);
+
+console.log('\n▶ Live streaming (RTMP, browser, HLS, chat, akses tiket)');
+await wait(6000); // gateway mem-polling pengaturan tiap 5 dtk — pastikan reset mode pemeliharaan di atas sudah terbaca
+const FF = createRequire(import.meta.url)('ffmpeg-static') as string;
+const RTMP = process.env.LIVE_RTMP ?? 'rtmp://127.0.0.1:1935/live';
+/** Publisher ala OBS: sinyal uji H.264/AAC ke RTMP. */
+const pushRtmp = (key: string, seconds = 60) =>
+  spawn(FF, ['-hide_banner', '-loglevel', 'error', '-re', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100',
+    '-t', String(seconds), '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-g', '60', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-f', 'flv', `${RTMP}/${key}`], { stdio: 'ignore' });
+const exited = (p: ReturnType<typeof spawn>, ms: number) => new Promise<number | null>((r) => { const t = setTimeout(() => r(null), ms); p.on('exit', (c) => (clearTimeout(t), r(c))); });
+const streamOf = (id: string, token: string | null = null) => call(token, 'GET', `/v1/live/streams/${id}`);
+
+const demoList = await call(null, 'GET', '/v1/live/streams?status=live');
+const demo = demoList.data?.data?.find((x: any) => x.is_demo);
+check('kanal demo sedang LIVE (sumber demo → RTMP → HLS)', demo?.status === 'LIVE' && demo.ingest === 'demo', demoList.data?.data?.map((x: any) => [x.title, x.status]));
+const pb = await call(null, 'POST', `/v1/live/streams/${demo?.id}/playback`);
+check('anonim dapat URL HLS bertanda tangan', pb.status === 200 && /index\.m3u8\?token=/.test(pb.data?.hls_url), pb.data);
+const m3u8 = await fetch(BASE + pb.data?.hls_url);
+const playlist = await m3u8.text();
+const segLine = playlist.split('\n').find((l) => l.startsWith('seg'));
+check('playlist HLS live: content-type, segmen membawa token', m3u8.headers.get('content-type') === 'application/vnd.apple.mpegurl' && !!segLine?.includes('token='), playlist.slice(0, 200));
+const segRes = await fetch(`${BASE}/v1/live/hls/${demo?.id}/${segLine}`);
+const segBuf = Buffer.from(await segRes.arrayBuffer());
+check('segmen MPEG-TS terunduh (sync byte 0x47)', segRes.status === 200 && segBuf.length > 10_000 && segBuf[0] === 0x47, [segRes.status, segBuf.length]);
+const noTok = await fetch(`${BASE}/v1/live/hls/${demo?.id}/index.m3u8?token=1.palsu`);
+check('HLS tanpa token valid ditolak (403)', noTok.status === 403, noTok.status);
+const hb = await call(F, 'POST', `/v1/live/streams/${demo?.id}/heartbeat`, { viewer_id: crypto.randomUUID() });
+await call(null, 'POST', `/v1/live/streams/${demo?.id}/heartbeat`, { viewer_id: crypto.randomUUID() });
+// Jumlah penonton & total_views ditulis job tiap 5 dtk (konsisten-akhir, aman multi-replika).
+const afterHb = await until(() => streamOf(demo?.id), (r) => r.data?.viewers >= 2 && r.data.total_views >= 2, 15_000);
+check('heartbeat menghitung penonton (login + anonim)', hb.data?.viewers >= 1 && afterHb.data?.viewers >= 2 && afterHb.data.total_views >= 2, [hb.data, afterHb.data?.viewers, afterHb.data?.total_views]);
+const anonChat = await call(null, 'POST', `/v1/live/streams/${demo?.id}/chat`, { body: 'halo' });
+check('chat butuh login (401)', anonChat.status === 401, anonChat.status);
+const c1 = await call(F, 'POST', `/v1/live/streams/${demo?.id}/chat`, { body: 'Merinding dengar lagu baru! 🔥' });
+const c2 = await call(F, 'POST', `/v1/live/streams/${demo?.id}/chat`, { body: 'spam' });
+check('kirim chat (201) + slowmode menolak pesan beruntun (429)', c1.status === 201 && c1.data.mine === true && c2.status === 429, [c1.status, c2.status]);
+const chatPoll = await call(null, 'GET', `/v1/live/streams/${demo?.id}/chat`);
+check('polling chat memuat pesan', chatPoll.data?.data?.some((m: any) => m.id === c1.data?.id) && chatPoll.data.last_id >= c1.data?.id, chatPoll.data?.last_id);
+const modDel = await call(admin.access_token, 'DELETE', `/v1/admin/live/chat/${c1.data?.id}`);
+const chatAfter = await call(null, 'GET', `/v1/live/streams/${demo?.id}/chat`);
+check('admin menghapus pesan chat (moderasi)', modDel.data?.deleted === true && !chatAfter.data?.data?.some((m: any) => m.id === c1.data?.id), modDel.data);
+
+// Siaran bertiket (seed: event ticketing #1)
+const tour = await streamOf(SEED.liveStreams.tourBandung, M);
+check('siaran bertiket: non-pemegang tiket → ticket_required', tour.data?.access === 'TICKET' && tour.data.can_watch === false && tour.data.access_reason === 'ticket_required', tour.data && [tour.data.access_reason]);
+const tourAnon = await streamOf(SEED.liveStreams.tourBandung);
+check('siaran bertiket: anonim → login_required', tourAnon.data?.access_reason === 'login_required', tourAnon.data?.access_reason);
+const tourPb = await call(M, 'POST', `/v1/live/streams/${SEED.liveStreams.tourBandung}/playback`);
+check('playback bertiket tanpa tiket → 403 ticket-required', tourPb.status === 403 && String(tourPb.data?.type).endsWith('/ticket-required'), [tourPb.status, tourPb.data?.type]);
+if (ev?.id === seedId(700, 1)) {
+  const fanTour = await streamOf(SEED.liveStreams.tourBandung, F);
+  check('pemegang tiket event lolos gating (tinggal menunggu siaran dimulai)', fanTour.data?.access_reason === 'not_live', fanTour.data?.access_reason);
+}
+
+// RTMP (OBS) ingest: kunci, LIVE, putus → INTERRUPTED, sambung ulang → LIVE, akhiri → ENDED
+const artistTok = (await login(SEED.emails.artist)).access_token;
+const fanCreate = await call(F, 'POST', '/v1/live/studio/streams', { org_id: SEED.artists[0].orgId, title: 'Tidak boleh', access: 'PUBLIC' });
+check('fan bukan anggota org tidak bisa membuat siaran (403)', fanCreate.status === 403, fanCreate.status);
+const created = await call(artistTok, 'POST', '/v1/live/studio/streams', { org_id: SEED.artists[0].orgId, title: 'E2E Soundcheck RTMP', access: 'PUBLIC' });
+check('artis membuat siaran → stream key sekali tampil + URL RTMP', created.status === 201 && /^gema_/.test(created.data?.stream_key) && created.data.stream.status === 'SCHEDULED', created.data);
+const LS = created.data?.stream?.id as string;
+const badPub = pushRtmp('gema_kunci_palsu', 10);
+check('RTMP dengan kunci salah ditolak server', (await exited(badPub, 8000)) !== null, 'publisher tidak diputus');
+let pub = pushRtmp(created.data?.stream_key, 120);
+const live1 = await until(() => streamOf(LS), (r) => r.data?.status === 'LIVE', 20_000);
+check('publish RTMP → LIVE (ingest rtmp)', live1.data?.status === 'LIVE' && live1.data.ingest === 'rtmp', live1.data?.status);
+const health = await until(() => call(artistTok, 'GET', `/v1/live/studio/streams/${LS}/health`), (r) => r.data?.bitrate_kbps > 0 && r.data.transcoder === 'running', 25_000);
+check('health: transcoder running, segmen & bitrate terukur', health.data?.transcoder === 'running' && health.data.bitrate_kbps > 0 && health.data.segment_age_s < 10, health.data);
+const rot = await call(artistTok, 'POST', `/v1/live/studio/streams/${LS}/key`);
+check('rotasi kunci ditolak saat siaran berjalan (409)', rot.status === 409, rot.status);
+const second = pushRtmp(created.data?.stream_key, 10);
+check('publisher kedua untuk stream yang sama ditolak', (await exited(second, 8000)) !== null);
+pub.kill('SIGKILL');
+const intr = await until(() => streamOf(LS), (r) => r.data?.status === 'INTERRUPTED', 20_000);
+check('publisher putus → INTERRUPTED (bukan langsung berakhir)', intr.data?.status === 'INTERRUPTED', intr.data?.status);
+pub = pushRtmp(created.data?.stream_key, 120);
+const back = await until(() => streamOf(LS), (r) => r.data?.status === 'LIVE', 20_000);
+check('sambung ulang dalam masa tunggu → LIVE lagi', back.data?.status === 'LIVE', back.data?.status);
+const endRes = await call(artistTok, 'POST', `/v1/live/studio/streams/${LS}/end`);
+check('akhiri siaran → ENDED (ended_by_host)', endRes.data?.status === 'ENDED' && endRes.data.ended_reason === 'ended_by_host', endRes.data?.status);
+check('publisher diputus saat siaran diakhiri', (await exited(pub, 10_000)) !== null);
+const pbEnded = await call(null, 'POST', `/v1/live/streams/${LS}/playback`);
+check('playback siaran berakhir → 409 not-live', pbEnded.status === 409, pbEnded.status);
+const again = pushRtmp(created.data?.stream_key, 10);
+check('kunci siaran yang sudah berakhir tidak bisa dipakai lagi', (await exited(again, 8000)) !== null);
+
+// Ingest browser: potongan WebM (MediaRecorder) berurutan lewat HTTP
+const created2 = await call(artistTok, 'POST', '/v1/live/studio/streams', { org_id: SEED.artists[0].orgId, title: 'E2E Siaran dari Browser', access: 'PUBLIC' });
+const BS = created2.data?.stream?.id as string;
+const webm = await new Promise<Buffer>((res, rej) => {
+  const p = spawn(FF, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=330', '-t', '12',
+    '-c:v', 'libvpx', '-deadline', 'realtime', '-b:v', '800k', '-c:a', 'libopus', '-f', 'webm', 'pipe:1'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const parts: Buffer[] = [];
+  p.stdout!.on('data', (d) => parts.push(d));
+  p.on('exit', (c) => (c === 0 ? res(Buffer.concat(parts)) : rej(new Error('webm gagal'))));
+});
+const ing = await call(artistTok, 'POST', `/v1/live/studio/streams/${BS}/ingest/start`, { mime: 'video/webm;codecs=vp8,opus' });
+check('mulai ingest browser', ing.status === 200 && !!ing.data?.session_id, ing.data);
+const putChunk = (seq: number, buf: Buffer) =>
+  fetch(`${BASE}/v1/live/studio/streams/${BS}/ingest/${ing.data?.session_id}/chunks/${seq}`, { method: 'PUT', headers: { authorization: `Bearer ${artistTok}`, 'content-type': 'video/webm' }, body: new Uint8Array(buf) }).then(async (r) => ({ status: r.status, data: await r.json().catch(() => null) }));
+const CH = 24;
+const size = Math.ceil(webm.length / CH);
+const chunks = Array.from({ length: CH }, (_, i) => webm.subarray(i * size, (i + 1) * size));
+let okChunks = 0;
+// Potongan 3 dikirim sebelum 2 (jaringan tak berurutan) + potongan 1 diulang (retry) — server harus tetap merakit berurutan.
+const chunkOrder = [0, 1, 1, 3, 2, ...Array.from({ length: CH - 4 }, (_, i) => i + 4)];
+for (const seq of chunkOrder) {
+  const r = await putChunk(seq, chunks[seq]);
+  if (r.status === 200) okChunks++;
+  await wait(400);
+}
+check('potongan WebM diterima (termasuk duplikat & tak berurutan)', okChunks === chunkOrder.length, okChunks);
+const bLive = await until(() => call(artistTok, 'GET', `/v1/live/studio/streams/${BS}/health`), (r) => r.data?.status === 'LIVE' && r.data.last_segment_at, 20_000);
+check('ingest browser → LIVE + segmen HLS (VP8/Opus → H.264/AAC)', bLive.data?.status === 'LIVE' && !!bLive.data.last_segment_at, bLive.data);
+const bPb = await call(null, 'POST', `/v1/live/streams/${BS}/playback`);
+const bList = await fetch(BASE + bPb.data?.hls_url).then((r) => r.text());
+check('siaran browser dapat diputar (playlist berisi segmen)', /seg\d+\.ts\?token=/.test(bList), bList.slice(0, 120));
+await call(artistTok, 'POST', `/v1/live/studio/streams/${BS}/ingest/${ing.data?.session_id}/stop`);
+const bIntr = await until(() => streamOf(BS), (r) => r.data?.status === 'INTERRUPTED', 10_000);
+check('stop ingest browser → INTERRUPTED', bIntr.data?.status === 'INTERRUPTED', bIntr.data?.status);
+const modStop = await call(admin.access_token, 'POST', `/v1/admin/live/streams/${BS}/stop`, { reason: 'uji moderasi e2e' });
+check('admin menghentikan siaran (moderasi)', modStop.data?.status === 'ENDED' && String(modStop.data.ended_reason).startsWith('moderation'), modStop.data?.ended_reason);
+for (const id of [LS, BS]) await call(artistTok, 'DELETE', `/v1/live/studio/streams/${id}`);
+const ovLive = await call(S, 'GET', '/v1/admin/platform/overview');
+check('dasbor Super Admin: service live sehat + KPI siaran', ovLive.data?.services?.some((x: any) => x.name === 'live' && x.ok) && ovLive.data.kpis.streams_live >= 1, ovLive.data?.kpis?.streams_live);
+
+console.log('\n▶ Iklan: kebijakan penayangan tier Gratis');
+const adAnon = await call(null, 'POST', '/v1/ads/break', { placement: 'between_tracks' });
+check('iklan: anonim tidak pernah diberi iklan', adAnon.data?.outcome === 'anonymous' && adAnon.data.ads.length === 0, adAnon.data);
+const adPrem = await call(admin.access_token, 'POST', '/v1/admin/ads/simulate', { premium: true });
+check('iklan: simulator — Premium selalu bebas iklan', adPrem.data?.outcome === 'premium', adPrem.data);
+const adGrace = await call(admin.access_token, 'POST', '/v1/admin/ads/simulate', { streams_today: 1 });
+check('iklan: simulator — masa bebas iklan harian', adGrace.data?.outcome === 'grace', adGrace.data);
+const adServe = await call(admin.access_token, 'POST', '/v1/admin/ads/simulate', { streams_today: 10, streams_since_break: 5, minutes_since_break: 30, genres: ['indie-pop'] });
+check('iklan: simulator — tayang bila syarat terpenuhi', adServe.data?.outcome === 'serve' && adServe.data.slots >= 1, adServe.data);
+const adBad = await call(admin.access_token, 'POST', '/v1/admin/ads/campaigns', { advertiser: 'E2E', name: 'Uji judi', category: 'gambling', type: 'display', title: 'Uji kategori', duration_s: 10 });
+check('iklan: kategori terlarang ditolak (422)', adBad.status === 422, adBad.status);
+const adNew = await call(admin.access_token, 'POST', '/v1/admin/ads/campaigns', { advertiser: 'E2E', name: 'Uji alur tinjauan', category: 'education', type: 'display', title: 'Kelas produksi musik', duration_s: 10, click_url: 'https://example.com', submit: true });
+check('iklan: kampanye valid diajukan', adNew.status === 201 && adNew.data.status === 'PENDING_REVIEW', adNew.data);
+const adSelf = await call(admin.access_token, 'POST', `/v1/admin/ads/campaigns/${adNew.data?.id}/review`, { approve: true });
+check('iklan: pembuat tidak boleh meninjau sendiri (403)', adSelf.status === 403, adSelf.status);
+const adRej = await call(S, 'POST', `/v1/admin/ads/campaigns/${adNew.data?.id}/review`, { approve: false, note: 'Uji e2e' });
+check('iklan: Super Admin menolak dengan alasan', adRej.data?.status === 'REJECTED', adRej.data?.status);
+const adDel = await call(admin.access_token, 'DELETE', `/v1/admin/ads/campaigns/${adNew.data?.id}`);
+check('iklan: kampanye ditolak tanpa impresi dapat dihapus', adDel.data?.deleted === true, adDel.data);
+const adOv = await call(admin.access_token, 'GET', '/v1/admin/ads/overview?days=7');
+check('iklan: ringkasan & matriks kategori', !!adOv.data?.kpis && adOv.data.policy.categories.some((c: any) => c.key === 'gambling' && c.blocked), adOv.data?.kpis);
+
+console.log('\n▶ Refund tiket (permintaan pembeli, perubahan jadwal, pembatalan event, bayar terlambat)');
+{
+  // Endpoint /v1/ticketing/orders* dibatasi 30 permintaan/menit per akun: polling di bagian ini tiap 2,5 dtk.
+  const day = 86_400_000;
+  /** Panggilan endpoint order tiket fan: ulangi saat kena rate limit 30/menit (gateway kelas `tix`). */
+  const callT = async (method: string, path: string, body?: unknown) => {
+    for (let i = 0; ; i++) {
+      const r = await call(F, method, path, body);
+      if (r.status !== 429 || i >= 20) return r;
+      await wait(3000);
+    }
+  };
+  const starts = new Date(Date.now() + 30 * day);
+  const evNew = await call(P, 'POST', '/v1/ticketing/events', {
+    org_id: SEED.orgs.pensiPromotor, title: `E2E Refund ${Date.now()}`, city: 'Bandung', venue_name: 'Aula E2E',
+    starts_at: starts.toISOString(), ends_at: new Date(starts.getTime() + 4 * 3600_000).toISOString(),
+    ticket_types: [{ name: 'Reguler', price: 100_000, quota: 50, max_per_account: 4 }],
+  });
+  const evId = evNew.data?.id;
+  await call(P, 'POST', `/v1/ticketing/events/${evId}/publish`);
+  const typeId = evNew.data?.ticket_types?.[0]?.id;
+  const buy = async (pay = true) => {
+    const o = await call(F, 'POST', '/v1/ticketing/orders', { event_id: evId, items: [{ ticket_type_id: typeId, quantity: 1 }] }, true);
+    if (pay) {
+      await call(F, 'POST', `/v1/finance/invoices/${o.data?.invoice?.id}/simulate-pay`, { method: 'QRIS' }, true);
+      await until(() => callT('GET', `/v1/ticketing/orders/${o.data?.order?.id}`), (r) => r.data?.status === 'PAID', 30000, 2500);
+    }
+    return o.data;
+  };
+  const setRefund = (changes: Record<string, unknown>) => call(S, 'PUT', '/v1/admin/platform/settings', { changes, reason: 'uji refund e2e' });
+  const refundDone = (id: string) => until(() => callT('GET', `/v1/ticketing/orders/${id}`), (r) => r.data?.refund?.status === 'COMPLETED', 30000, 2500);
+
+  // 1) Default kebijakan: refund atas permintaan pembeli mati.
+  const o1 = await buy();
+  await setRefund({ 'refund.buyer_request_enabled': false });
+  const q0 = await until(() => callT('GET', `/v1/ticketing/orders/${o1.order.id}/refund`), (r) => r.data?.eligible === false, 30000, 2500);
+  const r0 = await callT('POST', `/v1/ticketing/orders/${o1.order.id}/refund`);
+  check('refund pembeli ditolak saat kebijakan mati (409)', q0.data?.eligible === false && r0.status === 409, [q0.data, r0.status]);
+
+  // 2) Kebijakan dinyalakan (80%, H-7): pembeli mengajukan sendiri.
+  await setRefund({ 'refund.buyer_request_enabled': true, 'refund.buyer_refund_pct': 80 });
+  const q1 = await until(() => callT('GET', `/v1/ticketing/orders/${o1.order.id}/refund`), (r) => r.data?.eligible === true, 30000, 2500);
+  check('pratinjau refund pembeli: 80% tanpa biaya layanan', q1.data?.reason === 'buyer_request' && q1.data?.pct === 80 && q1.data?.amount === 80_000, q1.data);
+  const r1 = await callT('POST', `/v1/ticketing/orders/${o1.order.id}/refund`);
+  check('pengajuan refund → order REFUNDED, tiket dibatalkan', r1.status === 200 && r1.data?.status === 'REFUNDED' && r1.data?.refund?.status === 'PENDING', r1.data);
+  const d1 = await refundDone(o1.order.id);
+  check('finance mengembalikan dana (ticketing → finance → ticketing)', d1.data?.refund?.status === 'COMPLETED' && d1.data?.refund?.amount === 80_000, d1.data?.refund);
+  // Refund lewat adapter penyedia: REQUESTED → PENDING (sandbox) → COMPLETED oleh webhook bertanda tangan.
+  const fr = await call(S, 'GET', `/v1/admin/finance/refunds?reference_id=${o1.order.id}`);
+  const rf = fr.data?.data?.[0];
+  check('refund melewati penyedia: PENDING → COMPLETED via webhook', rf?.status === 'COMPLETED' && rf?.provider === 'sandbox' && /^sbx_rf_/.test(rf?.provider_ref ?? '') && rf?.settled_by === 'provider', rf);
+  const secret = process.env.PG_WEBHOOK_SECRET ?? 'dev-pg-webhook-secret';
+  const sign = (raw: string, key = secret) => {
+    const t = Math.floor(Date.now() / 1000);
+    return `t=${t},v1=${createHmac('sha256', key).update(`${t}.${raw}`).digest('hex')}`;
+  };
+  const hook = (raw: string, sig: string) => fetch(`${BASE}/v1/webhooks/pg/sandbox`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-pg-signature': sig }, body: raw });
+  const lateFail = JSON.stringify({ event_id: `e2e_rf_${Date.now()}`, refund_ref: rf?.provider_ref, status: 'FAILED', failure_reason: 'uji e2e' });
+  const forged = await hook(lateFail, sign(lateFail, 'kunci-palsu'));
+  check('webhook refund bertanda tangan palsu ditolak (401)', forged.status === 401, forged.status);
+  const genuine = await hook(lateFail, sign(lateFail));
+  const rfAfter = (await call(S, 'GET', `/v1/admin/finance/refunds?reference_id=${o1.order.id}`)).data?.data?.[0];
+  check('refund final tidak berubah oleh webhook susulan', genuine.status === 200 && rfAfter?.status === 'COMPLETED', [genuine.status, rfAfter?.status]);
+  const recon = await call(S, 'GET', '/v1/admin/finance/reconciliation');
+  const owed = recon.data?.accounts?.find((a: any) => a.account === `liability:refund:${SEED.users.fan}`)?.balance ?? 0;
+  check('utang refund ke pembeli lunas & ledger seimbang', recon.data?.balanced === true && Number(owed) === 0, [recon.data?.balanced, owed]);
+  const retryNone = await call(S, 'POST', `/v1/admin/finance/refunds/${o1.order.id}/retry`);
+  check('refund selesai tidak bisa dikirim ulang (409)', retryNone.status === 409, retryNone.status);
+
+  const r1b = await callT('POST', `/v1/ticketing/orders/${o1.order.id}/refund`);
+  check('refund ganda ditolak (409)', r1b.status === 409, r1b.status);
+  const myT = await call(F, 'GET', '/v1/ticketing/tickets/mine');
+  const t1 = myT.data?.data?.find((t: any) => t.order_id === o1.order.id);
+  const qrDead = t1 ? await call(F, 'GET', `/v1/ticketing/tickets/${t1.id}/qr`) : { status: 0 };
+  check('tiket refund tidak bisa dipakai (QR 409)', t1?.status === 'REFUNDED' && qrDead.status === 409, [t1?.status, qrDead.status]);
+  const evAfter = await call(null, 'GET', `/v1/ticketing/events/${evId}`);
+  check('kuota tiket kembali ke penjualan', evAfter.data?.ticket_types?.[0]?.remaining === 50, evAfter.data?.ticket_types?.[0]);
+
+  // 3) Jadwal berubah → refund penuh walau permintaan biasa dimatikan lagi.
+  await setRefund({ 'refund.buyer_request_enabled': false });
+  const o2 = await buy();
+  const moved = await call(P, 'PATCH', `/v1/ticketing/events/${evId}`, { starts_at: new Date(starts.getTime() + day).toISOString(), ends_at: new Date(starts.getTime() + day + 4 * 3600_000).toISOString() });
+  const q2 = await until(() => callT('GET', `/v1/ticketing/orders/${o2.order.id}/refund`), (r) => r.data?.reason === 'rescheduled', 30000, 2500);
+  check('jadwal berubah → hak refund penuh termasuk biaya layanan', moved.status === 200 && q2.data?.eligible && q2.data?.pct === 100 && q2.data?.refund_fee === true, q2.data);
+  const badTime = await call(P, 'PATCH', `/v1/ticketing/events/${evId}`, { ends_at: new Date(starts.getTime() - day).toISOString() });
+  check('edit event: selesai sebelum mulai ditolak (400)', badTime.status === 400, badTime.status);
+
+  // 4) Pembatalan event: order PAID direfund penuh otomatis; reservasi berjalan dihentikan.
+  const o3 = await buy(false); // reservasi belum dibayar
+  const fanCancel = await call(F, 'POST', `/v1/ticketing/events/${evId}/cancel`, { reason: 'Fan tidak boleh membatalkan event' });
+  check('fan tidak bisa membatalkan event (403)', fanCancel.status === 403, fanCancel.status);
+  const cancel = await call(P, 'POST', `/v1/ticketing/events/${evId}/cancel`, { reason: 'Venue tidak dapat digunakan (uji e2e)' });
+  check('promotor membatalkan event → refund diajukan', cancel.status === 200 && cancel.data?.status === 'CANCELLED' && cancel.data?.refunds?.requested === 1, cancel.data?.refunds ?? cancel.data);
+  const d2 = await refundDone(o2.order.id);
+  check('pembeli event batal menerima refund penuh', d2.data?.refund?.reason === 'event_cancelled' && d2.data?.refund?.amount === 100_000, d2.data?.refund);
+  const o3s = await callT('GET', `/v1/ticketing/orders/${o3.order.id}`);
+  check('reservasi event batal dihentikan (CANCELLED)', o3s.data?.status === 'CANCELLED', o3s.data?.status);
+
+  // 5) Pembayaran tetap masuk untuk reservasi event yang sudah batal → refund otomatis (tidak ditahan / dead letter).
+  await call(F, 'POST', `/v1/finance/invoices/${o3.invoice.id}/simulate-pay`, { method: 'QRIS' }, true);
+  const d3 = await refundDone(o3.order.id);
+  check('pembayaran terlambat untuk event batal → dana dikembalikan otomatis', d3.data?.status === 'REFUNDED' && d3.data?.refund?.amount === 100_000, d3.data);
+
+  const nRefund = await until(() => call(F, 'GET', '/v1/notifications'), (r) => r.data?.data?.some((n: any) => n.title === 'Dana tiket dikembalikan'));
+  check('pembeli menerima notifikasi refund', nRefund.data?.data?.some((n: any) => n.title === 'Dana tiket dikembalikan'));
+  const nMove = (await call(F, 'GET', '/v1/notifications')).data?.data?.some((n: any) => n.title === 'Jadwal event berubah');
+  check('pembeli menerima notifikasi perubahan jadwal', !!nMove);
+  const queue = await call(S, 'GET', '/v1/admin/ticketing/refunds');
+  check('antrean refund di back office', queue.status === 200 && queue.data?.data?.some((r: any) => r.order_id === o2.order.id), queue.status);
+  await call(S, 'POST', '/v1/admin/platform/settings/reset', { keys: ['refund.buyer_request_enabled', 'refund.buyer_refund_pct'], reason: 'selesai uji refund e2e' });
+}
+
+console.log('\n▶ Akses per peran (fan, artis, manajer, promotor, admin, Super Admin)');
+{
+  const nonAdmin: [string, string][] = [['fan', F], ['artis', artistTok], ['manajer', M], ['promotor', P]];
+  const probes = ['/v1/admin/platform/settings', '/v1/admin/platform/overview', '/v1/admin/qc/releases', '/v1/admin/iam/kyc', '/v1/admin/finance/reconciliation', '/v1/admin/ticketing/refunds', '/v1/admin/ads/campaigns'];
+  const leaks: string[] = [];
+  for (const [who, tok] of nonAdmin)
+    for (const path of probes) {
+      const r = await call(tok, 'GET', path);
+      if (r.status !== 403) leaks.push(`${who} ${path} → ${r.status}`);
+    }
+  check('akun non-admin ditolak di semua endpoint back office & platform (403)', !leaks.length, leaks);
+
+  const meOps = await call(admin.access_token, 'GET', '/v1/me');
+  check('/v1/me memuat izin efektif peran (OPS tanpa refund)', meOps.data?.admin_permissions?.includes('qc.review') && !meOps.data?.admin_permissions?.includes('finance.refund'), meOps.data?.admin_permissions);
+  const opsRefund = await call(admin.access_token, 'POST', `/v1/admin/ticketing/orders/${crypto.randomUUID()}/refund`, { pct: 100, refund_fee: true, note: 'uji akses peran' });
+  check('OPS tidak boleh memutuskan refund (403)', opsRefund.status === 403, opsRefund.status);
+
+  // Admin baru berperan Finance & Support (dibuat Super Admin lewat Tim Admin).
+  const mk = async (role: string) => {
+    const email = `e2e-${role.toLowerCase()}-${Date.now()}@gema.test`;
+    const first = await login(email);
+    await call(S, 'PATCH', `/v1/admin/iam/users/${first.user.id}`, { admin_role: role, reason: 'uji peran e2e' });
+    return { id: first.user.id as string, tok: (await login(email)).access_token };
+  };
+  const fin = await mk('FINANCE');
+  const sup = await mk('SUPPORT');
+  const finRecon = await call(fin.tok, 'GET', '/v1/admin/finance/reconciliation');
+  const finQc = await call(fin.tok, 'GET', '/v1/admin/qc/releases');
+  const finPlat = await call(fin.tok, 'GET', '/v1/admin/platform/settings');
+  check('Finance: buka keuangan, ditolak QC & Platform', finRecon.status === 200 && finQc.status === 403 && finPlat.status === 403, [finRecon.status, finQc.status, finPlat.status]);
+  const supAudit0 = await call(sup.tok, 'GET', '/v1/admin/iam/audit-logs');
+  check('Support default tidak boleh lihat audit log (403)', supAudit0.status === 403, supAudit0.status);
+
+  // Super Admin memberi Support izin audit log → berlaku tanpa login ulang.
+  const bad = await call(S, 'PUT', '/v1/admin/platform/settings', { changes: { 'access.role.SUPPORT': ['users.view', 'platform.everything'] }, reason: 'uji validasi izin' });
+  check('izin tak dikenal ditolak (400)', bad.status === 400, bad.status);
+  const grant = await call(S, 'PUT', '/v1/admin/platform/settings', { changes: { 'access.role.SUPPORT': ['users.view', 'finance.view', 'audit.view'] }, reason: 'Support perlu audit log (uji e2e)' });
+  const supAudit1 = await until(() => call(sup.tok, 'GET', '/v1/admin/iam/audit-logs'), (r) => r.status === 200, 15000);
+  check('Super Admin memberi izin → langsung berlaku tanpa login ulang', grant.status === 200 && supAudit1.status === 200, [grant.status, supAudit1.status]);
+  const opsGrant = await call(admin.access_token, 'PUT', '/v1/admin/platform/settings', { changes: { 'access.role.OPS': ['finance.refund'] }, reason: 'eskalasi diri' });
+  check('admin non-Super tidak bisa mengubah izin peran (403)', opsGrant.status === 403, opsGrant.status);
+  await call(S, 'POST', '/v1/admin/platform/settings/reset', { keys: ['access.role.SUPPORT'], reason: 'selesai uji peran e2e' });
+  const supAudit2 = await until(() => call(sup.tok, 'GET', '/v1/admin/iam/audit-logs'), (r) => r.status === 403, 15000);
+  check('izin dicabut → akses langsung tertutup', supAudit2.status === 403, supAudit2.status);
+  const supPlat = await call(sup.tok, 'GET', '/v1/admin/platform/overview');
+  const supTeam = await call(sup.tok, 'GET', '/v1/admin/iam/admins');
+  check('tim admin & platform tetap khusus Super Admin', supPlat.status === 403 && supTeam.status === 403, [supPlat.status, supTeam.status]);
+  for (const u of [fin, sup]) await call(S, 'PATCH', `/v1/admin/iam/users/${u.id}`, { admin_role: null, reason: 'selesai uji peran e2e' });
+}
 
 console.log(`\n${failed ? '\x1b[31m' : '\x1b[32m'}${passed} lulus, ${failed} gagal\x1b[0m\n`);
 process.exit(failed ? 1 : 0);

@@ -1,5 +1,5 @@
 import { SEED, SEED_ARTIST_IMAGE, seedId } from '@gema/domain';
-import { publish, uuidv7, type Client, type ServiceContext } from '@gema/service-kit';
+import { encryptField, maskField, publish, uuidv7, type Client, type ServiceContext } from '@gema/service-kit';
 import { renderContract, TEMPLATE_VERSION } from './contract.js';
 import type { BookingRow } from './common.js';
 
@@ -96,6 +96,27 @@ export async function seed({ db, log }: ServiceContext) {
         }),
         JSON.stringify({ name: a.id === SENJA.id ? 'Nada Manajemen' : `Manajemen ${a.name}`, email: `booking@${a.slug}.id`, phone: `+62 812-0000-${String(1000 + i * 37)}` }),
       ]);
+    }
+
+    // Profil legal pihak (data sensitif terenkripsi, hanya versi samar yang tampil) & rider berversi untuk kontrak SPK.
+    const legal: [string, string, string, string, string, string, string, string][] = [
+      [PENSI, 'PROMOTOR', 'PT Pensi Nusantara Kreatif', 'Raka Wirawan', 'Direktur Utama', '3273012509900001', '09.123.456.7-421.000', 'Jl. Braga No. 21, Bandung'],
+      [NADA, 'MANAGEMENT', 'PT Nada Manajemen Indonesia', 'Sekar Maheswari', 'Direktur', '3171014307880002', '02.765.432.1-017.000', 'Jl. Kemang Raya No. 8, Jakarta Selatan'],
+    ];
+    for (const [org, kind, name, rep, title, nik, npwp, addr] of legal)
+      await c.query(
+        `INSERT INTO legal_profiles (org_id, kind, legal_name, rep_name, rep_title, nik_enc, nik_mask, npwp_enc, npwp_mask, address, email, whatsapp, bank_name, bank_account_enc, bank_account_mask, bank_holder, mgmt_fee_pct)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT DO NOTHING`,
+        [org, kind, name, rep, title, encryptField(nik), maskField(nik), encryptField(npwp), maskField(npwp), addr,
+         kind === 'PROMOTOR' ? 'legal@pensi.id' : 'legal@nadamanajemen.id', kind === 'PROMOTOR' ? '+6281200001111' : '+6281200002222',
+         kind === 'MANAGEMENT' ? 'BCA' : null, kind === 'MANAGEMENT' ? encryptField('8201234567') : null, kind === 'MANAGEMENT' ? maskField('8201234567') : null, kind === 'MANAGEMENT' ? name : null,
+         kind === 'MANAGEMENT' ? 20 : null],
+      );
+    for (const a of SEED.artists) {
+      const performers = a.slug === 'mc-rantau' || a.slug === 'nirmala' ? 2 : a.slug === 'arunika' ? 3 : 5;
+      const { personnel, hospitality, ...technical } = RIDER(performers);
+      for (const [kind, content] of [['hospitality', { personnel, hospitality }], ['technical', technical]] as const)
+        await c.query(`INSERT INTO rider_versions (artist_id, kind, version, content, created_by) VALUES ($1,$2,1,$3,'seed') ON CONFLICT DO NOTHING`, [a.id, kind, JSON.stringify(content)]);
     }
 
     // Split fee Senja: band 80% / manajemen 20%

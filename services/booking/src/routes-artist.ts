@@ -15,6 +15,8 @@ import {
   badRequest,
   callService,
   conflict,
+  isAdmin,
+  managedArtistIds,
   notFound,
   requireAuth,
   requireRole,
@@ -25,6 +27,9 @@ import {
   type ServiceContext,
 } from '@gema/service-kit';
 import { assertManageArtist, canManageArtist, isVerifiedPromotor } from './common.js';
+
+/** Batas kandidat discovery yang diperkaya statistik (selaras EPK_BATCH_MAX di playback). */
+const DISCOVERY_MAX_CANDIDATES = 200;
 
 const METRIC_KEYS = ['monthly_listeners', 'growth_90d_pct', 'top_cities', 'age_groups', 'shows_12m', 'avg_rating', 'on_time_rate'] as const;
 
@@ -46,8 +51,24 @@ export async function playbackEpk(artistId: string, log?: { warn: (o: object, m:
   }
 }
 
+/** Batch EPK playback untuk banyak artis (satu panggilan, query ber-GROUP BY di playback). Gagal → fallback kosong. */
+export async function playbackEpkMany(artistIds: string[], log?: { warn: (o: object, m: string) => void }): Promise<Map<string, PlaybackEpk>> {
+  const out = new Map<string, PlaybackEpk>();
+  if (!artistIds.length) return out;
+  try {
+    const r = await callService<{ data: (PlaybackEpk & { artist_id: string })[] }>('booking', 'playback', `/internal/analytics/epk?ids=${artistIds.join(',')}`);
+    for (const { artist_id, ...x } of r.data) out.set(artist_id, { ...EMPTY_STATS, ...x });
+  } catch (e: any) {
+    log?.warn({ err: e?.message, n: artistIds.length }, 'playback epk batch tidak tersedia, pakai fallback');
+  }
+  return out;
+}
+
+export const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+
 export async function artistRow(db: Db, idOrSlug: string) {
-  const a = await db.one(`SELECT * FROM artists WHERE id::text=$1 OR slug=$1`, [idOrSlug]);
+  // Cabang uuid/slug terpisah agar indeks PK/slug terpakai (tanpa id::text).
+  const a = await db.one(`SELECT * FROM artists WHERE ${isUuid(idOrSlug) ? 'id' : 'slug'} = $1`, [idOrSlug]);
   if (!a) throw notFound('Artis');
   return a;
 }
@@ -56,17 +77,37 @@ export function artistSummary(a: any, monthly = 0) {
   return { id: a.id, slug: a.slug, name: a.name, image_url: a.image_url, city: a.city, genres: a.genres, verified: a.verified, monthly_listeners: monthly };
 }
 
+interface OffairStats {
+  shows_12m: number;
+  avg_rating: number | null;
+  on_time_rate: number | null;
+}
+
 /** Statistik off-air dari booking & rating (REQ-B2B-01 data off-air). */
-export async function offairStats(db: Db, artistId: string) {
-  const r = await db.one(
-    `SELECT
-       (SELECT count(*)::int FROM bookings WHERE artist_id=$1 AND status IN ('COMPLETED','SETTLED') AND event_date > current_date - interval '12 months') AS shows_12m,
-       (SELECT round(avg(overall)::numeric, 2) FROM ratings r JOIN bookings b ON b.id=r.booking_id WHERE b.artist_id=$1 AND r.by_party='promotor') AS avg_rating,
-       (SELECT round(avg(CASE WHEN (scores->>'ketepatan_waktu')::numeric >= 4 THEN 1 ELSE 0 END)::numeric, 2)
-          FROM ratings r JOIN bookings b ON b.id=r.booking_id WHERE b.artist_id=$1 AND r.by_party='promotor' AND scores ? 'ketepatan_waktu') AS on_time_rate`,
-    [artistId],
+export async function offairStats(db: Db, artistId: string): Promise<OffairStats> {
+  return (await offairStatsMany(db, [artistId])).get(artistId)!;
+}
+
+/** Versi batch: dua query ber-GROUP BY untuk banyak artis. Angka per artis identik dengan versi tunggal. */
+export async function offairStatsMany(db: Db, artistIds: string[]): Promise<Map<string, OffairStats>> {
+  const [shows, rates] = await Promise.all([
+    db.query(
+      `SELECT artist_id, count(*)::int AS n FROM bookings
+       WHERE artist_id = ANY($1::uuid[]) AND status IN ('COMPLETED','SETTLED') AND event_date > current_date - interval '12 months' GROUP BY artist_id`,
+      [artistIds],
+    ),
+    db.query(
+      `SELECT b.artist_id, round(avg(overall)::numeric, 2) AS avg_rating,
+         round(avg(CASE WHEN scores ? 'ketepatan_waktu' THEN CASE WHEN (scores->>'ketepatan_waktu')::numeric >= 4 THEN 1 ELSE 0 END END)::numeric, 2) AS on_time_rate
+       FROM ratings r JOIN bookings b ON b.id = r.booking_id WHERE b.artist_id = ANY($1::uuid[]) AND r.by_party = 'promotor' GROUP BY b.artist_id`,
+      [artistIds],
+    ),
+  ]);
+  const showMap = new Map(shows.map((r) => [r.artist_id, r.n]));
+  const rateMap = new Map(rates.map((r) => [r.artist_id, r]));
+  return new Map(
+    artistIds.map((id) => [id, { shows_12m: showMap.get(id) ?? 0, avg_rating: rateMap.get(id)?.avg_rating ?? null, on_time_rate: rateMap.get(id)?.on_time_rate ?? null }]),
   );
-  return { shows_12m: r?.shows_12m ?? 0, avg_rating: r?.avg_rating ?? null, on_time_rate: r?.on_time_rate ?? null };
 }
 
 /** Item rate card yang boleh dilihat viewer sesuai visibilitas (REQ-B2B-03). */
@@ -323,6 +364,8 @@ export async function artistRoutes(app: FastifyInstance, { db, log }: ServiceCon
   });
 
   // ---------- Talent discovery (REQ-B2B-07) ----------
+  // Filter genre/tanggal/budget di SQL (from_fee = logika visibleRateCard + filter format/kategori), lalu statistik
+  // off-air & playback dimuat batch untuk ≤ DISCOVERY_MAX_CANDIDATES kandidat; diurutkan Audience Match lalu dipotong `limit`.
   app.get('/v1/booking/discovery', { preHandler: requireRole('promotor') }, async (req) => {
     const q = z
       .object({
@@ -332,9 +375,9 @@ export async function artistRoutes(app: FastifyInstance, { db, log }: ServiceCon
         date: z.string().date().optional(),
         format: z.enum(PERFORMANCE_FORMATS).optional(),
         category: z.enum(EVENT_CATEGORIES).optional(),
+        limit: z.coerce.number().int().min(1).max(100).default(24),
       })
       .parse(req.query);
-    const artists = await db.query(`SELECT * FROM artists ${q.genre ? 'WHERE $1 = ANY(genres)' : ''} ORDER BY name`, q.genre ? [q.genre] : []);
     let cityMap = new Map<string, number>();
     if (q.city) {
       try {
@@ -344,43 +387,55 @@ export async function artistRoutes(app: FastifyInstance, { db, log }: ServiceCon
         log.warn({ err: e?.message }, 'city-listeners tidak tersedia, fallback ke kota asal artis');
       }
     }
-    const results = await Promise.all(
-      artists.map(async (a) => {
-        const [pb, off, rc] = await Promise.all([playbackEpk(a.id), offairStats(db, a.id), visibleRateCard(db, a.id, req.user)]);
-        const items = rc.items.filter((i: any) => (!q.format || i.format === q.format) && (!q.category || i.category === q.category));
-        const fromFee = items.length ? Math.min(...items.map((i: any) => i.fee)) : rc.from_fee;
-        if (q.budget_max && fromFee !== null && fromFee > q.budget_max) return null;
-        let available: boolean | null = null;
-        if (q.date) {
-          const busy = await db.one(
-            `SELECT 1 FROM calendar_slots WHERE artist_id=$1 AND status IN ('PENDING_CONTRACT','BOOKED','BOOKED_AND_SECURED','BLOCKED','TRAVEL') AND period @> $2::date`,
-            [a.id, q.date],
-          );
-          available = !busy;
-        }
-        const homeCity = q.city && a.city?.toLowerCase() === q.city.toLowerCase();
-        const inCity = q.city ? (cityMap.get(a.id) ?? (homeCity ? Math.round(pb.monthly_listeners * 0.3) : 0)) : 0;
-        // Tanpa data streaming (playback tidak tersedia) → heuristik kota asal artis.
-        const noData = pb.monthly_listeners === 0 && !cityMap.size;
-        const score = audienceMatchScore({
-          listenersInEventCity: noData ? (homeCity ? 1 : 0) : q.city ? inCity : pb.monthly_listeners * 0.25,
-          totalMonthlyListeners: noData ? 1 : Math.max(pb.monthly_listeners, inCity, 1),
-          growth90dPct: pb.growth_90d_pct,
-          engagementRate: pb.engagement_rate,
-          genreFit: q.genre ? 1 : 0.6,
-        });
-        return {
-          artist: artistSummary(a, pb.monthly_listeners),
-          from_fee: fromFee,
-          audience_match: score,
-          listeners_in_city: q.city ? kSafe(inCity) : null,
-          avg_rating: off.avg_rating,
-          shows_12m: off.shows_12m,
-          available,
-        };
-      }),
+    const u = req.user;
+    const managed = isAdmin(u) ? null : managedArtistIds(u);
+    const candidates = await db.query(
+      `SELECT a.*, f.from_fee FROM artists a
+       LEFT JOIN LATERAL (
+         SELECT CASE WHEN rc.visibility = 'PUBLIC' OR $1::boolean OR a.id::text = ANY($2::text[]) OR (rc.visibility = 'VERIFIED_PROMOTOR' AND $3::boolean)
+                     THEN coalesce(min(i.fee) FILTER (WHERE ($4::text IS NULL OR i.format = $4) AND ($5::text IS NULL OR i.category = $5)), min(i.fee)) END AS from_fee
+         FROM rate_cards rc LEFT JOIN rate_card_items i ON i.artist_id = rc.artist_id
+         WHERE rc.artist_id = a.id GROUP BY rc.visibility
+       ) f ON true
+       WHERE ($6::text IS NULL OR $6 = ANY(a.genres))
+         AND ($7::bigint IS NULL OR f.from_fee IS NULL OR f.from_fee <= $7)
+         AND ($8::date IS NULL OR NOT EXISTS (
+           SELECT 1 FROM calendar_slots cs WHERE cs.artist_id = a.id
+             AND cs.status IN ('PENDING_CONTRACT','BOOKED','BOOKED_AND_SECURED','BLOCKED','TRAVEL') AND cs.period @> $8::date))
+       ORDER BY a.name`,
+      [managed === null, managed ?? [], isVerifiedPromotor(u), q.format ?? null, q.category ?? null, q.genre ?? null, q.budget_max ?? null, q.date ?? null],
     );
-    const data = results.filter((r): r is NonNullable<typeof r> => !!r && r.available !== false).sort((x, y) => y.audience_match - x.audience_match);
+    // Batas kandidat: dengan kota acara, prioritaskan pendengar di kota itu (sort stabil → urutan nama tetap untuk seri).
+    const ranked = q.city && cityMap.size ? [...candidates].sort((x, y) => (cityMap.get(y.id) ?? 0) - (cityMap.get(x.id) ?? 0)) : candidates;
+    const pool = ranked.length > DISCOVERY_MAX_CANDIDATES ? new Set(ranked.slice(0, DISCOVERY_MAX_CANDIDATES)) : null;
+    const artists = pool ? candidates.filter((a) => pool.has(a)) : candidates;
+    const ids = artists.map((a) => a.id as string);
+    const [pbMap, offMap] = await Promise.all([playbackEpkMany(ids, log), offairStatsMany(db, ids)]);
+    const results = artists.map((a) => {
+      const pb = pbMap.get(a.id) ?? EMPTY_STATS;
+      const off = offMap.get(a.id)!;
+      const homeCity = q.city && a.city?.toLowerCase() === q.city.toLowerCase();
+      const inCity = q.city ? (cityMap.get(a.id) ?? (homeCity ? Math.round(pb.monthly_listeners * 0.3) : 0)) : 0;
+      // Tanpa data streaming (playback tidak tersedia) → heuristik kota asal artis.
+      const noData = pb.monthly_listeners === 0 && !cityMap.size;
+      const score = audienceMatchScore({
+        listenersInEventCity: noData ? (homeCity ? 1 : 0) : q.city ? inCity : pb.monthly_listeners * 0.25,
+        totalMonthlyListeners: noData ? 1 : Math.max(pb.monthly_listeners, inCity, 1),
+        growth90dPct: pb.growth_90d_pct,
+        engagementRate: pb.engagement_rate,
+        genreFit: q.genre ? 1 : 0.6,
+      });
+      return {
+        artist: artistSummary(a, pb.monthly_listeners),
+        from_fee: a.from_fee ?? null,
+        audience_match: score,
+        listeners_in_city: q.city ? kSafe(inCity) : null,
+        avg_rating: off.avg_rating,
+        shows_12m: off.shows_12m,
+        available: q.date ? true : null,
+      };
+    });
+    const data = results.sort((x, y) => y.audience_match - x.audience_match).slice(0, q.limit);
     return { data };
   });
 }

@@ -20,7 +20,12 @@
     "dev": "node --import tsx scripts/dev-all.ts",
     "test": "vitest run",
     "e2e": "node --import tsx scripts/e2e.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "e2e:isolated": "node --import tsx scripts/e2e-isolated.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "bash scripts/gema.sh start",
+    "stop": "bash scripts/gema.sh stop",
+    "status": "bash scripts/gema.sh status",
+    "logs": "bash scripts/gema.sh logs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

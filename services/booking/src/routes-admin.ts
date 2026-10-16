@@ -1,11 +1,11 @@
 import type { FastifyInstance } from 'fastify';
-import { audit, conflict, notFound, publish, requireRole, z, type ServiceContext } from '@gema/service-kit';
+import { audit, conflict, notFound, publish, requirePermission, z, type ServiceContext } from '@gema/service-kit';
 import { pickDispute } from './routes-bookings.js';
 import { feeSplits, loadBooking, transition } from './repo.js';
 
 /** Dispute center untuk tim mediasi GEMA (REQ-B2B-12, SLA keputusan ≤ 14 hari kerja). */
 export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) {
-  app.get('/v1/admin/disputes', { preHandler: requireRole('admin') }, async (req) => {
+  app.get('/v1/admin/disputes', { preHandler: requirePermission('dispute.resolve') }, async (req) => {
     const { status } = req.query as { status?: string };
     const rows = await db.query(
       `SELECT d.*, b.event_name, b.event_date, b.agreed_fee, b.status AS booking_status, a.name AS artist_name
@@ -21,7 +21,7 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
     };
   });
 
-  app.post('/v1/admin/disputes/:id/resolve', { preHandler: requireRole('admin') }, async (req) => {
+  app.post('/v1/admin/disputes/:id/resolve', { preHandler: requirePermission('dispute.resolve') }, async (req) => {
     const { id } = req.params as { id: string };
     const p = z.object({ outcome: z.enum(['RELEASE_TO_ARTIST', 'REFUND_PROMOTOR']), note: z.string().min(3).max(4000) }).parse(req.body);
     return db.tx(async (c) => {
@@ -40,6 +40,7 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
         splits: await feeSplits(c, b),
         payeeType: 'individual',
         promotorOrgId: b.promotor_org_id,
+        artistId: b.artist_id,
       });
       await audit(c, { actorId: req.user!.sub, action: 'dispute.resolve', entity: 'dispute', entityId: id, data: p, ip: req.ip });
       return pickDispute(r.rows[0]);

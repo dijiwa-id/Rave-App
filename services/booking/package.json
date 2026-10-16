@@ -11,6 +11,12 @@
   },
   "dependencies": {
     "@gema/domain": "*",
-    "@gema/service-kit": "*"
+    "@gema/service-kit": "*",
+    "handlebars": "^4.7.10",
+    "puppeteer-core": "^24.43.1",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6"
   }
 }

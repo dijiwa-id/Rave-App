@@ -2,7 +2,7 @@
 
 Memperluas modul kontrak di `services/booking` (templat markdown `booking-v1`, tanda tangan PSrE tiruan) menjadi mesin kontrak: PDF, versi, e-sign OTP multi-pihak, invoice DP otomatis, verifikasi publik.
 
-Status implementasi: **Tahap 0–2 selesai** (dokumen, skema, domain murni). Tahap 3–8 belum.
+Status implementasi: **Tahap 0–3 selesai** (dokumen, skema, domain murni, templat `spk-v2`, PDF, QR, hash, storage privat). Tahap 4–8 belum.
 
 ## Keputusan
 
@@ -39,6 +39,31 @@ Status implementasi: **Tahap 0–2 selesai** (dokumen, skema, domain murni). Tah
 7. UI Bahasa Indonesia: negosiasi, previewer, tracker, riwayat, halaman tanda tangan, `/verify/:contractId`.
 8. Adapter Privy/Vida (stub, flag e-Meterai) dan tes integrasi/keamanan.
 
-## Setup (diisi per tahap)
+## Tahap 3 — templat, PDF, storage
 
-Env var provider e-sign, storage, dan Puppeteer ditambahkan di sini saat modulnya masuk.
+- `contract-data.ts`: mengumpulkan snapshot (booking, profil legal ter-mask, rider berversi terbaru dengan fallback EPK, termin, pajak, e-Meterai). Nilai sensitif utuh (NIK, NPWP, rekening) tidak pernah masuk snapshot atau PDF; hanya versi samar.
+- `contract-template.ts`: Handlebars `spk-v2`. Klausul standar (hak cipta, keterlambatan bayar, force majeure, radius, keselamatan, sengketa, matriks pembatalan) adalah konstanta templat dan tidak bisa ditimpa data. Semua input di-escape; Lampiran A/B memuat rider. CSS inline karena render tanpa jaringan (Tailwind CDN tidak bisa dimuat).
+- `contract-pdf.ts`: `puppeteer-core` + Chromium yang sudah ada. JavaScript dimatikan, request non-`data:` dibatalkan, proxy dimatikan, dan CSP di dokumen. Footer tiap halaman: nomor kontrak, versi, halaman.
+- `contract-storage.ts`: `storage/contracts` (di-gitignore), tidak disajikan statis; akses lewat signed URL HMAC (TTL `contract.file_url_ttl_sec`, default 10 menit).
+- `contract-jobs.ts`: antrean `contract_jobs` (Postgres, `SKIP LOCKED`, retry 5×). `POST /bookings/:id/accept` membuat kontrak (v1, `status='SENT'` lama) dan mengantre `RENDER_DRAFT`.
+- Endpoint baru: `GET /v1/booking/contracts/:id/preview-url`, `GET /v1/booking/contracts/:id/versions`, `GET /v1/booking/contract-files/*` (token), `GET /v1/booking/verify/:contractId` (publik).
+- Hash: SHA-256 byte PDF draf disimpan di `contracts.draft_sha256` (migrasi 003). Hash final di Tahap 5.
+- Pengaturan baru (Super Admin → Booking Off-Air): `contract.pph21_pct`, `contract.pph23_pct`, `contract.emeterai_threshold`, `contract.emeterai_payer`, `contract.sign_window_days`, `contract.file_url_ttl_sec`.
+- Seed: `legal_profiles` (Pensi Nusantara, Nada Manajemen) dan `rider_versions` per artis. Jalankan `./gema seed` untuk DB dev yang sudah ada.
+
+## Setup
+
+| Variabel | Fungsi |
+|---|---|
+| `CHROMIUM_PATH` | Path Chromium/headless-shell. Bila kosong dicari di `~/.cache/ms-playwright`, `~/.cache/puppeteer`, lalu `/usr/bin`. Produksi: pasang Chromium sistem. |
+| `PUBLIC_WEB_URL` | Basis URL halaman verifikasi pada QR (default `http://localhost:5173`). |
+| `CONTRACT_DIR` | Lokasi storage dokumen (default `storage/contracts`). |
+| `MEDIA_SIGNING_SECRET` | Rahasia HMAC signed URL (wajib diganti di produksi). |
+| `KYC_KEY` | Kunci AES-256-GCM kolom sensitif (wajib di produksi). |
+
+Env provider e-sign ditambahkan di Tahap 4 dan 8.
+
+## Catatan verifikasi
+
+- Unit: domain (15), render/escape/storage/PDF Chromium nyata (10).
+- E2E terisolasi: PDF draf, unduh via signed URL dengan hash cocok, URL dimanipulasi 403, pihak luar 403, verifikasi publik tanpa data sensitif, riwayat versi. Bagian Super Admin pada e2e sering terhenti 429 (rate limit login) dan tidak terkait kontrak.
