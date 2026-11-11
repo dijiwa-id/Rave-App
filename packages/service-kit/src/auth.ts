@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { SignJWT, jwtVerify } from 'jose';
-import type { OrgType } from '@gema/domain';
+import type { OrgType } from '@rave/domain';
 import { config } from './config.js';
 import { forbidden, unauthorized } from './errors.js';
 
@@ -42,15 +42,15 @@ export async function signAccessToken(u: AuthUser, ttlSec = ACCESS_TOKEN_TTL_SEC
   return new SignJWT({ email: u.email, name: u.name, roles: u.roles, orgs: u.orgs, city: u.city, kyc: u.kyc, premium: u.premium, admin_role: u.admin_role ?? null })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(u.sub)
-    .setIssuer('gema-iam')
-    .setAudience('gema')
+    .setIssuer('rave-iam')
+    .setAudience('rave')
     .setIssuedAt()
     .setExpirationTime(`${ttlSec}s`)
     .sign(key());
 }
 
 export async function verifyAccessToken(token: string): Promise<AuthUser> {
-  const { payload } = await jwtVerify(token, key(), { issuer: 'gema-iam', audience: 'gema' });
+  const { payload } = await jwtVerify(token, key(), { issuer: 'rave-iam', audience: 'rave' });
   return {
     sub: payload.sub!,
     email: payload.email as string | undefined,

@@ -1,0 +1,17 @@
+# Konteks build Docker — jaga tetap kecil & bebas rahasia.
+**/node_modules
+**/dist
+**/.vite
+**/coverage
+**/*.log
+**/*.tsbuildinfo
+.git
+.github
+.claude
+storage
+.env
+.env.*
+!.env.example
+docs
+*.md
+!apps/web/**/*.md

@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Db } from '@gema/service-kit';
+import type { Db } from '@rave/service-kit';
 
 /** Penyimpanan upload dev (<root>/storage/uploads). Produksi: bucket quarantine via presigned URL (TDD §11.3). */
 export const UPLOAD_DIR = process.env.UPLOAD_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'storage', 'uploads');

@@ -10,8 +10,9 @@ import {
   CONFIGURABLE_ADMIN_ROLES,
   DEFAULT_ROLE_PERMISSIONS,
   type AdminPermission,
-} from '@gema/domain/settings';
+} from '@rave/domain/settings';
 import { api, ApiError } from '@/lib/api';
+import { useDict } from '@/lib/i18n';
 import type { AdminUser, SettingsResponse } from '@/lib/types';
 import { Badge, Button, Card, cx, Field, Modal, PageHeader, Textarea, toast } from '@/components/ui';
 import { QueryState } from '@/components/b2b/common';
@@ -36,6 +37,8 @@ const same = (a: readonly string[], b: readonly string[]) => a.length === b.leng
  * Area Platform tidak ada di matriks: selalu khusus Super Admin.
  */
 export function PlatformRoles() {
+  const d = useDict('admin');
+  const t = d.roles;
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['platform-settings'], queryFn: () => api<SettingsResponse>('/v1/admin/platform/settings') });
   const admins = useQuery({ queryKey: ['platform-admins'], queryFn: () => api<{ data: AdminUser[] }>('/v1/admin/iam/admins') });
@@ -67,17 +70,17 @@ export function PlatformRoles() {
     try {
       if (kind === 'save') {
         await api('/v1/admin/platform/settings', { method: 'PUT', body: { changes: Object.fromEntries(dirty.map((r) => [accessKey(r), current(r)])), reason: reason.trim() } });
-        toast.success('Izin peran disimpan — berlaku seketika di semua layanan');
+        toast.success(t.toastSaved);
       } else {
         await api('/v1/admin/platform/settings/reset', { body: { keys: nonDefault.map((r) => accessKey(r)), reason: reason.trim() } });
-        toast.success('Izin semua peran dikembalikan ke default');
+        toast.success(t.toastReset);
       }
       setDraft({});
       setConfirm(null);
       setReason('');
       qc.invalidateQueries({ queryKey: ['platform-settings'] });
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : 'Gagal menyimpan');
+      toast.error(e instanceof ApiError ? e.message : t.saveFailed);
     } finally {
       setSaving(null);
     }
@@ -86,29 +89,28 @@ export function PlatformRoles() {
   return (
     <div>
       <PageHeader
-        title="Peran & Akses"
-        subtitle="Tentukan area back office yang boleh dibuka tiap peran admin. Perubahan berlaku seketika, tercatat di riwayat pengaturan dan audit log."
+        title={t.title}
+        subtitle={t.subtitle}
         actions={
           <span className="flex gap-2">
             {nonDefault.length > 0 && !dirty.length && (
               <Button variant="outline-ink" icon={<RotateCcw className="size-4" />} onClick={() => setConfirm('reset')}>
-                Kembalikan default
+                {t.resetDefault}
               </Button>
             )}
             <Link to="/admin/platform/admins">
               <Button variant="outline-ink" icon={<ShieldCheck className="size-4" />}>
-                Atur pemegang peran
+                {t.manageHolders}
               </Button>
             </Link>
           </span>
         }
       />
 
-      <div className="mb-4 flex items-start gap-3 rounded-xl border border-b2b-line bg-b2b-card p-4 text-sm">
+      <div className="mb-4 flex items-start gap-3 rounded-none border border-b2b-line bg-b2b-card p-4 text-sm">
         <Lock className="mt-0.5 size-4 shrink-0 text-b2b-muted" />
         <p className="text-b2b-muted">
-          <strong className="text-b2b-ink">Super Admin</strong> selalu memegang semua izin. Area <strong className="text-b2b-ink">Platform</strong> (pengaturan, peran & akses, tim admin,
-          storage, backup, event bus) khusus Super Admin dan tidak dapat didelegasikan. Akun fan, artis, manajemen, dan promotor tidak memiliki akses back office.
+          <strong className="text-b2b-ink">Super Admin</strong> {t.noteA} <strong className="text-b2b-ink">Platform</strong> {t.noteB}
         </p>
       </div>
 
@@ -117,15 +119,15 @@ export function PlatformRoles() {
           <table className="w-full min-w-[860px] text-sm">
             <thead>
               <tr className="border-b border-b2b-line text-left">
-                <th className="px-4 py-3 font-bold">Izin</th>
+                <th className="px-4 py-3 font-bold">{t.permission}</th>
                 <th className="px-3 py-3 text-center font-bold">
                   Super Admin
-                  <span className="block text-[11px] font-normal text-b2b-muted">{holders('SUPER_ADMIN')} admin</span>
+                  <span className="block text-[11px] font-normal text-b2b-muted">{t.adminCount(holders('SUPER_ADMIN'))}</span>
                 </th>
                 {CONFIGURABLE_ADMIN_ROLES.map((r) => (
                   <th key={r} className={cx('px-3 py-3 text-center font-bold', dirty.includes(r) && 'bg-amber-500/10')}>
                     {ADMIN_ROLE_LABEL[r]}
-                    <span className="block text-[11px] font-normal text-b2b-muted">{admins.data ? `${holders(r)} admin` : '…'}</span>
+                    <span className="block text-[11px] font-normal text-b2b-muted">{admins.data ? t.adminCount(holders(r)) : '…'}</span>
                   </th>
                 ))}
               </tr>
@@ -144,7 +146,7 @@ export function PlatformRoles() {
                       <p className="font-mono text-[11px] text-b2b-muted">{p}</p>
                     </td>
                     <td className="px-3 py-2.5 text-center">
-                      <span className="inline-grid size-6 place-items-center rounded-md bg-b2b-ink/10 text-b2b-muted" title="Super Admin selalu memegang semua izin">
+                      <span className="inline-grid size-6 place-items-center rounded-none bg-b2b-ink/10 text-b2b-muted" title={t.superHasAll}>
                         <Check className="size-4" />
                       </span>
                     </td>
@@ -157,10 +159,10 @@ export function PlatformRoles() {
                             type="button"
                             role="checkbox"
                             aria-checked={on}
-                            aria-label={`${ADMIN_PERMISSIONS[p].label} untuk ${ADMIN_ROLE_LABEL[r]}`}
+                            aria-label={t.permFor(ADMIN_PERMISSIONS[p].label, ADMIN_ROLE_LABEL[r])}
                             onClick={() => toggle(r, p)}
                             className={cx(
-                              'inline-grid size-6 place-items-center rounded-md border transition',
+                              'inline-grid size-6 place-items-center rounded-none border transition',
                               on ? 'border-b2b-ink bg-b2b-ink text-b2b-on-ink' : 'border-b2b-line bg-b2b-card hover:border-b2b-ink',
                               changed && 'ring-2 ring-amber-500 ring-offset-1',
                             )}
@@ -179,48 +181,48 @@ export function PlatformRoles() {
       </QueryState>
 
       {dirty.length > 0 && (
-        <div className="sticky bottom-4 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-b2b-card p-4 shadow-lg">
+        <div className="sticky bottom-4 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-none border border-amber-500/40 bg-b2b-card p-4 shadow-lg">
           <p className="text-sm">
-            <Badge tone="amber">{dirty.length} peran diubah</Badge>{' '}
+            <Badge tone="amber">{t.rolesChanged(dirty.length)}</Badge>{' '}
             <span className="text-b2b-muted">{dirty.map((r) => ADMIN_ROLE_LABEL[r]).join(', ')}</span>
           </p>
           <span className="flex gap-2">
             <Button variant="outline-ink" onClick={() => setDraft({})}>
-              Batalkan
+              {t.discard}
             </Button>
             <Button variant="ink" onClick={() => setConfirm('save')}>
-              Simpan perubahan
+              {t.saveChanges}
             </Button>
           </span>
         </div>
       )}
 
       {confirm && (
-        <Modal open onClose={() => setConfirm(null)} title={confirm === 'save' ? 'Simpan izin peran' : 'Kembalikan izin ke default'}>
+        <Modal open onClose={() => setConfirm(null)} title={confirm === 'save' ? t.confirmSaveTitle : t.confirmResetTitle}>
           <div className="space-y-4 text-sm">
-            {confirm === 'reset' && <p>Izin {nonDefault.map((r) => ADMIN_ROLE_LABEL[r]).join(', ')} akan dikembalikan ke default GEMA.</p>}
+            {confirm === 'reset' && <p>{t.resetBody(nonDefault.map((r) => ADMIN_ROLE_LABEL[r]).join(', '))}</p>}
             {confirm === 'save' && revoked.length > 0 && (
-              <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3">
-                <p className="font-bold text-red-700">Izin dicabut dari admin yang sedang aktif:</p>
+              <div className="rounded-none border border-red-500/30 bg-red-500/5 p-3">
+                <p className="font-bold text-red-700">{t.revokedTitle}</p>
                 <ul className="mt-1 list-disc pl-5 text-b2b-ink">
                   {revoked.map(({ r, p }) => (
                     <li key={r + p}>
-                      {ADMIN_ROLE_LABEL[r]} ({holders(r)} admin): {ADMIN_PERMISSIONS[p].label}
+                      {ADMIN_ROLE_LABEL[r]} ({t.adminCount(holders(r))}): {ADMIN_PERMISSIONS[p].label}
                     </li>
                   ))}
                 </ul>
-                <p className="mt-1 text-b2b-muted">Mereka langsung kehilangan akses ke area tersebut.</p>
+                <p className="mt-1 text-b2b-muted">{t.revokedBody}</p>
               </div>
             )}
-            <Field label="Alasan perubahan" hint="Wajib, tercatat di riwayat pengaturan dan audit log">
-              <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Mis. Support perlu melihat antrean refund untuk menjawab pembeli" />
+            <Field label={t.reason} hint={t.reasonHint}>
+              <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t.reasonPlaceholder} />
             </Field>
             <div className="flex justify-end gap-2">
               <Button variant="outline-ink" onClick={() => setConfirm(null)}>
-                Batal
+                {d.common.cancel}
               </Button>
               <Button variant={revoked.length ? 'danger' : 'ink'} loading={!!saving} disabled={reason.trim().length < 5} onClick={submit}>
-                {confirm === 'save' ? 'Simpan & terapkan' : 'Kembalikan default'}
+                {confirm === 'save' ? t.saveApply : t.resetDefault}
               </Button>
             </div>
           </div>

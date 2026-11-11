@@ -8,7 +8,7 @@ import {
   computeCancellation,
   contactRevealed,
   type BookingStatus,
-} from '@gema/domain';
+} from '@rave/domain';
 import {
   audit,
   badRequest,
@@ -27,13 +27,14 @@ import {
   type Client,
   type Db,
   type ServiceContext,
-} from '@gema/service-kit';
+} from '@rave/service-kit';
 import { FAST_CLOCK, RATING_REVEAL_DAYS, commissionPolicy, daysUntil, isPromotorMember, partyOf, requireParty, todayWib, type BookingRow, type Party } from './common.js';
 import { renderContract } from './contract.js';
 import { SPK_TEMPLATE_VERSION, buildContractData } from './contract-data.js';
 import { enqueueContractJob } from './contract-jobs.js';
 import { contractAudit } from './routes-contracts.js';
-import { feeSplits, loadBooking, managementOrgId, transition } from './repo.js';
+import { activateBooking } from './contract-sign.js';
+import { feeSplits, loadBooking, transition } from './repo.js';
 
 const SUMMARY_SQL = `SELECT b.*, a.name AS artist_name, a.image_url AS artist_image, a.city AS artist_city, coalesce(o.name, 'Promotor') AS promotor_name
   FROM bookings b JOIN artists a ON a.id=b.artist_id LEFT JOIN orgs o ON o.id=b.promotor_org_id`;
@@ -70,7 +71,7 @@ export async function bookingView(db: Db | Client, id: string, u: AuthUser | nul
     q(`SELECT id, by_party, fee, dp_pct, settlement_days_before, rider_notes, message, created_at FROM offers WHERE booking_id=$1 ORDER BY created_at`, [id]),
     q(`SELECT id, by_party, author_name, body, created_at FROM messages WHERE booking_id=$1 ORDER BY created_at`, [id]),
     q(`SELECT from_status, to_status, actor, note, created_at FROM booking_events WHERE booking_id=$1 ORDER BY id`, [id]),
-    q(`SELECT * FROM contracts WHERE booking_id=$1`, [id]),
+    q(`SELECT * FROM contracts WHERE booking_id=$1 ORDER BY version DESC LIMIT 1`, [id]),
     q(`SELECT by_party, scores, comment, created_at FROM ratings WHERE booking_id=$1`, [id]),
     q(`SELECT * FROM disputes WHERE booking_id=$1 ORDER BY created_at DESC LIMIT 1`, [id]),
     q(`SELECT contact FROM epk WHERE artist_id=$1`, [r.artist_id]),
@@ -101,7 +102,7 @@ export async function bookingView(db: Db | Client, id: string, u: AuthUser | nul
     messages,
     timeline,
     contract: contract
-      ? { id: contract.id, booking_id: id, template_version: contract.template_version, body_markdown: contract.body_markdown, sha256: contract.sha256, status: contract.status, created_at: contract.created_at, signed_at: contract.signed_at }
+      ? { id: contract.id, booking_id: id, template_version: contract.template_version, body_markdown: contract.body_markdown, sha256: contract.sha256, status: contract.status, version: contract.version, contract_no: contract.contract_no, require_artist_ack: contract.require_artist_ack, pdf_ready: !!(contract.final_key || contract.draft_key), created_at: contract.created_at, signed_at: contract.signed_at }
       : null,
     invoice: fee ? invoiceDto(bookingInvoice(fee, r.dp_pct, commissionPolicy())) : null,
     contact,
@@ -167,8 +168,8 @@ async function ensureContract(c: Client, b: BookingRow, who: { actorId?: string;
   });
   const id = uuidv7();
   await c.query(
-    `INSERT INTO contracts (id, booking_id, template_version, body_markdown, sha256, version, contract_no, template_id, terms, data_snapshot, require_artist_ack, expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now() + make_interval(days => $12))`,
+    `INSERT INTO contracts (id, booking_id, template_version, body_markdown, sha256, version, contract_no, template_id, terms, data_snapshot, require_artist_ack, expires_at, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now() + make_interval(days => $12), 'AWAITING_PROMOTOR_SIGN')`,
     [id, b.id, data.template.version, body, sha256, version, data.contract_no, data.template.id, JSON.stringify(data.terms), JSON.stringify(data), data.terms.require_artist_ack, settings.num('contract.sign_window_days')],
   );
   await enqueueContractJob(c, id, 'RENDER_DRAFT');
@@ -192,7 +193,7 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
       await c.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`cal:${p.artist_id}`]);
       const slots = (await c.query(`SELECT status FROM calendar_slots WHERE artist_id=$1 AND period @> $2::date`, [p.artist_id, p.event_date])).rows;
       if (slots.some((s) => !s.status.startsWith('HOLD') && s.status !== 'TRAVEL'))
-        throw conflict('Tanggal tidak tersedia (Booked/Blocked). Pilih tanggal lain.', { type: 'https://gema.id/problems/schedule-conflict' });
+        throw conflict('Tanggal tidak tersedia (Booked/Blocked). Pilih tanggal lain.', { type: 'https://rave.id/problems/schedule-conflict' });
       const id = uuidv7();
       const holdRank = slots.some((s) => s.status === 'HOLD_1') ? (slots.some((s) => s.status === 'HOLD_2') ? null : 'HOLD_2') : 'HOLD_1';
       if (p.hold && !holdRank) throw conflict('Sudah ada 1st & 2nd hold pada tanggal ini');
@@ -321,7 +322,8 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
       let b = await loadBooking(c, id, true);
       const party = requireParty(req.user, b, false) as Exclude<Party, 'admin'>;
       if (b.status !== 'CONTRACT_SENT') throw conflict(`Kontrak tidak menunggu tanda tangan (status ${b.status})`);
-      const k = (await c.query(`SELECT * FROM contracts WHERE booking_id=$1`, [id])).rows[0];
+      const k = (await c.query(`SELECT * FROM contracts WHERE booking_id=$1 ORDER BY version DESC LIMIT 1`, [id])).rows[0];
+      if (k.status !== 'SENT') throw conflict('Kontrak ini ditandatangani dengan OTP: minta OTP lalu verifikasi (POST /v1/booking/contracts/:id/sign/request-otp)');
       const ins = await c.query(
         `INSERT INTO signatures (contract_id, party, signer_name, signer_user_id, provider_ref) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
         [k.id, party, signer_name, req.user!.sub, `psre-sandbox-${randomUUID()}`],
@@ -331,24 +333,7 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
       const n = (await c.query(`SELECT count(*)::int AS n FROM signatures WHERE contract_id=$1`, [k.id])).rows[0].n;
       if (n >= 2) {
         await c.query(`UPDATE contracts SET status='SIGNED', signed_at=now() WHERE id=$1`, [k.id]);
-        b = await transition(c, b, 'SIGNED', 'system', { note: `Ditandatangani semua pihak · sha256 ${k.sha256.slice(0, 12)}…` });
-        const inv = bookingInvoice(b.agreed_fee!, b.dp_pct, commissionPolicy());
-        await publish(c, 'booking.contract.signed', id, {
-          bookingId: id,
-          contractId: k.id,
-          fee: inv.fee,
-          dpAmount: inv.dp,
-          settlementAmount: inv.settlement,
-          serviceFee: inv.serviceFee,
-          promotorOrgId: b.promotor_org_id,
-          artistId: b.artist_id,
-          managementOrgId: await managementOrgId(c, b),
-          artistOrgId: b.artist_org_id,
-          promotorUserId: b.promotor_user_id,
-          eventDate: b.event_date,
-          settlementDaysBefore: b.settlement_days_before,
-          eventName: b.event_name,
-        });
+        b = await activateBooking(c, b, k.id, k.sha256);
       } else {
         await c.query(`INSERT INTO booking_events (booking_id, from_status, to_status, actor, actor_id, note) VALUES ($1,$2,$2,$3,$4,$5)`, [
           id, b.status, party, req.user!.sub, `Ditandatangani oleh ${party} (${signer_name})`,
@@ -385,7 +370,7 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
       const party = requireParty(req.user, b, false) as Exclude<Party, 'admin'>;
       if (['DRAFT', 'INQUIRY', 'NEGOTIATING', 'AGREED', 'CONTRACT_SENT'].includes(b.status)) {
         // Sebelum kontrak sah: cukup tolak/batalkan negosiasi (tanpa dana); kontrak yang belum ditandatangani di-VOID.
-        await c.query(`UPDATE contracts SET status='VOID' WHERE booking_id=$1 AND status='SENT'`, [id]);
+        await c.query(`UPDATE contracts SET status = CASE WHEN status='SENT' THEN 'VOID' ELSE 'CANCELLED' END WHERE booking_id=$1 AND status IN ('SENT','CONTRACT_GENERATED','AWAITING_PROMOTOR_SIGN','AWAITING_MANAGEMENT_SIGN','AWAITING_ARTIST_ACK')`, [id]);
         await transition(c, b, 'DECLINED', party, { actorId: req.user!.sub, note: p.reason });
         return view(id, req.user, c);
       }

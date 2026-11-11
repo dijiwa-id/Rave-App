@@ -1,16 +1,16 @@
 import pg from 'pg';
-import type { CommissionPolicy } from '@gema/domain';
-import { config, forbidden, isAdmin, managedArtistIds, settings, type AuthUser } from '@gema/service-kit';
+import type { CommissionPolicy } from '@rave/domain';
+import { config, forbidden, isAdmin, managedArtistIds, settings, type AuthUser } from '@rave/service-kit';
 
 // Kolom DATE dikembalikan sebagai string 'YYYY-MM-DD' (bukan Date lokal yang bergeser zona).
 pg.types.setTypeParser(1082, (v) => v);
 
 /**
- * Jam dipercepat untuk demo lokal (default aktif bila NODE_ENV≠production; matikan dengan GEMA_FAST_CLOCK=0):
+ * Jam dipercepat untuk demo lokal (default aktif bila NODE_ENV≠production; matikan dengan RAVE_FAST_CLOCK=0):
  * - show-done boleh kapan saja setelah BOOKED_AND_SECURED (sistem memajukan ke SHOW_DAY),
  * - jendela auto-complete 24 jam diperpendek jadi 60 detik.
  */
-export const FAST_CLOCK = (process.env.GEMA_FAST_CLOCK ?? (config.isDev ? '1' : '0')) === '1';
+export const FAST_CLOCK = (process.env.RAVE_FAST_CLOCK ?? (config.isDev ? '1' : '0')) === '1';
 export const AUTO_COMPLETE_MS = FAST_CLOCK ? 60_000 : 24 * 3600_000;
 export const RATING_REVEAL_DAYS = 14;
 

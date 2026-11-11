@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { kSafe } from '@gema/domain';
-import { callService, forbidden, isAdmin, managedArtistIds, requireAuth, unauthorized, z, type Db, type Job, type ServiceContext } from '@gema/service-kit';
+import { kSafe } from '@rave/domain';
+import { callService, forbidden, isAdmin, managedArtistIds, requireAuth, unauthorized, z, type Db, type Job, type ServiceContext } from '@rave/service-kit';
 import { todayWib, UNKNOWN } from './util.js';
 
 const OTHERS = 'Lainnya';
@@ -226,7 +226,7 @@ export async function analyticsRoutes(app: FastifyInstance, ctx: ServiceContext)
       const csv = [header, ...rows.map((r) => [r.date, r.streams, r.listeners, r.starts, r.skips, r.completes, r.saves, r.followers_gained].join(','))].join('\n');
       reply
         .header('content-type', 'text/csv; charset=utf-8')
-        .header('content-disposition', `attachment; filename="gema-analitik-${artistId.slice(-6)}-${days}h.csv"`);
+        .header('content-disposition', `attachment; filename="rave-analitik-${artistId.slice(-6)}-${days}h.csv"`);
       return csv + '\n';
     });
   });

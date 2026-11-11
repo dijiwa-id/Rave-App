@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { config, conflict, HttpError, INSTANCE_ID, notFound, publish, serviceHeaders, sessionLock, settings, uuidv7, type ServiceContext } from '@gema/service-kit';
+import { config, conflict, HttpError, INSTANCE_ID, notFound, publish, serviceHeaders, sessionLock, settings, uuidv7, type ServiceContext } from '@rave/service-kit';
 import { clearHls, DemoPublisher, ffmpegPath, hlsStats, RTMP_PORT, segmentSeconds, startRtmp, Transcoder, type RtmpSession } from './media.js';
 
 export const keyHash = (k: string) => createHash('sha256').update(k).digest('hex');
-export const newStreamKey = () => 'gema_' + randomBytes(18).toString('base64url');
+export const newStreamKey = () => 'rave_' + randomBytes(18).toString('base64url');
 
 const ACTIVE = ['LIVE', 'INTERRUPTED'];
 /** Instance ini (replika) dan alamat internalnya untuk replika lain (penerusan potongan ingest, kesehatan). */
@@ -56,7 +56,7 @@ export class LiveManager {
   constructor(private ctx: ServiceContext) {
     this.demo = new DemoPublisher(ctx.log);
     // Kunci lepas (koneksi putus) → berhenti seketika agar replika lain bisa mengambil alih kanal demo.
-    this.demoLock = sessionLock('gema.live.demo', {
+    this.demoLock = sessionLock('rave.live.demo', {
       log: (o, m) => ctx.log.warn(o, m),
       onLost: () => {
         this.demo.stop();
@@ -148,7 +148,7 @@ export class LiveManager {
    */
   private async claim(id: string, o: { demo: boolean; hash?: string }) {
     await this.ctx.db.tx(async (tx) => {
-      await tx.query(`SELECT pg_advisory_xact_lock(hashtext('gema.live.capacity'))`);
+      await tx.query(`SELECT pg_advisory_xact_lock(hashtext('rave.live.capacity'))`);
       const s = (
         await tx.query(`SELECT s.status, s.stream_key_hash, s.owner_instance, ${ownerAlive('s.owner_instance')} AS owner_alive FROM streams s WHERE s.id=$1 FOR UPDATE`, [id])
       ).rows[0];
@@ -564,7 +564,7 @@ export class LiveManager {
 
   /**
    * Kanal demo hidup selama `live.demo_channel` & `modules.live` aktif. Kunci baru tiap start (tidak pernah keluar
-   * dari proses). Hanya satu replika yang menjalankannya: pemegang kunci advisory sesi `gema.live.demo`.
+   * dari proses). Hanya satu replika yang menjalankannya: pemegang kunci advisory sesi `rave.live.demo`.
    */
   private async syncDemo() {
     const want = settings.bool('live.demo_channel') && settings.bool('modules.live') && this.rtmp.ok && !!ffmpegPath();

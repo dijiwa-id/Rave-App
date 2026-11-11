@@ -1,4 +1,4 @@
-import { createService, config, type Consumers } from '@gema/service-kit';
+import { createService, config, type Consumers } from '@rave/service-kit';
 import { routes } from './routes.js';
 import { seed } from './seed.js';
 

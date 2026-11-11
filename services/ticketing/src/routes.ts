@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { QR_STEP_SECONDS, quoteTicketRefund, RESERVATION_MINUTES, rotatingCode, verifyRotatingCode, type TicketRefundReason } from '@gema/domain';
+import { QR_STEP_SECONDS, quoteTicketRefund, RESERVATION_MINUTES, rotatingCode, verifyRotatingCode, type TicketRefundReason } from '@rave/domain';
 import {
   assertOrg,
   audit,
@@ -21,7 +21,7 @@ import {
   z,
   type Client,
   type ServiceContext,
-} from '@gema/service-kit';
+} from '@rave/service-kit';
 import { detailOut, orderOut, refundCancelledOrders, refundOut, refundPolicy, releasePendingOrder, releaseReservation, requestInvoice, requestRefund, summaryOut, SUMMARY_SQL, type Q } from './shared.js';
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
@@ -491,7 +491,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       if (t.status !== 'VALID') throw conflict(t.status === 'CHECKED_IN' ? 'Tiket sudah dipakai check-in' : 'Tiket tidak berlaku');
       const now = Date.now();
       const expiresIn = QR_STEP_SECONDS - (Math.floor(now / 1000) % QR_STEP_SECONDS);
-      return { payload: `GEMA1.${t.id}.${rotatingCode(t.secret, now)}`, expires_in: expiresIn };
+      return { payload: `RAVE1.${t.id}.${rotatingCode(t.secret, now)}`, expires_in: expiresIn };
     });
 
     // ---- Check-in gate (REQ-TIX-04): anti duplikasi multi-gate ----
@@ -510,7 +510,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
           reason ?? null,
           req.user!.sub,
         ]);
-      const m = /^GEMA1\.([0-9a-f-]{36})\.(\d{6})$/i.exec(b.payload.trim());
+      const m = /^RAVE1\.([0-9a-f-]{36})\.(\d{6})$/i.exec(b.payload.trim());
       if (!m) {
         await log(null, null, false, 'INVALID');
         return { ok: false, reason: 'INVALID' };

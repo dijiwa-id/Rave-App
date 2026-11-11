@@ -1,0 +1,66 @@
+# nginx untuk web RAVE — SPA + reverse proxy /v1 → gateway. Variabel ${RAVE_*} diisi envsubst saat start.
+# TLS ditangani di depan (Caddy profil `tls`, load balancer, atau Cloudflare).
+upstream rave_gateway {
+  server ${RAVE_GATEWAY_UPSTREAM};
+  keepalive 32;
+}
+
+map $http_upgrade $connection_upgrade { default upgrade; '' ''; }
+
+server {
+  listen 8080;
+  server_name _;
+  root /usr/share/nginx/html;
+  server_tokens off;
+
+  # Upload master audio lewat gateway; batas sebenarnya ditegakkan service (storage.max_upload_mb).
+  client_max_body_size ${RAVE_MAX_UPLOAD};
+
+  gzip on;
+  gzip_vary on;
+  gzip_min_length 1024;
+  gzip_types text/plain text/css application/javascript application/json image/svg+xml application/vnd.apple.mpegurl;
+
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header X-Frame-Options "SAMEORIGIN" always;
+  add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+  add_header Permissions-Policy "camera=(self), microphone=(self), geolocation=()" always;
+
+  location = /nginx-health { access_log off; default_type text/plain; return 200 "ok\n"; }
+
+  location /v1/ {
+    proxy_pass http://rave_gateway;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header X-Request-Id $request_id;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Real-IP $remote_addr;
+    # Upload besar & HLS: jangan di-buffer ke disk nginx.
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+  }
+
+  # Aset ber-hash Vite: cache 1 tahun.
+  location /assets/ {
+    access_log off;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    add_header X-Content-Type-Options "nosniff" always;
+    try_files $uri =404;
+  }
+
+  location = /version.json { add_header Cache-Control "no-store"; try_files $uri =404; }
+
+  # SPA: index.html tidak pernah di-cache agar rilis baru langsung terambil.
+  location / {
+    add_header Cache-Control "no-cache";
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    try_files $uri $uri/ /index.html;
+  }
+}

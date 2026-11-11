@@ -23,7 +23,7 @@ import {
   type AuthUser,
   type Db,
   type ServiceContext,
-} from '@gema/service-kit';
+} from '@rave/service-kit';
 import { keyHash, ME, newStreamKey, type LiveManager } from './manager.js';
 import { RTMP_PUBLIC_URL, streamDir } from './media.js';
 
@@ -180,8 +180,8 @@ export async function routes(app: FastifyInstance, ctx: ServiceContext, mgr: Liv
     const reason = await access(r, req.user);
     if (reason === 'login_required') throw unauthorized('Masuk untuk menonton siaran bertiket');
     if (reason === 'ticket_required')
-      throw new HttpError(403, 'Forbidden', 'Siaran ini khusus pemegang tiket', { type: 'https://gema.id/problems/ticket-required', event_id: r.event_id, event_slug: r.event_slug });
-    if (reason === 'not_live') throw conflict('Siaran belum dimulai atau sudah berakhir', { type: 'https://gema.id/problems/not-live', status: r.status });
+      throw new HttpError(403, 'Forbidden', 'Siaran ini khusus pemegang tiket', { type: 'https://rave.id/problems/ticket-required', event_id: r.event_id, event_slug: r.event_slug });
+    if (reason === 'not_live') throw conflict('Siaran belum dimulai atau sudah berakhir', { type: 'https://rave.id/problems/not-live', status: r.status });
     const t = playbackToken(r.id);
     return { hls_url: `/v1/live/hls/${r.id}/index.m3u8?token=${encodeURIComponent(t.token)}`, expires_at: new Date(t.exp * 1000).toISOString() };
   });
@@ -410,7 +410,7 @@ export async function routes(app: FastifyInstance, ctx: ServiceContext, mgr: Liv
         o || !r.owner_instance
           ? 'Sesi siaran browser tidak aktif — mulai ulang siaran'
           : 'Server penerima siaran ini tidak aktif lagi — mulai ulang siaran dari Studio',
-        { type: 'https://gema.id/problems/ingest-session-lost' },
+        { type: 'https://rave.id/problems/ingest-session-lost' },
       );
     });
 

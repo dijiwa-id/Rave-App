@@ -6,6 +6,7 @@ import { api, fmt } from '@/lib/api';
 import { setting, usePlatformConfig } from '@/lib/platform';
 import type { LiveStatus, LiveStream } from '@/lib/types';
 import { Badge, cx } from '@/components/ui';
+import { dict, useDict } from '@/lib/i18n';
 
 // Utilitas bersama Live Streaming (docs/API.md §10): pengaturan publik, viewer id, pill/badge status, kartu fan.
 
@@ -20,9 +21,9 @@ export function useLiveSettings() {
   };
 }
 
-/** UUID penonton anonim per tab (sessionStorage `gema-live-viewer`) untuk heartbeat. */
+/** UUID penonton anonim per tab (sessionStorage `rave-live-viewer`) untuk heartbeat. */
 export function liveViewerId(): string {
-  const KEY = 'gema-live-viewer';
+  const KEY = 'rave-live-viewer';
   try {
     const v = sessionStorage.getItem(KEY);
     if (v) return v;
@@ -30,7 +31,7 @@ export function liveViewerId(): string {
     sessionStorage.setItem(KEY, id);
     return id;
   } catch {
-    return (window as any).__gemaLiveViewer ??= crypto.randomUUID();
+    return (window as any).__raveLiveViewer ??= crypto.randomUUID();
   }
 }
 
@@ -78,27 +79,29 @@ export function formatCountdown(ms: number) {
   const hh = String(Math.floor((s % 86400) / 3600)).padStart(2, '0');
   const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
   const ss = String(s % 60).padStart(2, '0');
-  return `${d ? `${d} hari ` : ''}${hh}:${mm}:${ss}`;
+  return `${d ? dict('live').common.days(d) : ''}${hh}:${mm}:${ss}`;
 }
 
 export function Countdown({ until, className }: { until: string; className?: string }) {
   const left = useCountdown(until) ?? 0;
-  return <span className={cx('font-mono font-bold tabular-nums', className)}>{left > 0 ? formatCountdown(left) : 'segera dimulai'}</span>;
+  const d = useDict('live');
+  return <span className={cx('font-mono font-bold tabular-nums', className)}>{left > 0 ? formatCountdown(left) : d.common.startingSoon}</span>;
 }
 
 /** Pill merah "LIVE" berdenyut (+ jumlah penonton). */
 export function LivePill({ viewers, interrupted, className }: { viewers?: number | null; interrupted?: boolean; className?: string }) {
+  const d = useDict('live');
   return (
     <span className={cx('inline-flex items-center gap-1.5', className)}>
-      <span className={cx('inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px] font-black tracking-wider text-white uppercase', interrupted ? 'bg-amber-600' : 'bg-red-600')}>
+      <span className={cx('inline-flex items-center gap-1.5 rounded-none px-2 py-0.5 text-[11px] font-black tracking-wider text-white uppercase', interrupted ? 'bg-amber-600' : 'bg-red-600')}>
         <span className="relative flex size-2">
           {!interrupted && <span className="absolute inline-flex size-full animate-ping rounded-full bg-white opacity-75" />}
           <span className="relative inline-flex size-2 rounded-full bg-white" />
         </span>
-        {interrupted ? 'Terputus' : 'Live'}
+        {interrupted ? d.common.interrupted : d.common.live}
       </span>
       {viewers != null && (
-        <span className="inline-flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 text-[11px] font-bold text-white tabular-nums">
+        <span className="inline-flex items-center gap-1 rounded-none bg-black/60 px-1.5 py-0.5 text-[11px] font-bold text-white tabular-nums">
           <Eye className="size-3" />
           {fmt.compact(viewers)}
         </span>
@@ -107,36 +110,34 @@ export function LivePill({ viewers, interrupted, className }: { viewers?: number
   );
 }
 
-const STATUS_LABEL: Record<LiveStatus, string> = { SCHEDULED: 'Terjadwal', LIVE: 'Live', INTERRUPTED: 'Terputus', ENDED: 'Selesai' };
 const STATUS_TONE: Record<LiveStatus, 'blue' | 'red' | 'amber' | 'neutral'> = { SCHEDULED: 'blue', LIVE: 'red', INTERRUPTED: 'amber', ENDED: 'neutral' };
 
 /** Badge status untuk dasbor B2B. */
 export function LiveStatusBadge({ status }: { status: LiveStatus }) {
+  const d = useDict('live');
   return (
     <Badge tone={STATUS_TONE[status]}>
       {status === 'LIVE' && <span className="size-1.5 animate-pulse rounded-full bg-red-500" />}
-      {STATUS_LABEL[status]}
+      {d.common.status[status]}
     </Badge>
   );
 }
 
-export const ENDED_REASON_LABEL: Record<string, string> = {
-  ended_by_host: 'Diakhiri penyiar',
-  signal_lost: 'Sinyal hilang',
-  max_duration: 'Batas durasi tercapai',
-};
-export const endedReason = (r: string | null) => (!r ? '—' : r.startsWith('moderation') ? `Dihentikan moderator${r.includes(':') ? ` — ${r.split(':').slice(1).join(':').trim()}` : ''}` : (ENDED_REASON_LABEL[r] ?? r));
+/** Label alasan berakhir (dievaluasi saat dipanggil → ikut bahasa aktif). */
+export const endedReasonLabel = () => dict('live').common.endedReason;
+export const endedReason = (r: string | null) => (!r ? '—' : r.startsWith('moderation') ? dict('live').common.moderated(r.includes(':') ? r.split(':').slice(1).join(':').trim() : '') : (endedReasonLabel()[r] ?? r));
 
 export const liveImage = (s: LiveStream) => s.cover_url ?? s.artist?.image_url ?? null;
 export const liveHref = (s: Pick<LiveStream, 'id'>) => `/app/live/${s.id}`;
 
 /** Kartu stream untuk aplikasi fan (gelap). */
 export function LiveCard({ s, className }: { s: LiveStream; className?: string }) {
+  const d = useDict('live');
   const img = liveImage(s);
   const onAir = isOnAir(s.status);
   return (
     <Link to={liveHref(s)} className={cx('media-card group block', className)}>
-      <div className="relative mb-3 aspect-video overflow-hidden rounded-md bg-gradient-to-br from-gema-highlight to-[#3a1020]">
+      <div className="relative mb-3 aspect-video overflow-hidden rounded-none bg-gradient-to-br from-rave-highlight to-[#3a1020]">
         {img ? (
           <img src={img} alt="" loading="lazy" className={cx('size-full object-cover transition duration-300 group-hover:scale-105', s.status === 'ENDED' && 'opacity-60 grayscale')} />
         ) : (
@@ -148,22 +149,22 @@ export function LiveCard({ s, className }: { s: LiveStream; className?: string }
           {onAir ? (
             <LivePill viewers={s.viewers} interrupted={s.status === 'INTERRUPTED'} />
           ) : s.status === 'SCHEDULED' ? (
-            <span className="inline-flex items-center gap-1 rounded bg-black/70 px-2 py-0.5 text-[11px] font-bold text-white">
-              <CalendarClock className="size-3" /> {s.scheduled_at ? fmt.dateTime(s.scheduled_at) : 'Segera'}
+            <span className="inline-flex items-center gap-1 rounded-none bg-black/70 px-2 py-0.5 text-[11px] font-bold text-white">
+              <CalendarClock className="size-3" /> {s.scheduled_at ? fmt.dateTime(s.scheduled_at) : d.common.soon}
             </span>
           ) : (
-            <span className="rounded bg-black/70 px-2 py-0.5 text-[11px] font-bold text-white/80">Sudah tayang</span>
+            <span className="rounded-none bg-black/70 px-2 py-0.5 text-[11px] font-bold text-white/80">{d.common.aired}</span>
           )}
         </div>
-        {s.access === 'TICKET' && <span className="absolute top-2 right-2 rounded bg-gema-pink px-1.5 py-0.5 text-[10px] font-black text-white uppercase">Tiket</span>}
+        {s.access === 'TICKET' && <span className="absolute top-2 right-2 rounded-none bg-rave-pink px-1.5 py-0.5 text-[10px] font-black text-white uppercase">{d.common.ticket}</span>}
       </div>
       <p className="truncate font-bold text-white">{s.title}</p>
-      <p className="truncate text-sm text-gema-muted">
+      <p className="truncate text-sm text-rave-muted">
         {s.artist?.name ?? s.org.name}
         {s.status === 'SCHEDULED' && s.scheduled_at && (
           <>
             {' · '}
-            <Countdown until={s.scheduled_at} className="text-xs font-semibold text-gema-primary-text" />
+            <Countdown until={s.scheduled_at} className="text-xs font-semibold text-rave-primary-text" />
           </>
         )}
         {s.status === 'ENDED' && s.ended_at && ` · ${fmt.date(s.ended_at)}`}

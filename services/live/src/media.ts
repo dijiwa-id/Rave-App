@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import net from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { settings } from '@gema/service-kit';
+import { settings } from '@rave/service-kit';
 
 /**
  * Lapisan media service live:
@@ -294,7 +294,7 @@ export async function startRtmp(h: RtmpHandlers, log: Log): Promise<{ ok: boolea
   Context.eventEmitter.on('postPublish', (s: RtmpSession) => {
     if (rejected.delete(s.id)) return;
     accepted.add(s.id);
-    // NMS menunda donePublish selama masa tunggu internalnya; GEMA punya masa tunggu sendiri
+    // NMS menunda donePublish selama masa tunggu internalnya; RAVE punya masa tunggu sendiri
     // (status INTERRUPTED), jadi putusnya socket publisher langsung diteruskan.
     s.socket.once('close', () => {
       if (accepted.delete(s.id)) h.ended(s.streamName, s);

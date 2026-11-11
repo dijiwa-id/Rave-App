@@ -1,7 +1,7 @@
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { isAdmin, managedArtistIds, notFound, z, type AuthUser, type ServiceContext } from '@gema/service-kit';
+import { forbidden, isAdmin, managedArtistIds, notFound, reqLocale, verifyMediaSig, z, type AuthUser, type ServiceContext } from '@rave/service-kit';
 import { ARTIST_SUMMARY_COLS, EPISODE_COLS, RELEASE_SUMMARY_SELECT, SHOW_COLS, TRACK_SELECT, isUuid, releaseFull } from './queries.js';
 import { UPLOAD_DIR } from './storage.js';
 
@@ -16,6 +16,9 @@ const media = {
   episode: (e: any) => ({ id: e.id, kind: 'episode', title: e.title, subtitle: e.show_title, image_url: e.cover_url, href: `/app/episode/${e.id}` }),
 };
 
+/** Berkas rendisi khusus Premium (lihat audio.ts: <id>.high.m4a / <id>.lossless.flac). */
+const PREMIUM_RENDITION = /\.(high\.m4a|lossless\.flac)$/;
+
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -25,6 +28,12 @@ const MIME: Record<string, string> = {
   '.wav': 'audio/wav',
   '.flac': 'audio/flac',
   '.m4a': 'audio/mp4',
+  '.alac': 'audio/mp4',
+  '.aif': 'audio/aiff',
+  '.aiff': 'audio/aiff',
+  '.aac': 'audio/aac',
+  '.ogg': 'audio/ogg',
+  '.opus': 'audio/ogg',
 };
 
 export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext) {
@@ -54,14 +63,17 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
       ...popular.slice(0, 2).map(media.artist),
       ...shows.slice(0, 1).map(media.show),
     ];
+    // Judul section mengikuti bahasa permintaan (Accept-Language dari web).
+    const en = reqLocale(req) === 'en';
     const sections = [
-      { id: 'new-releases', title: 'Rilis Baru', kind: 'releases', items: newReleases.map(media.release) },
-      ...(local.length ? [{ id: 'local', title: `Indie Kotamu: ${city}`, kind: 'artists', items: local.map(media.artist) }] : []),
-      { id: 'popular-artists', title: 'Artis Populer', kind: 'artists', items: popular.map(media.artist) },
-      { id: 'shows', title: 'Podcast & Cerita Pilihan', kind: 'shows', items: shows.map(media.show) },
-      { id: 'episodes', title: 'Episode Untukmu', kind: 'episodes', items: episodes.map(media.episode) },
+      { id: 'new-releases', title: en ? 'New Releases' : 'Rilis Baru', kind: 'releases', items: newReleases.map(media.release) },
+      ...(local.length ? [{ id: 'local', title: en ? `Indie in Your City: ${city}` : `Indie Kotamu: ${city}`, kind: 'artists', items: local.map(media.artist) }] : []),
+      { id: 'popular-artists', title: en ? 'Popular Artists' : 'Artis Populer', kind: 'artists', items: popular.map(media.artist) },
+      { id: 'shows', title: en ? 'Featured Podcasts & Stories' : 'Podcast & Cerita Pilihan', kind: 'shows', items: shows.map(media.show) },
+      { id: 'episodes', title: en ? 'Episodes for You' : 'Episode Untukmu', kind: 'episodes', items: episodes.map(media.episode) },
     ];
-    return { quick_picks: quick, sections };
+    const fix = <T extends { kind: string; subtitle: string }>(m: T): T => (en && m.kind === 'artist' ? { ...m, subtitle: 'Artist' } : m);
+    return { quick_picks: quick.map(fix), sections: sections.map((sec) => ({ ...sec, items: sec.items.map(fix) })) };
   });
 
   // ---------- Browse (mockup Spotify 2) ----------
@@ -220,15 +232,36 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
   });
 
   // ---------- Media hasil upload (dev; produksi: CDN/object storage) ----------
+  // Rendisi khusus Premium (AAC 320 / FLAC) hanya dengan URL bertanda tangan dari playback (berlaku sementara).
+  // Mendukung Range (206) agar seek di berkas lossless besar tidak mengunduh ulang dari awal.
   app.get('/v1/catalog/media/:file', async (req, reply) => {
     const { file } = req.params as { file: string };
     if (!/^[\w.-]+$/.test(file)) throw notFound('Media');
+    const premiumOnly = PREMIUM_RENDITION.test(file);
+    if (premiumOnly) {
+      const q = req.query as { exp?: string; sig?: string };
+      if (!verifyMediaSig(`/v1/catalog/media/${file}`, q.exp, q.sig)) throw forbidden('Tautan media khusus Premium tidak valid atau kedaluwarsa');
+    }
     const p = join(UPLOAD_DIR, file);
     if (!existsSync(p)) throw notFound('Media');
+    const size = statSync(p).size;
     const ext = file.slice(file.lastIndexOf('.')).toLowerCase();
     reply.header('content-type', MIME[ext] ?? 'application/octet-stream');
-    reply.header('content-length', statSync(p).size);
-    reply.header('cache-control', 'public, max-age=31536000, immutable');
+    reply.header('accept-ranges', 'bytes');
+    // Bertanda tangan → jangan disimpan cache bersama (URL berganti tiap sesi); lainnya immutable.
+    reply.header('cache-control', premiumOnly ? 'private, max-age=3600' : 'public, max-age=31536000, immutable');
+    const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+    if (range && (range[1] || range[2])) {
+      let start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+      let end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+      if (start >= size || start > end) {
+        reply.header('content-range', `bytes */${size}`);
+        return reply.status(416).send();
+      }
+      reply.status(206).header('content-range', `bytes ${start}-${end}/${size}`).header('content-length', end - start + 1);
+      return reply.send(createReadStream(p, { start, end }));
+    }
+    reply.header('content-length', size);
     return reply.send(createReadStream(p));
   });
 }

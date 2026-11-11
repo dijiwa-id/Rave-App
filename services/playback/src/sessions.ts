@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import { callService, HttpError, notFound, settings, uuidv7, z, type ServiceContext } from '@gema/service-kit';
-import { CODEC_LABEL, signStream, verifyStream, type Quality } from './util.js';
+import { resolvePlayback, type AudioMeta, type Renditions } from '@rave/domain/audio';
+import { callService, HttpError, notFound, settings, signMediaUrl, uuidv7, z, type ServiceContext } from '@rave/service-kit';
+import { signStream, verifyStream } from './util.js';
 
 const body = z
   .object({
@@ -16,7 +17,14 @@ export async function sessionRoutes(app: FastifyInstance, { db, name }: ServiceC
   app.post('/v1/playback/sessions', async (req, reply) => {
     const b = body.parse(req.body ?? {});
     const user = req.user;
-    let media: { audio_url: string | null; duration_ms: number; artist_id?: string; loudness_gain_db?: number };
+    let media: {
+      audio_url: string | null;
+      duration_ms: number;
+      artist_id?: string;
+      loudness_gain_db?: number;
+      audio_meta?: AudioMeta | null;
+      renditions?: Renditions | null;
+    };
     if (b.track_id) {
       const t = await callService<any>(name, 'catalog', `/internal/tracks/${b.track_id}/media`).catch((e) => {
         if (e instanceof HttpError && e.status === 404) throw notFound('Lagu');
@@ -39,8 +47,22 @@ export async function sessionRoutes(app: FastifyInstance, { db, name }: ServiceC
     const previewOnly = !user; // REQ-WEB-04: anonim mendapat pratinjau (durasi: streaming.preview_seconds)
     const ttlSec = Math.max(15 * 60, Math.ceil(media.duration_ms / 1000) + 10 * 60);
     const exp = Math.floor(Date.now() / 1000) + ttlSec;
-    // D-03: lossless gratis bisa dimatikan Super Admin → turunkan ke AAC 320.
-    const quality = (b.quality === 'lossless' && !settings.bool('streaming.lossless_enabled') ? 'high' : b.quality) as Quality;
+    // Hak kualitas: AAC 320 & Lossless (FLAC) khusus Premium; pratinjau anonim selalu standar (packages/domain/src/audio.ts).
+    const choice = resolvePlayback({
+      requested: b.quality,
+      premium: !!user?.premium,
+      preview: previewOnly,
+      losslessEnabled: settings.bool('streaming.lossless_enabled'),
+      renditions: media.renditions,
+      master: { url: media.audio_url!, meta: media.audio_meta ?? null },
+    });
+    if (!choice) {
+      // Master lossless tanpa rendisi standar (transcoding belum selesai/dimatikan): jangan bocorkan FLAC ke non-Premium.
+      throw new HttpError(503, 'Service Unavailable', 'Versi streaming standar lagu ini sedang diproses. Coba lagi sebentar lagi.', { retry_after_s: 30 });
+    }
+    const quality = choice.quality;
+    // Berkas khusus Premium hanya bisa diambil lewat URL bertanda tangan (catalog memverifikasi; kedaluwarsa bersama sesi).
+    const audioUrl = /\.(high\.m4a|lossless\.flac)$/.test(choice.url) ? signMediaUrl(choice.url, ttlSec) : choice.url;
     await db.tx(async (tx) => {
       await tx.query(
         `INSERT INTO sessions (id, user_id, track_id, episode_id, artist_id, quality, codec_label, city, source, preview_only, audio_url, duration_ms, expires_at)
@@ -52,11 +74,11 @@ export async function sessionRoutes(app: FastifyInstance, { db, name }: ServiceC
           b.episode_id ?? null,
           media.artist_id ?? null,
           quality,
-          CODEC_LABEL[quality],
+          choice.codec_label,
           user?.city ?? null,
           b.source ?? 'library',
           previewOnly,
-          media.audio_url,
+          audioUrl,
           media.duration_ms,
           exp,
         ],
@@ -71,7 +93,10 @@ export async function sessionRoutes(app: FastifyInstance, { db, name }: ServiceC
       stream_url: `/v1/playback/stream/${id}?exp=${exp}&sig=${signStream(id, exp)}`,
       expires_at: new Date(exp * 1000).toISOString(),
       quality,
-      codec_label: CODEC_LABEL[quality],
+      codec_label: choice.codec_label,
+      requested_quality: b.quality,
+      /** premium | preview | disabled | unavailable — klien menampilkan alasan (mis. ajakan Premium). */
+      quality_capped: choice.capped,
       loudness_gain_db: Number(media.loudness_gain_db ?? 0),
       preview_only: previewOnly,
       preview_ms: previewOnly ? settings.num('streaming.preview_seconds') * 1000 : null,

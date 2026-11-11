@@ -1,5 +1,5 @@
 -- Finance (service terisolasi) — REQ-B2B-04, REQ-PAY-01..05, TDD §11.1 & §7.2.
--- Prinsip: GEMA tidak menampung dana di rekening operasional; semua dana pihak ketiga
+-- Prinsip: RAVE tidak menampung dana di rekening operasional; semua dana pihak ketiga
 -- direpresentasikan sebagai liabilitas escrow di mitra berizin (asset:escrow_bank:<mitra>).
 
 -- Tagihan / payment intent (DP, pelunasan, order tiket)

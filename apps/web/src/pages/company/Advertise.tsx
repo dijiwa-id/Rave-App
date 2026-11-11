@@ -1,13 +1,18 @@
 import { Mic, MonitorPlay, Music4, Sparkles, Ticket } from 'lucide-react';
-import { AD_CATEGORIES, AD_FIXED_RULES } from '@gema/domain/ads';
+import { AD_CATEGORIES, AD_FIXED_RULES } from '@rave/domain/ads';
 import { Cards, CompanyPage, ContactCta, CtaBand, Heading, PageHero, Section, Stats, Steps, useParam } from './shell';
+import { AdvertiseHeroArt } from './heroArt';
+import { useDict } from '@/lib/i18n';
 
-const byTier = (tier: string) =>
-  Object.values(AD_CATEGORIES)
-    .filter((c) => c.tier === tier)
-    .map((c) => c.label);
+/** Label kategori per tier, diterjemahkan lewat kamus (fallback ke label domain). */
+const byTier = (tier: string, labels: Record<string, string>) =>
+  Object.entries(AD_CATEGORIES)
+    .filter(([, c]) => c.tier === tier)
+    .map(([k, c]) => labels[k] ?? c.label);
 
 export default function Advertise() {
+  const d = useDict('company').advertise;
+  const labels = d.categories as Record<string, string>;
   const audioMax = useParam('ads.max_audio_seconds');
   const displayMax = useParam('ads.max_display_seconds');
   const skipAfter = useParam('ads.skip_after_seconds');
@@ -17,67 +22,68 @@ export default function Advertise() {
   const perBreak = useParam('ads.max_ads_per_break');
 
   return (
-    <CompanyPage title="Iklan">
+    <CompanyPage title={d.title}>
       <PageHero
-        kicker="Beriklan di GEMA"
-        title="Sampai ke telinga yang tepat, tanpa merusak musiknya."
-        lead="Jangkau pendengar musik indie di kota-kota peluncuran GEMA lewat iklan audio, display, pre-roll podcast, dan kemitraan brand di panggung nyata — dengan kebijakan yang menjaga pengalaman dengar dan keamanan merekmu."
-        actions={<ContactCta subject="Iklan">Hubungi tim iklan</ContactCta>}
+        aside={<AdvertiseHeroArt />}
+        kicker={d.kicker}
+        title={d.heroTitle}
+        lead={d.lead}
+        actions={<ContactCta subject="Iklan">{d.contact}</ContactCta>}
       />
 
       <Section className="border-t border-white/10">
-        <Heading kicker="Format" title="Pilih cara bercerita." />
+        <Heading kicker={d.formats.kicker} title={d.formats.title} />
         <Cards
           cols={4}
           items={[
-            { icon: Mic, title: 'Audio', body: `Spot audio hingga ${audioMax} detik yang diputar di antara lagu, tidak pernah memotong lagu yang sedang didengar.` },
-            { icon: MonitorPlay, title: 'Display', body: `Kartu visual di pemutar selama hingga ${displayMax} detik${skipAfter ? `, dapat dilewati setelah ${skipAfter} detik` : ''}, dengan tautan ke halamanmu.` },
-            { icon: Music4, title: 'Pre-roll podcast', body: 'Pesan singkat sebelum episode podcast gratis. Episode Premium selalu bebas iklan.' },
-            { icon: Ticket, title: 'Kemitraan panggung', body: 'Paket brand untuk event, tur kampus, dan siaran langsung — dari aktivasi venue sampai konten artis.' },
+            { icon: Mic, title: d.audio.title, body: d.audio.body(audioMax) },
+            { icon: MonitorPlay, title: d.display.title, body: d.display.body(displayMax, skipAfter) },
+            { icon: Music4, ...d.podcast },
+            { icon: Ticket, ...d.stage },
           ]}
         />
       </Section>
 
       <Section>
-        <Heading kicker="Pengalaman dengar" title="Iklan yang dihargai, bukan dihindari." body="Batas tayang kami jaga ketat agar pendengar tetap betah — dan pesanmu benar-benar didengar." />
+        <Heading kicker={d.experience.kicker} title={d.experience.title} body={d.experience.body} />
         <Stats
           items={[
-            { value: `${interval} mnt`, label: 'Jeda minimum antar-jeda iklan untuk satu pendengar' },
-            { value: `${perBreak}`, label: 'Iklan maksimum dalam satu jeda' },
-            { value: `${perHour}/jam`, label: 'Batas total iklan per pendengar dalam satu jam' },
-            { value: `${cap}×/hari`, label: 'Frequency cap satu kampanye ke pendengar yang sama' },
+            { value: d.stats.interval(interval), label: d.stats.intervalLabel },
+            { value: `${perBreak}`, label: d.stats.perBreakLabel },
+            { value: d.stats.perHour(perHour), label: d.stats.perHourLabel },
+            { value: d.stats.cap(cap), label: d.stats.capLabel },
           ]}
-          note="Parameter dapat disesuaikan oleh GEMA untuk menjaga kualitas pengalaman dengar."
+          note={d.stats.note}
         />
       </Section>
 
       <Section className="border-t border-white/10">
-        <Heading kicker="Kebijakan" title="Aturan yang tidak dapat ditawar." />
+        <Heading kicker={d.policy.kicker} title={d.policy.title} />
         <ul className="mt-12 grid gap-x-12 gap-y-5 md:grid-cols-2">
-          {AD_FIXED_RULES.map((r) => (
+          {AD_FIXED_RULES.map((rule, i) => d.fixedRules[i] ?? rule).map((r) => (
             <li key={r} className="flex gap-4 text-[15px] leading-relaxed text-white/75">
-              <span className="mt-2 size-2 shrink-0 rounded-full bg-gema-primary" aria-hidden /> {r}
+              <span className="mt-2 size-2 shrink-0 rounded-full bg-rave-primary" aria-hidden /> {r}
             </li>
           ))}
         </ul>
         <div className="mt-14 grid gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 p-6">
-            <h3 className="font-bold">Kategori terbatas</h3>
-            <p className="mt-1.5 text-sm text-white/55">Diterima dengan nomor izin yang sah dan peninjauan tambahan; sebagian dapat dinonaktifkan sesuai kebijakan platform.</p>
+          <div className="rounded-none border border-white/10 p-6">
+            <h3 className="font-bold">{d.restricted.title}</h3>
+            <p className="mt-1.5 text-sm text-white/55">{d.restricted.body}</p>
             <ul className="mt-4 flex flex-wrap gap-2">
-              {byTier('restricted').map((l) => (
-                <li key={l} className="rounded-full border border-white/15 px-3 py-1 text-sm text-white/75">
+              {byTier('restricted', labels).map((l) => (
+                <li key={l} className="rounded-none border border-white/15 px-3 py-1 text-sm text-white/75">
                   {l}
                 </li>
               ))}
             </ul>
           </div>
-          <div className="rounded-2xl border border-white/10 p-6">
-            <h3 className="font-bold">Kategori terlarang</h3>
-            <p className="mt-1.5 text-sm text-white/55">Selalu ditolak, tanpa pengecualian.</p>
+          <div className="rounded-none border border-white/10 p-6">
+            <h3 className="font-bold">{d.prohibited.title}</h3>
+            <p className="mt-1.5 text-sm text-white/55">{d.prohibited.body}</p>
             <ul className="mt-4 flex flex-wrap gap-2">
-              {byTier('prohibited').map((l) => (
-                <li key={l} className="rounded-full border border-red-400/30 px-3 py-1 text-sm text-red-200/90">
+              {byTier('prohibited', labels).map((l) => (
+                <li key={l} className="rounded-none border border-red-400/30 px-3 py-1 text-sm text-red-200/90">
                   {l}
                 </li>
               ))}
@@ -87,23 +93,16 @@ export default function Advertise() {
       </Section>
 
       <Section>
-        <Heading kicker="Proses" title="Dari brief sampai tayang." />
-        <Steps
-          items={[
-            { title: 'Brief', body: 'Ceritakan tujuan, kota, genre, periode, dan anggaran kampanyemu.' },
-            { title: 'Kreatif', body: 'Kirim materi audio atau display sesuai spesifikasi; kami bantu menyesuaikan format.' },
-            { title: 'Peninjauan', body: 'Setiap kampanye ditinjau tim GEMA — termasuk izin untuk kategori terbatas — sebelum tayang.' },
-            { title: 'Tayang & laporan', body: 'Pantau impresi dan interaksi; kampanye berhenti otomatis di akhir periode.' },
-          ]}
-        />
+        <Heading kicker={d.process.kicker} title={d.process.title} />
+        <Steps items={d.steps} />
       </Section>
 
-      <CtaBand title="Mari rancang kampanye pertamamu." body="Tim kami menyiapkan rekomendasi format dan penempatan berdasarkan audiens yang ingin kamu jangkau.">
+      <CtaBand title={d.band.title} body={d.band.body}>
         <ContactCta subject="Iklan" variant="light">
-          Minta penawaran
+          {d.band.quote}
         </ContactCta>
-        <a href="/premium" className="inline-flex items-center gap-2 rounded-full border border-white/25 px-7 py-3.5 text-sm font-bold hover:border-white">
-          <Sparkles className="size-4" aria-hidden /> Premium bebas iklan
+        <a href="/premium" className="inline-flex items-center gap-2 rounded-none border border-white/25 px-7 py-3.5 text-sm font-bold hover:border-white">
+          <Sparkles className="size-4" aria-hidden /> {d.band.premium}
         </a>
       </CtaBand>
     </CompanyPage>

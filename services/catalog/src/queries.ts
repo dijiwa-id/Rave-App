@@ -1,4 +1,4 @@
-import type { Client, Db } from '@gema/service-kit';
+import type { Client, Db } from '@rave/service-kit';
 
 type Q = Pick<Db, 'query'> | Client;
 async function rows<T = any>(q: Q, sql: string, params: unknown[] = []): Promise<T[]> {
@@ -10,6 +10,14 @@ async function rows<T = any>(q: Q, sql: string, params: unknown[] = []): Promise
 export const TRACK_SELECT = `
   SELECT t.id, t.title, t.duration_ms, t.explicit, t.isrc, t.track_number, t.play_count,
          EXISTS (SELECT 1 FROM lyrics l WHERE l.track_id = t.id) AS has_lyrics,
+         (SELECT json_build_object(
+                   'lossless', coalesce((au.audio_meta->>'lossless')::bool, false),
+                   'hires', coalesce((au.audio_meta->>'lossless')::bool AND ((au.audio_meta->>'bit_depth')::int > 16 OR (au.audio_meta->>'sample_rate')::int > 48000), false),
+                   'sample_rate', (au.audio_meta->>'sample_rate')::int,
+                   'bit_depth', nullif((au.audio_meta->>'bit_depth')::int, 0),
+                   'codec', au.audio_meta->>'codec',
+                   'transcode_status', au.transcode_status)
+            FROM uploads au WHERE au.audio_meta IS NOT NULL AND au.stored_name = split_part(t.audio_url, '/v1/catalog/media/', 2)) AS audio,
          json_build_object('id', a.id, 'name', a.name, 'slug', a.slug) AS artist,
          json_build_object('id', r.id, 'title', r.title, 'cover_url', r.cover_url) AS release
   FROM tracks t JOIN releases r ON r.id = t.release_id JOIN artists a ON a.id = t.artist_id`;

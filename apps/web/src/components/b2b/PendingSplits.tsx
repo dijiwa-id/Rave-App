@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Badge, Button, Card, toast } from '@/components/ui';
+import { useDict } from '@/lib/i18n';
 
 interface PendingSplit {
   id: string;
@@ -19,13 +20,14 @@ interface PendingSplit {
  */
 export function PendingSplits({ className }: { className?: string }) {
   const qc = useQueryClient();
+  const d = useDict('b2b').splits;
   const q = useQuery({ queryKey: ['splits-pending'], queryFn: () => api<{ data: PendingSplit[] }>('/v1/studio/splits/pending') });
   const items = q.data?.data ?? [];
   if (!items.length) return null;
   async function approve(id: string) {
     try {
       await api(`/v1/studio/splits/${id}/approve`, { body: {} });
-      toast.success('Split disetujui');
+      toast.success(d.approved);
       qc.invalidateQueries({ queryKey: ['splits-pending'] });
       qc.invalidateQueries({ queryKey: ['splits'] });
     } catch (e) {
@@ -33,7 +35,7 @@ export function PendingSplits({ className }: { className?: string }) {
     }
   }
   return (
-    <Card className={className} title={<span>Split menunggu persetujuan Anda <Badge tone="amber">{items.length}</Badge></span>}>
+    <Card className={className} title={<span>{d.title} <Badge tone="amber">{items.length}</Badge></span>}>
       <ul className="divide-y divide-b2b-line">
         {items.map((s) => (
           <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5 text-sm">
@@ -42,11 +44,11 @@ export function PendingSplits({ className }: { className?: string }) {
                 {s.track_title} <span className="font-normal text-b2b-muted">· {s.artist_name}</span>
               </p>
               <p className="text-xs text-b2b-muted">
-                {s.type === 'MASTER' ? 'Master' : 'Publishing'} {s.pct}% atas nama {s.party_name}
+                {d.line(s.type === 'MASTER' ? 'Master' : 'Publishing', s.pct, s.party_name)}
               </p>
             </div>
             <Button variant="ink" size="sm" onClick={() => approve(s.id)}>
-              Setujui
+              {d.approve}
             </Button>
           </li>
         ))}

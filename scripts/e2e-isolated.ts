@@ -1,23 +1,25 @@
-// E2E pada stack terisolasi: database `gema_test` baru + semua service di port terpisah (+1000) + storage sementara.
-// Data development (database `gema`, folder storage/) tidak disentuh — aman dijalankan saat aplikasi sedang dipakai.
-//   npm run e2e:isolated            → reset gema_test, seed, jalankan service, e2e, matikan
+// E2E pada stack terisolasi: database `rave_test` baru + semua service di port terpisah (+1000) + storage sementara.
+// Data development (database `rave`, folder storage/) tidak disentuh — aman dijalankan saat aplikasi sedang dipakai.
+//   npm run e2e:isolated            → reset rave_test, seed, jalankan service, e2e, matikan
 //   KEEP=1 npm run e2e:isolated     → biarkan stack uji tetap jalan setelah e2e (untuk uji manual)
 //   KEEP=1 SKIP_E2E=1 npm run e2e:isolated → hanya siapkan stack uji (gateway :9080)
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
-import { mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT } from './services.js';
 
 const OFFSET = Number(process.env.E2E_PORT_OFFSET ?? 1000);
-const DB = process.env.E2E_DB ?? 'gema_test';
-const PG = { host: '127.0.0.1', port: process.env.GEMA_PGPORT ?? '55432' };
+const DB = process.env.E2E_DB ?? 'rave_test';
+const envFile = join(ROOT, '.env');
+const pgPortFromEnvFile = existsSync(envFile) ? /^RAVE_PGPORT=(\d+)/m.exec(readFileSync(envFile, 'utf8'))?.[1] : undefined;
+const PG = { host: '127.0.0.1', port: process.env.RAVE_PGPORT ?? pgPortFromEnvFile ?? '55432' };
 const SERVICES = { iam: 4001, catalog: 4002, library: 4003, playback: 4004, booking: 4005, finance: 4006, ticketing: 4007, notification: 4008, platform: 4009, live: 4010, ads: 4011 };
-const storage = join(tmpdir(), `gema-e2e-${process.pid}`);
+const storage = join(tmpdir(), `rave-e2e-${process.pid}`);
 
 const env: NodeJS.ProcessEnv = {
   ...process.env,
-  DATABASE_URL: `postgres://gema:gema@${PG.host}:${PG.port}/${DB}`,
+  DATABASE_URL: `postgres://rave:rave@${PG.host}:${PG.port}/${DB}`,
   GATEWAY_PORT: String(8080 + OFFSET),
   LIVE_RTMP_PORT: String(1935 + OFFSET),
   LIVE_RTMP_PUBLIC_URL: `rtmp://localhost:${1935 + OFFSET}/live`,
@@ -43,23 +45,29 @@ function run(cmd: string, args: string[], opts: { detached?: boolean; quiet?: bo
 }
 const exited = (c: ChildProcess) => new Promise<number>((r) => c.on('exit', (code) => r(code ?? 1)));
 
-async function waitHealthy(ms = 120_000) {
+// Cold start 11 service + gateway (tsx) bisa > 2 menit di filesystem lambat (mis. NTFS /mnt/* di WSL) — atur via E2E_HEALTH_TIMEOUT_MS.
+async function waitHealthy(ms = Number(process.env.E2E_HEALTH_TIMEOUT_MS ?? 300_000)) {
   const end = Date.now() + ms;
+  let pending = 'gateway';
   while (Date.now() < end) {
     try {
-      const r = await fetch(`http://127.0.0.1:${8080 + OFFSET}/v1/status`, { signal: AbortSignal.timeout(2000) });
-      if ((await r.json()).ok) return;
-    } catch {
-      /* belum siap */
+      const r = await fetch(`http://127.0.0.1:${8080 + OFFSET}/v1/status`, { signal: AbortSignal.timeout(3000) });
+      const s = (await r.json()) as { ok: boolean; services: { service: string; ok: boolean }[] };
+      if (s.ok) return;
+      pending = s.services.filter((x) => !x.ok).map((x) => x.service).join(', ');
+    } catch (e) {
+      // Port di daftar "bad ports" Fetch (mis. 10080 = offset 2000) ditolak instan oleh fetch() — jangan menunggu sia-sia.
+      if ((e as { cause?: Error }).cause?.message === 'bad port') throw new Error(`port gateway uji ${8080 + OFFSET} diblokir fetch() (bad port) — pakai E2E_PORT_OFFSET lain`);
+      /* gateway belum siap */
     }
     await new Promise((r) => setTimeout(r, 1500));
   }
-  throw new Error('stack uji tidak sehat dalam batas waktu');
+  throw new Error(`stack uji tidak sehat dalam ${Math.round(ms / 1000)} dtk — belum siap: ${pending} (port +${OFFSET}; atur E2E_PORT_OFFSET / E2E_HEALTH_TIMEOUT_MS)`);
 }
 
 console.log(`▶ reset database ${DB}`);
 psql(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE)`);
-psql(`CREATE DATABASE ${DB} OWNER gema`);
+psql(`CREATE DATABASE ${DB} OWNER rave`);
 
 console.log('▶ migrasi + seed');
 if ((await exited(run('node', ['--import', 'tsx', 'scripts/seed-all.ts'], { quiet: true }))) !== 0) process.exit(1);

@@ -1,21 +1,32 @@
-# Lingkungan lokal mirip produksi (TDD §11.6): Postgres + Redpanda (Kafka API) + semua service.
-#   docker compose up -d postgres redpanda   # infra saja, service dijalankan via `npm run dev`
-#   docker compose up --build                # semuanya dalam container
-x-svc: &svc
-  build: { context: ., dockerfile: infra/Dockerfile.service }
+# RAVE — stack DEVELOPMENT di Docker (hot reload, data demo, port terbuka ke host).
+#
+#   npm run docker:dev              # = docker compose up --build  (Postgres → init DB → 11 service + gateway + web)
+#   npm run docker:dev -- -d        # di background
+#   docker compose --profile kafka up   # + Redpanda (set BUS_DRIVER=kafka di .env)
+#   docker compose down             # stop  (`down -v` ikut menghapus data DB & storage dev)
+#
+# Source di-bind mount; perubahan kode memicu `tsx watch` / Vite (polling — inotify tidak lewat bind mount WSL /mnt/*).
+# Produksi: lihat docker-compose.prod.yml dan docs/DEPLOYMENT.md.
+name: rave-dev
+
+x-dev: &dev
+  image: rave/dev:local
+  build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: dev }
   restart: unless-stopped
   depends_on:
     postgres: { condition: service_healthy }
-    redpanda: { condition: service_healthy }
+    db-init: { condition: service_completed_successfully }
   environment: &env
     NODE_ENV: development
-    DATABASE_URL: postgres://gema:gema@postgres:5432/gema
+    PATH: /repo/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    DATABASE_URL: postgres://rave:rave@postgres:5432/rave
     JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-please-32-bytes-min}
-    BUS_DRIVER: kafka
+    BUS_DRIVER: ${BUS_DRIVER:-pg}
     KAFKA_BROKERS: redpanda:9092
     MEDIA_SIGNING_SECRET: ${MEDIA_SIGNING_SECRET:-dev-media-signing-secret}
     PG_WEBHOOK_SECRET: ${PG_WEBHOOK_SECRET:-dev-pg-webhook-secret}
     INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET:-dev-internal-service-secret}
+    PUBLIC_WEB_URL: http://localhost:${DEV_WEB_PORT:-5173}
     IAM_URL: http://iam:4001
     CATALOG_URL: http://catalog:4002
     LIBRARY_URL: http://library:4003
@@ -27,20 +38,33 @@ x-svc: &svc
     PLATFORM_URL: http://platform:4009
     LIVE_URL: http://live:4010
     ADS_URL: http://ads:4011
-    LIVE_DIR: /data/live
     UPLOAD_DIR: /data/uploads
     BACKUP_DIR: /data/backups
+    LIVE_DIR: /data/live
+    CONTRACT_DIR: /data/contracts
+    BRANDING_DIR: /data/branding
+  volumes: &src
+    - ./packages:/repo/packages
+    - ./services:/repo/services
+    - ./scripts:/repo/scripts
+    - ./package.json:/repo/package.json:ro
+    - ./tsconfig.base.json:/repo/tsconfig.base.json:ro
+    - storage:/data
+  command: ['tsx', 'watch', '--clear-screen=false', 'src/index.ts']
 
 services:
   postgres:
     image: postgres:16-alpine
-    environment: { POSTGRES_USER: gema, POSTGRES_PASSWORD: gema, POSTGRES_DB: gema }
-    ports: ['55432:5432']
+    restart: unless-stopped
+    environment: { POSTGRES_USER: rave, POSTGRES_PASSWORD: rave, POSTGRES_DB: rave }
+    ports: ['${DEV_PG_PORT:-55442}:5432']
     volumes: [pgdata:/var/lib/postgresql/data]
-    healthcheck: { test: ['CMD-SHELL', 'pg_isready -U gema'], interval: 5s, retries: 20 }
+    healthcheck: { test: ['CMD-SHELL', 'pg_isready -U rave'], interval: 5s, retries: 20 }
 
   redpanda:
     image: redpandadata/redpanda:v24.2.7
+    profiles: [kafka]
+    restart: unless-stopped
     command: >-
       redpanda start --smp 1 --memory 1G --overprovisioned --node-id 0 --check=false
       --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
@@ -49,31 +73,50 @@ services:
     ports: ['19092:19092']
     healthcheck: { test: ['CMD-SHELL', "rpk cluster health | grep -E 'Healthy:.+true'"], interval: 10s, retries: 20 }
 
-  iam: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: iam } } }
-  catalog: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: catalog } }, volumes: [storage:/data] }
-  library: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: library } } }
-  playback: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: playback } } }
-  booking: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: booking } } }
-  finance: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: finance } } }
-  ticketing: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: ticketing } } }
-  notification: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: notification } } }
-  ads: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: ads } } }
-  # Super Admin: pengaturan, storage (berbagi volume dengan catalog), backup pg_dump.
-  platform: { <<: *svc, build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: platform } }, volumes: [storage:/data] }
-  # Live streaming: ingest RTMP :1935 (OBS/Larix) → ffmpeg sistem → HLS di volume bersama.
+  # Sekali jalan: DB kosong → migrasi + seed demo; sudah berisi → migrasi. Seed ulang: SEED=1 docker compose up db-init
+  db-init:
+    <<: *dev
+    restart: 'no'
+    depends_on: { postgres: { condition: service_healthy } }
+    working_dir: /repo
+    environment: { <<: *env, SEED: '${SEED:-0}' }
+    command: ['node', '--import', 'tsx', 'scripts/db-init.ts']
+
+  platform: { <<: *dev, working_dir: /repo/services/platform }
+  iam: { <<: *dev, working_dir: /repo/services/iam }
+  catalog: { <<: *dev, working_dir: /repo/services/catalog }
+  library: { <<: *dev, working_dir: /repo/services/library }
+  playback: { <<: *dev, working_dir: /repo/services/playback }
+  booking: { <<: *dev, working_dir: /repo/services/booking }
+  finance: { <<: *dev, working_dir: /repo/services/finance }
+  ticketing: { <<: *dev, working_dir: /repo/services/ticketing }
+  notification: { <<: *dev, working_dir: /repo/services/notification }
+  ads: { <<: *dev, working_dir: /repo/services/ads }
+  # Live: ingest RTMP :1935 (OBS/Larix) → ffmpeg → HLS di volume bersama.
   live:
-    <<: *svc
-    build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: live } }
-    # Replika live: LIVE_DIR wajib volume bersama + LIVE_INTERNAL_URL per replika (docs/ARCHITECTURE.md §6).
-    environment: { <<: *env, FFMPEG_PATH: /usr/bin/ffmpeg, LIVE_RTMP_PUBLIC_URL: 'rtmp://localhost:1935/live', LIVE_INTERNAL_URL: 'http://live:4010' }
+    <<: *dev
+    working_dir: /repo/services/live
+    environment: { <<: *env, LIVE_RTMP_PUBLIC_URL: 'rtmp://localhost:1935/live', LIVE_INTERNAL_URL: 'http://live:4010' }
     ports: ['1935:1935']
-    volumes: [storage:/data]
   gateway:
-    <<: *svc
-    build: { context: ., dockerfile: infra/Dockerfile.service, args: { SERVICE: gateway } }
-    # Rate limit bersama antar-replika (tabel UNLOGGED gateway.rate_limits; fail open bila DB bermasalah).
+    <<: *dev
+    working_dir: /repo/services/gateway
     environment: { <<: *env, RATE_LIMIT_STORE: pg }
-    ports: ['8080:8080']
+    ports: ['${DEV_GATEWAY_PORT:-8080}:8080']
+
+  web:
+    <<: *dev
+    depends_on: [gateway]
+    working_dir: /repo/apps/web
+    environment: { <<: *env, VITE_API_PROXY: 'http://gateway:8080', CHOKIDAR_USEPOLLING: 'true', VITE_CACHE_DIR: /home/node/.cache/vite }
+    volumes:
+      - ./apps/web:/repo/apps/web
+      - /repo/apps/web/node_modules
+      - ./packages:/repo/packages
+      - ./package.json:/repo/package.json:ro
+      - ./tsconfig.base.json:/repo/tsconfig.base.json:ro
+    command: ['node_modules/.bin/vite', '--host', '0.0.0.0', '--port', '5173', '--strictPort']
+    ports: ['${DEV_WEB_PORT:-5173}:5173']
 
 volumes:
   pgdata:

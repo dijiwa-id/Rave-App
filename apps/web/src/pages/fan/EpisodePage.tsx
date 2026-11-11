@@ -6,14 +6,16 @@ import type { Episode, Show } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
 import { useShallow } from 'zustand/react/shallow';
 import { usePlayer } from '@/stores/player';
-import { colorFor, DarkError, PlayFab } from '@/components/fan';
+import { colorFor, DarkError, glow, PlayFab } from '@/components/fan';
 import { PageLoader } from '@/components/ui';
 import { episodeToPlayable } from './ShowPage';
+import { useDict } from '@/lib/i18n';
 
 /** Episode (mockup Spotify 7 & 10): header warna, tombol play hijau, deskripsi, paywall premium. */
 export default function EpisodePage() {
   const { id = '' } = useParams();
   const user = useAuth((s) => s.user);
+  const d = useDict('fan');
   const { current, playing, toggle, playOne, error } = usePlayer(useShallow((s) => ({ current: s.current, playing: s.playing, toggle: s.toggle, playOne: s.playOne, error: s.error })));
   const q = useQuery({ queryKey: ['episode', id], queryFn: () => api<Episode & { show: Show }>(`/v1/catalog/episodes/${id}`) });
   if (q.isLoading) return <PageLoader />;
@@ -24,9 +26,9 @@ export default function EpisodePage() {
   const color = colorFor(e.show.id);
   return (
     <div className="min-h-full pb-12">
-      <header className="px-4 pt-24 pb-8 md:px-8" style={{ background: `linear-gradient(${color}, ${color}88)` }}>
+      <header className="px-4 pt-24 pb-8 md:px-8" style={{ background: glow(color, '77') }}>
         <div className="flex flex-col gap-6 md:flex-row md:items-end">
-          <img src={e.cover_url} alt="" className="size-48 rounded-lg shadow-2xl md:size-56" />
+          <img src={e.cover_url} alt="" className="size-48 rounded-none shadow-2xl md:size-56" />
           <div className="min-w-0">
             <p className="text-sm font-bold">Episode {e.is_premium && '· Premium'}</p>
             <h1 className="my-3 text-3xl font-black tracking-tight md:text-5xl">{e.title}</h1>
@@ -36,14 +38,14 @@ export default function EpisodePage() {
           </div>
         </div>
       </header>
-      <div className="bg-gradient-to-b from-black/40 to-transparent px-4 py-6 md:px-8">
-        <p className="flex items-center gap-3 text-sm text-gema-muted">
+      <div className="px-4 py-6 md:px-8">
+        <p className="flex items-center gap-3 text-sm text-rave-muted">
           {fmt.date(e.published_at)} · {fmt.minutes(e.duration_ms)}
           <span className="h-1 w-24 rounded-full bg-white/20" />
         </p>
         <div className="mt-5 flex items-center gap-6">
           {locked ? (
-            <span className="grid size-14 place-items-center rounded-full bg-white/20" aria-label="Terkunci">
+            <span className="grid size-14 place-items-center rounded-full bg-white/20" aria-label={d.episode.locked}>
               <Lock className="size-6" />
             </span>
           ) : (
@@ -51,16 +53,16 @@ export default function EpisodePage() {
           )}
         </div>
         {(locked || (isCurrent && error?.includes('Premium'))) && (
-          <div className="mt-8 max-w-2xl rounded-xl bg-gradient-to-r from-[#1e70e0] to-[#7c3aed] p-6">
-            <p className="text-lg font-black">Episode ini khusus Premium</p>
-            <p className="mt-1 text-sm text-white/85">Dengarkan podcast premium dan cerita fiksi berseri tanpa iklan. Musik tetap gratis.</p>
-            <Link to="/premium" className="mt-4 inline-block rounded-full bg-white px-6 py-2.5 text-sm font-bold text-black hover:scale-105">
-              Coba Premium gratis
+          <div className="mt-8 max-w-2xl rounded-none bg-gradient-to-r from-[#1F5C52] to-[#5B2A6E] p-6">
+            <p className="text-lg font-black">{d.episode.premiumOnly}</p>
+            <p className="mt-1 text-sm text-white/85">{d.episode.premiumBody}</p>
+            <Link to="/premium" className="mt-4 inline-block rounded-none bg-white px-6 py-2.5 text-sm font-bold text-black hover:scale-105">
+              {d.episode.tryPremium}
             </Link>
           </div>
         )}
-        <h2 className="mt-10 mb-3 text-2xl font-bold">Deskripsi episode</h2>
-        <p className="max-w-3xl leading-relaxed whitespace-pre-line text-gema-muted">{e.description}</p>
+        <h2 className="mt-10 mb-3 text-2xl font-bold">{d.episode.description}</h2>
+        <p className="max-w-3xl leading-relaxed whitespace-pre-line text-rave-muted">{e.description}</p>
       </div>
     </div>
   );

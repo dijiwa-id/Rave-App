@@ -1,4 +1,4 @@
-import { createService, config } from '@gema/service-kit';
+import { createService, config } from '@rave/service-kit';
 import { consumers } from './consumers.js';
 import { expiryJob, payoutJob, refundDispatchJob, releaseJob, sandboxRefundSettleJob } from './jobs.js';
 import { paymentProvider } from './providers.js';

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronUp, Clock3, Music2, Pause, Play } from 'lucide-react';
 import { api, fmt } from '@/lib/api';
+import { dict, useDict } from '@/lib/i18n';
 import { useAuth } from '@/stores/auth';
 import type { MediaItem, Track } from '@/lib/types';
 import { cx, Skeleton } from '@/components/ui';
@@ -10,20 +11,21 @@ import { LikeButton } from '@/layouts/PlayerBar';
 import { trackToPlayable, usePlayer, type Playable } from '@/stores/player';
 
 /** Warna gradien header deterministik dari string (pengganti ekstraksi warna dominan artwork). */
-const PALETTE = ['#1e3264', '#8d67ab', '#e8115b', '#662d91', '#bc5900', '#509bf5', '#7a3a10', '#af2896', '#503750', '#ba5d07', '#477d95', '#e13300'];
+const PALETTE = ['#5B2A6E', '#8A2F3F', '#1F5C52', '#B8901A', '#2A1233', '#7A3E91', '#6B2431', '#24463F', '#4A1F5C', '#9A6B12', '#3B2F45', '#5E3A1E'];
 export function colorFor(key: string | undefined | null): string {
   let h = 0;
-  for (const c of key ?? 'gema') h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  for (const c of key ?? 'rave') h = (h * 31 + c.charCodeAt(0)) >>> 0;
   return PALETTE[h % PALETTE.length];
 }
 
-export function PlayFab({ onClick, playing, size = 'md', className, label = 'Putar' }: { onClick: (e: React.MouseEvent) => void; playing?: boolean; size?: 'md' | 'lg'; className?: string; label?: string }) {
+export function PlayFab({ onClick, playing, size = 'md', className, label }: { onClick: (e: React.MouseEvent) => void; playing?: boolean; size?: 'md' | 'lg'; className?: string; label?: string }) {
+  const d = useDict('common');
   return (
     <button
       onClick={onClick}
-      aria-label={playing ? 'Jeda' : label}
+      aria-label={playing ? d.fan.pause : (label ?? d.fan.play)}
       className={cx(
-        'grid place-items-center rounded-full bg-gema-primary text-white shadow-[0_8px_8px_rgba(0,0,0,0.3)] transition hover:scale-105 hover:bg-gema-primary-hover',
+        'grid place-items-center rounded-none border-2 border-rave-ink bg-rave-primary text-rave-on-primary shadow-[3px_3px_0_#0b0a0c] transition hover:-translate-x-0.5 hover:-translate-y-0.5 hover:bg-rave-primary-hover hover:shadow-[5px_5px_0_#0b0a0c]',
         size === 'lg' ? 'size-14' : 'size-12',
         className,
       )}
@@ -33,17 +35,17 @@ export function PlayFab({ onClick, playing, size = 'md', className, label = 'Put
   );
 }
 
-/** Kartu media ala mockup (gambar persegi, judul tebal, deskripsi 2 baris, tombol play hijau saat hover). */
+/** Kartu media ala mockup (gambar persegi, judul tebal, deskripsi 2 baris, tombol play mustard saat hover). */
 export function MediaCard({ title, subtitle, image, href, round, onPlay }: { title: string; subtitle?: string; image?: string | null; href: string; round?: boolean; onPlay?: () => void }) {
   const nav = useNavigate();
   return (
     <div className="media-card group cursor-pointer" onClick={() => nav(href)}>
       <div className="relative mb-4">
         {image ? (
-          <img src={image} alt="" loading="lazy" decoding="async" className={cx('aspect-square w-full object-cover shadow-[var(--shadow-card)]', round ? 'rounded-full' : 'rounded-md')} />
+          <img src={image} alt="" loading="lazy" decoding="async" className={cx('aspect-square w-full object-cover', round ? 'rounded-full' : 'rounded-none border-2 border-rave-ink')} />
         ) : (
-          <div className={cx('grid aspect-square w-full place-items-center bg-gema-highlight', round ? 'rounded-full' : 'rounded-md')}>
-            <Music2 className="size-12 text-gema-subtle" />
+          <div className={cx('grid aspect-square w-full place-items-center bg-rave-highlight', round ? 'rounded-full' : 'rounded-none')}>
+            <Music2 className="size-12 text-rave-subtle" />
           </div>
         )}
         {onPlay && (
@@ -59,7 +61,7 @@ export function MediaCard({ title, subtitle, image, href, round, onPlay }: { tit
       <Link to={href} onClick={(e) => e.stopPropagation()} className="block truncate font-bold text-white">
         {title}
       </Link>
-      {subtitle && <p className="mt-1 line-clamp-2 text-sm text-gema-muted">{subtitle}</p>}
+      {subtitle && <p className="mt-1 line-clamp-2 text-sm text-rave-muted">{subtitle}</p>}
     </div>
   );
 }
@@ -69,13 +71,14 @@ export function MediaItemCard({ item, onPlay }: { item: MediaItem; onPlay?: () =
 }
 
 export function Shelf({ title, href, children, loading }: { title: string; href?: string; children: ReactNode; loading?: boolean }) {
+  const d = useDict('common');
   return (
     <section className="mb-10">
       <div className="mb-4 flex items-end justify-between">
-        <h2 className="text-2xl font-bold tracking-tight text-white hover:underline">{href ? <Link to={href}>{title}</Link> : title}</h2>
+        <h2 className="text-[1.75rem] leading-none text-white md:text-3xl">{href ? <Link to={href} className="hover:text-rave-primary-text">{title}</Link> : title}</h2>
         {href && (
-          <Link to={href} className="text-sm font-bold text-gema-muted hover:underline">
-            Lihat semua
+          <Link to={href} className="rave-label text-rave-muted transition hover:text-rave-primary-text">
+            {d.fan.seeAll}
           </Link>
         )}
       </div>
@@ -88,7 +91,7 @@ export function Shelf({ title, href, children, loading }: { title: string; href?
 
 export function CardSkeleton() {
   return (
-    <div className="rounded-lg bg-gema-elevated p-4">
+    <div className="rounded-none bg-rave-elevated p-4">
       <Skeleton className="mb-4 aspect-square w-full" />
       <Skeleton className="mb-2 h-4 w-3/4" />
       <Skeleton className="h-3 w-1/2" />
@@ -96,23 +99,23 @@ export function CardSkeleton() {
   );
 }
 
-/** Header halaman (gradien dari warna kunci + gambar + judul besar), mockup Spotify 9. */
+/** Header halaman: cahaya warna kunci yang transparan (tekstur kanvas tetap terlihat) + sampul + judul besar. */
 export function HeroHeader({ color, image, kicker, title, meta, round }: { color: string; image?: string | null; kicker?: string; title: string; meta?: ReactNode; round?: boolean }) {
   const big = title.length < 18 ? 'text-5xl md:text-7xl lg:text-8xl' : title.length < 32 ? 'text-4xl md:text-6xl' : 'text-3xl md:text-5xl';
   return (
-    <header className="relative px-4 pt-24 pb-6 md:px-8" style={{ background: `linear-gradient(${color}, ${color}99 60%, transparent)` }}>
+    <header className="relative px-4 pt-24 pb-6 md:px-8" style={{ background: glow(color) }}>
       <div className="flex flex-col items-start gap-6 md:flex-row md:items-end">
         {image !== undefined &&
           (image ? (
-            <img src={image} alt="" className={cx('size-44 shrink-0 object-cover shadow-[0_4px_60px_rgba(0,0,0,0.5)] md:size-56', round ? 'rounded-full' : 'rounded')} />
+            <img src={image} alt="" className={cx('size-44 shrink-0 object-cover shadow-[6px_6px_0_#0b0a0c] md:size-56', round ? 'rounded-full' : 'rounded-none border-2 border-rave-ink')} />
           ) : (
-            <div className="grid size-44 shrink-0 place-items-center rounded bg-gema-highlight shadow-2xl md:size-56">
-              <Music2 className="size-16 text-gema-subtle" />
+            <div className="grid size-44 shrink-0 place-items-center rounded-none bg-rave-highlight shadow-2xl md:size-56">
+              <Music2 className="size-16 text-rave-subtle" />
             </div>
           ))}
         <div className="min-w-0">
-          {kicker && <p className="text-sm font-bold">{kicker}</p>}
-          <h1 className={cx('my-2 font-black tracking-tighter break-words text-white', big)}>{title}</h1>
+          {kicker && <p className="rave-label text-rave-primary-text">{kicker}</p>}
+          <h1 className={cx('my-3 leading-[0.9] break-words text-white', big)}>{title}</h1>
           {meta && <div className="flex flex-wrap items-center gap-1 text-sm text-white/90">{meta}</div>}
         </div>
       </div>
@@ -121,7 +124,12 @@ export function HeroHeader({ color, image, kicker, title, meta, round }: { color
 }
 
 export function ActionBar({ children }: { children: ReactNode }) {
-  return <div className="flex items-center gap-6 bg-gradient-to-b from-black/30 to-transparent px-4 py-6 md:px-8">{children}</div>;
+  return <div className="flex items-center gap-6 px-4 py-6 md:px-8">{children}</div>;
+}
+
+/** Cahaya warna kunci halaman yang transparan & lembut — dipakai semua header app agar seragam di atas kanvas. */
+export function glow(color: string, strength = '66') {
+  return `radial-gradient(70rem 26rem at 18% -10%, ${color}${strength}, transparent 70%)`;
 }
 
 /** Batas `ids` per permintaan /v1/library/likes/contains (dipotong server di 200). */
@@ -170,24 +178,25 @@ type RowProps = {
 
 // memo: baris hanya render ulang bila status aktif/putar berubah, bukan setiap perubahan store pemutar.
 const TrackRow = memo(function TrackRow({ t, i, active, playing, showAlbum, showCover, numbered, batched, onPlay, onToggle, onRemove, onMove, count }: RowProps) {
+  const d = useDict('common');
   return (
     <div
       role="row"
       onDoubleClick={() => onPlay(i)}
-      className="group grid grid-cols-[24px_1fr_40px] items-center gap-4 rounded-md px-4 py-2 text-sm text-gema-muted hover:bg-white/10 md:grid-cols-[24px_4fr_3fr_80px]"
+      className="group grid grid-cols-[24px_1fr_40px] items-center gap-4 rounded-none px-4 py-2 text-sm text-rave-muted hover:bg-white/10 md:grid-cols-[24px_4fr_3fr_80px]"
     >
-      <button onClick={() => (active ? onToggle() : onPlay(i))} aria-label={`Putar ${t.title}`} className="w-6 text-right">
-        <span className={cx('group-hover:hidden', active && 'text-gema-primary-text')}>{active && playing ? '♪' : numbered ? i + 1 : '•'}</span>
+      <button onClick={() => (active ? onToggle() : onPlay(i))} aria-label={d.fan.playTrack(t.title)} className="w-6 text-right">
+        <span className={cx('group-hover:hidden', active && 'text-rave-primary-text')}>{active && playing ? '♪' : numbered ? i + 1 : '•'}</span>
         <Play className="hidden size-4 fill-white text-white group-hover:inline" />
       </button>
       <div className="flex min-w-0 items-center gap-3">
-        {showCover && (t.release.cover_url ? <img src={t.release.cover_url} alt="" loading="lazy" decoding="async" width={40} height={40} className="size-10 rounded" /> : <div className="size-10 rounded bg-gema-highlight" />)}
+        {showCover && (t.release.cover_url ? <img src={t.release.cover_url} alt="" loading="lazy" decoding="async" width={40} height={40} className="size-10 rounded-none" /> : <div className="size-10 rounded-none bg-rave-highlight" />)}
         <div className="min-w-0">
-          <Link to={`/app/track/${t.id}`} className={cx('block truncate text-base hover:underline', active ? 'text-gema-primary-text' : 'text-white')}>
+          <Link to={`/app/track/${t.id}`} className={cx('block truncate text-base hover:underline', active ? 'text-rave-primary-text' : 'text-white')}>
             {t.title}
           </Link>
           <p className="truncate">
-            {t.explicit && <span className="mr-1.5 rounded-sm bg-gema-muted px-1 text-[10px] font-bold text-black">E</span>}
+            {t.explicit && <span className="mr-1.5 rounded-none bg-rave-muted px-1 text-[10px] font-bold text-black">E</span>}
             <Link to={`/app/artist/${t.artist.slug}`} className="hover:text-white hover:underline">
               {t.artist.name}
             </Link>
@@ -204,16 +213,16 @@ const TrackRow = memo(function TrackRow({ t, i, active, playing, showAlbum, show
         <span className="tabular-nums">{fmt.duration(t.duration_ms)}</span>
         {onMove && (
           <span className="hidden items-center gap-0.5 group-focus-within:inline-flex group-hover:inline-flex">
-            <button onClick={() => onMove(i, -1)} disabled={i === 0} className="hover:text-white disabled:opacity-30" aria-label={`Naikkan ${t.title}`}>
+            <button onClick={() => onMove(i, -1)} disabled={i === 0} className="hover:text-white disabled:opacity-30" aria-label={d.fan.moveUp(t.title)}>
               <ChevronUp className="size-4" />
             </button>
-            <button onClick={() => onMove(i, 1)} disabled={i === count - 1} className="hover:text-white disabled:opacity-30" aria-label={`Turunkan ${t.title}`}>
+            <button onClick={() => onMove(i, 1)} disabled={i === count - 1} className="hover:text-white disabled:opacity-30" aria-label={d.fan.moveDown(t.title)}>
               <ChevronDown className="size-4" />
             </button>
           </span>
         )}
         {onRemove && (
-          <button onClick={() => onRemove(i)} className="hidden text-xs font-bold group-hover:inline hover:text-white" aria-label={`Hapus ${t.title}`}>
+          <button onClick={() => onRemove(i)} className="hidden text-xs font-bold group-hover:inline hover:text-white" aria-label={d.fan.remove(t.title)}>
             ✕
           </button>
         )}
@@ -249,13 +258,14 @@ export function TrackTable({
   const ids = useMemo(() => (idsKey ? idsKey.split(',') : []), [idsKey]);
   const batchedIds = useBatchedLikes(ids);
   const onPlay = useCallback((i: number) => void playQueue(queue, i), [playQueue, queue]);
+  const d = useDict('common');
   return (
-    <div className="px-4 md:px-8" role="table" aria-label="Daftar lagu">
-      <div role="row" className="mb-2 grid grid-cols-[24px_1fr_40px] items-center gap-4 border-b border-white/10 px-4 pb-2 text-xs tracking-widest text-gema-muted uppercase md:grid-cols-[24px_4fr_3fr_80px]">
+    <div className="px-4 md:px-8" role="table" aria-label={d.fan.trackList}>
+      <div role="row" className="mb-2 grid grid-cols-[24px_1fr_40px] items-center gap-4 border-b border-white/10 px-4 pb-2 text-xs tracking-widest text-rave-muted uppercase md:grid-cols-[24px_4fr_3fr_80px]">
         <span>#</span>
-        <span>Judul</span>
-        <span className="hidden md:block">{showAlbum ? 'Album' : ''}</span>
-        <Clock3 className="size-4 justify-self-end" aria-label="Durasi" />
+        <span>{d.fan.colTitle}</span>
+        <span className="hidden md:block">{showAlbum ? d.fan.colAlbum : ''}</span>
+        <Clock3 className="size-4 justify-self-end" aria-label={d.fan.colDuration} />
       </div>
       {tracks.map((t, i) => {
         const active = currentId === t.id;
@@ -288,20 +298,22 @@ export function FanPage({ children, className }: { children: ReactNode; classNam
 
 export function greeting(d = new Date()): string {
   const h = d.getHours();
-  if (h < 11) return 'Selamat pagi';
-  if (h < 15) return 'Selamat siang';
-  if (h < 18) return 'Selamat sore';
-  return 'Selamat malam';
+  const t = dict('common').fan;
+  if (h < 11) return t.greetMorning;
+  if (h < 15) return t.greetAfternoon;
+  if (h < 18) return t.greetLateAfternoon;
+  return t.greetEvening;
 }
 
 export function DarkError({ error, retry }: { error: unknown; retry?: () => void }) {
+  const d = useDict('common');
   return (
-    <div className="m-8 rounded-lg bg-white/5 p-6 text-sm">
-      <p className="font-bold">Gagal memuat konten</p>
-      <p className="mt-1 text-gema-muted">{(error as any)?.message ?? 'Layanan sedang tidak tersedia.'}</p>
+    <div className="m-8 rounded-none bg-white/5 p-6 text-sm">
+      <p className="font-bold">{d.fan.contentLoadFailed}</p>
+      <p className="mt-1 text-rave-muted">{(error as any)?.message ?? d.fan.serviceUnavailable}</p>
       {retry && (
-        <button onClick={retry} className="mt-3 rounded-full border border-white/40 px-4 py-1.5 text-xs font-bold hover:border-white">
-          Coba lagi
+        <button onClick={retry} className="mt-3 rounded-none border border-white/40 px-4 py-1.5 text-xs font-bold hover:border-white">
+          {d.ui.retry}
         </button>
       )}
     </div>

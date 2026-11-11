@@ -1,5 +1,5 @@
 {
-  "name": "@gema/catalog",
+  "name": "@rave/catalog",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,8 @@
     "seed": "tsx src/index.ts seed"
   },
   "dependencies": {
-    "@gema/domain": "*",
-    "@gema/service-kit": "*"
+    "@rave/domain": "*",
+    "@rave/service-kit": "*",
+    "ffmpeg-static": "^5.2.0"
   }
 }

@@ -10,8 +10,8 @@ import {
   type PaymentTerm,
   type TaxPayee,
   type ValueBasis,
-} from '@gema/domain';
-import { settings, type Client } from '@gema/service-kit';
+} from '@rave/domain';
+import { settings, type Client } from '@rave/service-kit';
 import { commissionPolicy, todayWib, type BookingRow } from './common.js';
 import { managementOrgId } from './repo.js';
 
@@ -141,7 +141,7 @@ export function assertTermsValid(t: ContractTerms): void {
 
 export function contractNumber(bookingId: string, now = new Date()): string {
   const ym = new Date(now.getTime() + 7 * 3600_000).toISOString().slice(0, 7).replace('-', '');
-  return `GEMA/SPK/${ym}/${bookingId.replace(/-/g, '').slice(-8).toUpperCase()}`;
+  return `RAVE/SPK/${ym}/${bookingId.replace(/-/g, '').slice(-8).toUpperCase()}`;
 }
 
 /**

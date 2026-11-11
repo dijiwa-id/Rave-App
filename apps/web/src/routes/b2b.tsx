@@ -1,6 +1,6 @@
 import { lazy, Suspense, type ComponentType } from 'react';
 import type { RouteObject } from 'react-router-dom';
-import type { AdminPermission } from '@gema/domain/settings';
+import type { AdminPermission } from '@rave/domain/settings';
 import { RequireAdminAccess, RequireAuth, RequireRole } from '@/components/guards';
 import { PageLoader } from '@/components/ui';
 import { RouteError } from '@/components/RouteError';
@@ -56,6 +56,7 @@ const platform = {
   settings: () => import('@/pages/admin/PlatformSettings'),
   storage: () => import('@/pages/admin/PlatformStorage'),
   roles: () => import('@/pages/admin/PlatformRoles'),
+  landing: () => import('@/pages/admin/PlatformLanding'),
 };
 const access = (perms: AdminPermission[], children: RouteObject[]): RouteObject => ({ element: <RequireAdminAccess perms={perms} />, children });
 
@@ -139,6 +140,7 @@ export const b2bRoutes: RouteObject[] = [
                 children: [
                   { path: 'platform', element: named(platform.main, 'PlatformDashboard') },
                   { path: 'platform/settings', element: named(platform.settings, 'PlatformSettings') },
+                  { path: 'platform/landing', element: named(platform.landing, 'PlatformLanding') },
                   { path: 'platform/roles', element: named(platform.roles, 'PlatformRoles') },
                   { path: 'platform/storage', element: named(platform.storage, 'PlatformStorage') },
                   { path: 'platform/backups', element: named(platform.storage, 'PlatformBackups') },

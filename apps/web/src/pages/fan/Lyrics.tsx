@@ -7,6 +7,7 @@ import { usePlayer } from '@/stores/player';
 import { colorFor } from '@/components/fan';
 import { cx, EmptyState, toast } from '@/components/ui';
 import type { Lyrics as LyricsT } from './Track';
+import { useDict } from '@/lib/i18n';
 
 /** Indeks baris aktif (-1 = belum ada / lirik tidak tersinkron). */
 function activeLine(lines: { time_ms: number }[], synced: boolean, pos: number): number {
@@ -21,6 +22,7 @@ export default function Lyrics() {
   const current = usePlayer((s) => s.current);
   const seek = usePlayer((s) => s.seek);
   const [karaoke, setKaraoke] = useState(false);
+  const d = useDict('fan');
   const isTrack = current?.kind === 'track';
   const q = useQuery({
     queryKey: ['lyrics', current?.id],
@@ -41,15 +43,15 @@ export default function Lyrics() {
   if (!current)
     return (
       <div className="pt-24">
-        <EmptyState icon={<Mic2 className="size-12" />} title="Putar lagu untuk melihat lirik" action={<Link to="/app" className="rounded-full bg-white px-6 py-2.5 text-sm font-bold text-black">Ke Beranda</Link>} />
+        <EmptyState icon={<Mic2 className="size-12" />} title={d.lyrics.playToSee} action={<Link to="/app" className="rounded-none bg-white px-6 py-2.5 text-sm font-bold text-black">{d.lyrics.goHome}</Link>} />
       </div>
     );
 
   async function shareLine(text: string) {
-    const card = `“${text}”\n— ${current!.title}, ${current!.subtitle} · didengar di GEMA`;
+    const card = d.lyrics.shareCard(text, current!.title, current!.subtitle);
     try {
       await navigator.clipboard.writeText(card);
-      toast.success('Kutipan lirik disalin — bagikan ke teman!');
+      toast.success(d.lyrics.copied);
     } catch {
       toast.info(card);
     }
@@ -59,23 +61,23 @@ export default function Lyrics() {
     <div className="min-h-full px-4 pt-24 pb-24 md:px-12" style={{ background: color }}>
       <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-sm font-bold text-white/70">Lirik</p>
+          <p className="text-sm font-bold text-white/70">{d.shared.lyrics}</p>
           <p className="text-xl font-bold">
             {current.title} · <span className="text-white/80">{current.subtitle}</span>
           </p>
         </div>
         {q.data?.synced && (
-          <button onClick={() => setKaraoke(!karaoke)} aria-pressed={karaoke} className={cx('rounded-full px-4 py-2 text-sm font-bold', karaoke ? 'bg-white text-black' : 'bg-black/30 text-white')}>
-            Mode karaoke
+          <button onClick={() => setKaraoke(!karaoke)} aria-pressed={karaoke} className={cx('rounded-none px-4 py-2 text-sm font-bold', karaoke ? 'bg-white text-black' : 'bg-black/30 text-white')}>
+            {d.lyrics.karaoke}
           </button>
         )}
       </div>
       {!isTrack ? (
-        <p className="text-2xl font-bold text-black/60">Lirik tidak tersedia untuk episode.</p>
+        <p className="text-2xl font-bold text-black/60">{d.lyrics.notForEpisodes}</p>
       ) : q.isLoading ? (
-        <p className="text-2xl font-bold text-black/50">Memuat lirik…</p>
+        <p className="text-2xl font-bold text-black/50">{d.shared.loadingLyrics}</p>
       ) : q.isError || !lines.length ? (
-        <p className="text-2xl font-bold text-black/60">Lirik belum tersedia untuk lagu ini.</p>
+        <p className="text-2xl font-bold text-black/60">{d.shared.lyricsUnavailable}</p>
       ) : (
         <div className="max-w-4xl space-y-4">
           {lines.map((l, i) => {
@@ -98,7 +100,7 @@ export default function Lyrics() {
                   {l.text || '♪'}
                 </button>
                 {l.text && (
-                  <button onClick={() => shareLine(l.text)} aria-label="Bagikan baris lirik" className="mt-2 opacity-0 transition group-hover:opacity-100">
+                  <button onClick={() => shareLine(l.text)} aria-label={d.lyrics.shareLine} className="mt-2 opacity-0 transition group-hover:opacity-100">
                     <Share2 className="size-5" />
                   </button>
                 )}
@@ -107,7 +109,7 @@ export default function Lyrics() {
           })}
         </div>
       )}
-      <p className="mt-16 text-xs text-black/50">Lirik ditampilkan berdasarkan lisensi publisher.</p>
+      <p className="mt-16 text-xs text-black/50">{d.lyrics.license}</p>
     </div>
   );
 }

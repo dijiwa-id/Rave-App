@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { api, ApiError } from '@/lib/api';
+import { dict } from '@/lib/i18n';
 import { useAuth } from '@/stores/auth';
 import { safeGet, safeSet } from '@/lib/storage';
 import type { PlaybackSession } from '@/lib/types';
 import { runAdBreak, useAds } from '@/stores/ads';
+import { toast } from '@/components/ui';
 
 /** Item yang bisa diputar: lagu atau episode podcast/fiksi. */
 export interface Playable {
@@ -114,13 +116,16 @@ if (typeof window !== 'undefined') {
 let recoveries = 0;
 const MAX_RECOVERIES = 2;
 
-const PLAY_BLOCKED = 'Ketuk putar untuk melanjutkan';
+// Pesan galat diambil dari kamus saat terjadi (bukan konstanta modul) agar mengikuti bahasa aktif.
+const errText = () => dict('common').player.errors;
+/** Penjelasan "HQ/Lossless khusus Premium" cukup sekali per sesi aplikasi, bukan tiap lagu. */
+let premiumQualityNotified = false;
 /** audio.play() bisa ditolak: AbortError (src berganti) diabaikan; NotAllowedError = autoplay diblokir. */
 function playSafe() {
   return audio.play().catch((e: unknown) => {
     const name = (e as { name?: string })?.name;
     if (name === 'AbortError') return;
-    usePlayer.setState({ playing: false, buffering: false, error: name === 'NotAllowedError' ? PLAY_BLOCKED : 'Gagal memutar' });
+    usePlayer.setState({ playing: false, buffering: false, error: name === 'NotAllowedError' ? errText().playBlocked : errText().playFailed });
     throw e;
   });
 }
@@ -144,6 +149,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
       });
       if (get().current?.id !== item.id) return;
       set({ session, durationMs: session.duration_ms || item.duration_ms });
+      if (session.quality_capped === 'premium' && !premiumQualityNotified) {
+        premiumQualityNotified = true;
+        toast.info(errText().premiumQuality);
+      }
       audio.src = session.stream_url;
       if (resumeMs) audio.addEventListener('loadedmetadata', () => (audio.currentTime = resumeMs / 1000), { once: true });
       audio.volume = get().muted ? 0 : get().volume;
@@ -154,7 +163,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       // Penolakan play() (DOMException) sudah ditangani playSafe.
       if (e instanceof DOMException) return;
       if (get().current?.id !== item.id) return; // galat item lama tidak menimpa item yang sedang diputar
-      set({ playing: false, buffering: false, error: e?.status === 402 ? 'Episode ini khusus Premium' : e?.message ?? 'Gagal memutar' });
+      set({ playing: false, buffering: false, error: e?.status === 402 ? errText().premiumEpisode : e?.message ?? errText().playFailed });
     }
   }
 
@@ -216,7 +225,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       // Pratinjau 30 detik untuk pengguna anonim (REQ-WEB-04)
       if (s.session?.preview_only && s.session.preview_ms && pos >= s.session.preview_ms) {
         audio.pause();
-        set({ error: 'Pratinjau 30 detik berakhir — masuk untuk mendengar penuh, gratis.' });
+        set({ error: errText().previewEnded });
       }
       if (playedMs - lastProgressAt >= 15_000) {
         lastProgressAt = playedMs;
@@ -236,12 +245,12 @@ export const usePlayer = create<PlayerState>((set, get) => {
         void load(current, positionMs);
         return;
       }
-      set({ playing: false, buffering: false, error: 'Stream tidak tersedia' });
+      set({ playing: false, buffering: false, error: errText().streamUnavailable });
     });
     // Jaringan kembali setelah putus: coba lagi otomatis bila pemutaran terhenti karena galat stream.
     window.addEventListener('online', () => {
       const { current, session, error, positionMs } = get();
-      if (current && session && error === 'Stream tidak tersedia') {
+      if (current && session && error === errText().streamUnavailable) {
         recoveries = 0;
         void load(current, positionMs);
       }
@@ -261,7 +270,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     muted: false,
     shuffle: false,
     repeat: 'off',
-    quality: (safeGet('gema-quality') as Quality | null) ?? 'auto',
+    quality: (safeGet('rave-quality') as Quality | null) ?? 'auto',
     error: null,
 
     async playQueue(items, startIndex = 0) {
@@ -283,7 +292,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       if (useAds.getState().busy) return;
       if (!get().current) return;
       if (audio.paused) {
-        if (get().error === PLAY_BLOCKED) set({ error: null });
+        if (get().error === errText().playBlocked) set({ error: null });
         void playSafe().catch(() => {});
       }
       else audio.pause();
@@ -340,7 +349,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
     toggleShuffle: () => set({ shuffle: !get().shuffle }),
     cycleRepeat: () => set({ repeat: get().repeat === 'off' ? 'all' : get().repeat === 'all' ? 'one' : 'off' }),
     setQuality(q) {
-      safeSet('gema-quality', q);
+      safeSet('rave-quality', q);
       set({ quality: q });
     },
     addToQueue: (item) => set({ queue: [...get().queue, item] }),

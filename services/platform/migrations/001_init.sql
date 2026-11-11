@@ -1,6 +1,6 @@
 -- Platform / Super Admin (REQ-ADM-01, BRD §12.3 "Konfigurasi Kebijakan", §9 durabilitas)
 
--- Nilai pengaturan yang menyimpang dari default registri (@gema/domain/settings). Kunci tanpa baris = default.
+-- Nilai pengaturan yang menyimpang dari default registri (@rave/domain/settings). Kunci tanpa baris = default.
 CREATE TABLE settings (
   key         text PRIMARY KEY,
   value       jsonb NOT NULL,

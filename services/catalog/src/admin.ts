@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { audit, conflict, forbidden, notFound, publish, requirePermission, unauthorized, z, type Client, type Job, type ServiceContext } from '@gema/service-kit';
+import { audit, conflict, forbidden, notFound, publish, requirePermission, unauthorized, z, type Client, type Job, type ServiceContext } from '@rave/service-kit';
 import { isUuid, releaseFull } from './queries.js';
 
 /** Tanggal hari ini di WIB (rilis default 00:00 WIB, §7.4). */
@@ -90,9 +90,13 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
     s.get('/internal/tracks/:id/media', async (req) => {
       const { id } = req.params as { id: string };
       if (!isUuid(id)) throw notFound('Lagu');
+      // Master + metadata + rendisi (bila audio_url menunjuk berkas upload; URL eksternal/demo → null).
       const t = await db.one(
-        `SELECT t.id, r.status, t.audio_url, t.duration_ms, t.artist_id, t.loudness_gain_db, t.title, t.release_id
-         FROM tracks t JOIN releases r ON r.id = t.release_id WHERE t.id = $1`,
+        `SELECT t.id, r.status, t.audio_url, t.duration_ms, t.artist_id, t.loudness_gain_db, t.title, t.release_id,
+                u.audio_meta, coalesce(u.renditions, '{}'::jsonb) AS renditions, u.transcode_status
+         FROM tracks t JOIN releases r ON r.id = t.release_id
+         LEFT JOIN uploads u ON u.stored_name = split_part(t.audio_url, '/v1/catalog/media/', 2)
+         WHERE t.id = $1`,
         [id],
       );
       if (!t) throw notFound('Lagu');
@@ -117,7 +121,12 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
            UNION ALL SELECT cover_url FROM shows UNION ALL SELECT audio_url FROM episodes UNION ALL SELECT cover_url FROM episodes
            UNION ALL SELECT image_url FROM categories
          ) x WHERE u LIKE '%/v1/catalog/media/%'
-         UNION SELECT '/v1/catalog/media/' || stored_name FROM uploads WHERE created_at > now() - interval '24 hours'`,
+         UNION SELECT '/v1/catalog/media/' || stored_name FROM uploads WHERE created_at > now() - interval '24 hours'
+         -- Rendisi streaming milik master yang masih dipakai (atau upload < 24 jam) bukan file yatim.
+         UNION SELECT r.value->>'url' FROM uploads up CROSS JOIN LATERAL jsonb_each(up.renditions) r
+          WHERE up.created_at > now() - interval '24 hours'
+             OR EXISTS (SELECT 1 FROM tracks t WHERE t.audio_url = '/v1/catalog/media/' || up.stored_name)
+             OR EXISTS (SELECT 1 FROM episodes e WHERE e.audio_url = '/v1/catalog/media/' || up.stored_name)`,
       );
       return { files: [...new Set(rows.map((r) => String(r.u).split('/v1/catalog/media/')[1].split(/[?#]/)[0]))] };
     });

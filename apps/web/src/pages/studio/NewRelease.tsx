@@ -7,6 +7,8 @@ import { api, ApiError, fmt } from '@/lib/api';
 import type { Release } from '@/lib/types';
 import { Field, Input, PageHeader, Select, toast } from '@/components/ui';
 import { GENRES, useCurrentArtist } from '@/components/b2b/common';
+import { useDict } from '@/lib/i18n';
+import { AUDIO_ACCEPT, uploadFile } from '@/lib/upload';
 
 /** `key` = id stabil baris: unggahan yang selesai belakangan ditulis ke baris yang benar walau baris lain dihapus. */
 interface TrackDraft {
@@ -25,13 +27,8 @@ interface ShareDraft {
   pct: number;
 }
 
-export async function uploadFile(file: File, kind: 'audio' | 'artwork'): Promise<string> {
-  const u = await api<{ upload_id: string; upload_url: string; public_url: string }>('/v1/studio/uploads', {
-    body: { kind, filename: file.name, content_type: file.type || 'application/octet-stream', size: file.size },
-  });
-  const r = await api<{ public_url?: string }>(u.upload_url, { method: 'PUT', body: file });
-  return r?.public_url ?? u.public_url;
-}
+// Dipakai ulang oleh halaman Studio lain (ReleaseDetail).
+export { AUDIO_ACCEPT, uploadFile };
 
 export function audioDuration(file: File): Promise<number | undefined> {
   return new Promise((res) => {
@@ -55,26 +52,27 @@ const sum = (s: ShareDraft[]) => Math.round(s.reduce((a, x) => a + (Number(x.pct
 
 export function SharesEditor({ title, shares, onChange }: { title: string; shares: ShareDraft[]; onChange: (s: ShareDraft[]) => void }) {
   const total = sum(shares);
+  const t = useDict('b2b').studio.shares;
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
         <p className="font-bold">{title}</p>
-        <span className={`text-sm font-extrabold ${total === 100 ? 'text-emerald-600' : 'text-red-600'}`}>Total {total}%</span>
+        <span className={`text-sm font-extrabold ${total === 100 ? 'text-emerald-600' : 'text-red-600'}`}>{t.total(total)}</span>
       </div>
       <div className="space-y-2">
         {shares.map((s, i) => (
           <div key={i} className="grid grid-cols-[1fr_1fr_90px_32px] gap-2">
-            <Input placeholder="Nama pihak" value={s.party_name} onChange={(e) => onChange(shares.map((x, j) => (j === i ? { ...x, party_name: e.target.value } : x)))} />
-            <Input placeholder="Email (undangan persetujuan)" type="email" value={s.email} onChange={(e) => onChange(shares.map((x, j) => (j === i ? { ...x, email: e.target.value } : x)))} />
-            <Input type="number" min={0} max={100} step={0.01} value={s.pct} onChange={(e) => onChange(shares.map((x, j) => (j === i ? { ...x, pct: Number(e.target.value) } : x)))} aria-label="Persen" />
-            <button type="button" aria-label="Hapus" onClick={() => onChange(shares.filter((_, j) => j !== i))} className="text-b2b-muted hover:text-red-600">
+            <Input placeholder={t.partyName} value={s.party_name} onChange={(e) => onChange(shares.map((x, j) => (j === i ? { ...x, party_name: e.target.value } : x)))} />
+            <Input placeholder={t.email} type="email" value={s.email} onChange={(e) => onChange(shares.map((x, j) => (j === i ? { ...x, email: e.target.value } : x)))} />
+            <Input type="number" min={0} max={100} step={0.01} value={s.pct} onChange={(e) => onChange(shares.map((x, j) => (j === i ? { ...x, pct: Number(e.target.value) } : x)))} aria-label={t.percent} />
+            <button type="button" aria-label={t.remove} onClick={() => onChange(shares.filter((_, j) => j !== i))} className="text-b2b-muted hover:text-red-600">
               <Trash2 className="size-4" />
             </button>
           </div>
         ))}
       </div>
       <button type="button" onClick={() => onChange([...shares, { party_name: '', email: '', pct: 0 }])} className="mt-2 flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
-        <Plus className="size-4" /> Tambah pihak
+        <Plus className="size-4" /> {t.addParty}
       </button>
     </div>
   );
@@ -93,6 +91,7 @@ export default function NewRelease() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<{ path: string; message: string }[]>([]);
   const [stepperKey, setStepperKey] = useState(0);
+  const d = useDict('b2b').studio.newRelease;
 
   const valid: Record<number, boolean> = {
     1: meta.title.trim().length > 0 && !!meta.release_date,
@@ -129,7 +128,7 @@ export default function NewRelease() {
     });
     try {
       const url = await uploadFile(file, 'artwork');
-      setCover({ url, uploading: false, warn: dims && dims < 3000 ? `Resolusi ${dims}px — standar minimal 3000×3000 px.` : '' });
+      setCover({ url, uploading: false, warn: dims && dims < 3000 ? d.lowRes(dims) : '' });
     } catch (e) {
       toast.error(e);
       setCover({ url: '', uploading: false, warn: '' });
@@ -153,7 +152,7 @@ export default function NewRelease() {
       const strip = (s: ShareDraft[]) => s.map((x) => ({ party_name: x.party_name, email: x.email || undefined, pct: Number(x.pct) }));
       for (const t of release.tracks) await api(`/v1/studio/tracks/${t.id}/splits`, { method: 'PUT', body: { master: strip(master), publishing: strip(publishing) } });
       await api(`/v1/studio/releases/${release.id}/submit`, { body: {} });
-      toast.success('Rilis dikirim untuk review');
+      toast.success(d.submitted);
       qc.invalidateQueries({ queryKey: ['studio-releases'] });
       nav(`/studio/releases/${release.id}`);
     } catch (e) {
@@ -165,7 +164,7 @@ export default function NewRelease() {
         setStep(5);
       } else {
         qc.invalidateQueries({ queryKey: ['studio-releases'] });
-        toast.info('Draf tersimpan — perbaiki lalu submit dari halaman detail.');
+        toast.info(d.draftSaved);
         nav(`/studio/releases/${release.id}`);
       }
     } finally {
@@ -175,7 +174,7 @@ export default function NewRelease() {
 
   return (
     <div>
-      <PageHeader title="Rilis baru" subtitle="Master WAV/FLAC min. 16-bit/44,1 kHz · artwork min. 3000×3000 px · split hak wajib 100%" />
+      <PageHeader title={d.title} subtitle={d.subtitle} />
       <Stepper
         key={stepperKey}
         className="flex w-full flex-col"
@@ -183,68 +182,68 @@ export default function NewRelease() {
         initialStep={stepperKey ? 5 : 1}
         onStepChange={setStep}
         onFinalStepCompleted={submit}
-        backButtonText="Kembali"
-        nextButtonText="Lanjut"
+        backButtonText={d.back}
+        nextButtonText={d.next}
         disableStepIndicators
-        nextButtonProps={{ disabled: !valid[step] || submitting, className: 'rounded-full bg-b2b-ink px-5 py-2 text-sm font-bold text-b2b-on-ink disabled:opacity-40' }}
+        nextButtonProps={{ disabled: !valid[step] || submitting, className: 'rounded-none bg-b2b-ink px-5 py-2 text-sm font-bold text-b2b-on-ink disabled:opacity-40' }}
       >
         <Step>
-          <h2 className="mb-4 text-lg font-extrabold">1. Metadata</h2>
+          <h2 className="mb-4 text-lg font-extrabold">{d.step1}</h2>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <Field label="Judul rilis">
+              <Field label={d.releaseTitle}>
                 <Input value={meta.title} onChange={(e) => setMeta({ ...meta, title: e.target.value })} />
               </Field>
             </div>
-            <Field label="Tipe">
+            <Field label={d.type}>
               <Select value={meta.type} onChange={(e) => setMeta({ ...meta, type: e.target.value as any })}>
                 <option value="SINGLE">Single</option>
                 <option value="EP">EP</option>
                 <option value="ALBUM">Album</option>
               </Select>
             </Field>
-            <Field label="Tanggal rilis" hint="00:00 WIB">
+            <Field label={d.releaseDate} hint="00:00 WIB">
               <Input type="date" value={meta.release_date} onChange={(e) => setMeta({ ...meta, release_date: e.target.value })} />
             </Field>
-            <Field label="Genre">
+            <Field label={d.genre}>
               <Select value={meta.genre} onChange={(e) => setMeta({ ...meta, genre: e.target.value })}>
                 {GENRES.map((g) => (
                   <option key={g}>{g}</option>
                 ))}
               </Select>
             </Field>
-            <Field label="Label" hint="kosongkan bila mandiri">
+            <Field label={d.label} hint={d.labelHint}>
               <Input value={meta.label} onChange={(e) => setMeta({ ...meta, label: e.target.value })} />
             </Field>
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={meta.explicit} onChange={(e) => setMeta({ ...meta, explicit: e.target.checked })} /> Konten eksplisit
+              <input type="checkbox" checked={meta.explicit} onChange={(e) => setMeta({ ...meta, explicit: e.target.checked })} /> {d.explicitContent}
             </label>
           </div>
-          <p className="mt-3 text-xs text-b2b-muted">Submit ≥ 7 hari sebelum tanggal rilis agar bisa dipitch ke playlist editorial.</p>
+          <p className="mt-3 text-xs text-b2b-muted">{d.pitchNote}</p>
         </Step>
         <Step>
-          <h2 className="mb-4 text-lg font-extrabold">2. Lagu</h2>
+          <h2 className="mb-4 text-lg font-extrabold">{d.step2}</h2>
           <div className="space-y-3">
             {tracks.map((t, i) => (
-              <div key={t.key} className="rounded-xl border border-b2b-line p-3">
+              <div key={t.key} className="rounded-none border border-b2b-line p-3">
                 <div className="grid gap-2 sm:grid-cols-[32px_1fr_160px_32px] sm:items-center">
                   <span className="text-sm font-bold text-b2b-muted">{i + 1}</span>
-                  <Input placeholder="Judul lagu" value={t.title} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} />
-                  <Input placeholder="ISRC (opsional)" value={t.isrc} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, isrc: e.target.value } : x)))} />
-                  <button type="button" aria-label="Hapus lagu" disabled={tracks.length === 1} onClick={() => setTracks(tracks.filter((_, j) => j !== i))} className="text-b2b-muted hover:text-red-600 disabled:opacity-30">
+                  <Input placeholder={d.trackTitle} value={t.title} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} />
+                  <Input placeholder={d.isrcOptional} value={t.isrc} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, isrc: e.target.value } : x)))} />
+                  <button type="button" aria-label={d.removeTrack} disabled={tracks.length === 1} onClick={() => setTracks(tracks.filter((_, j) => j !== i))} className="text-b2b-muted hover:text-red-600 disabled:opacity-30">
                     <Trash2 className="size-4" />
                   </button>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-2 sm:pl-10">
-                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-b2b-line px-3 py-1.5 text-xs font-bold hover:border-b2b-ink">
-                    <Upload className="size-3.5" /> {t.uploading ? 'Mengunggah…' : 'Unggah master'}
-                    <input type="file" accept="audio/*,.wav,.flac" className="hidden" onChange={(e) => e.target.files?.[0] && void onAudio(t.key, e.target.files[0])} />
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-none border border-b2b-line px-3 py-1.5 text-xs font-bold hover:border-b2b-ink">
+                    <Upload className="size-3.5" /> {t.uploading ? d.uploading : d.uploadMaster}
+                    <input type="file" accept={AUDIO_ACCEPT} className="hidden" onChange={(e) => e.target.files?.[0] && void onAudio(t.key, e.target.files[0])} />
                   </label>
-                  <span className="text-xs text-b2b-muted">atau URL</span>
+                  <span className="text-xs text-b2b-muted">{d.orUrl}</span>
                   <Input className="max-w-sm py-1.5! text-xs" placeholder="https://…/master.flac" value={t.audio_url} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, audio_url: e.target.value } : x)))} />
                   {t.duration_ms && <span className="text-xs text-b2b-muted">{fmt.duration(t.duration_ms)}</span>}
                   <label className="flex items-center gap-1 text-xs">
-                    <input type="checkbox" checked={t.explicit} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, explicit: e.target.checked } : x)))} /> Eksplisit
+                    <input type="checkbox" checked={t.explicit} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, explicit: e.target.checked } : x)))} /> {d.explicit}
                   </label>
                 </div>
               </div>
@@ -252,20 +251,20 @@ export default function NewRelease() {
           </div>
           {meta.type !== 'SINGLE' || tracks.length < 1 ? (
             <button type="button" onClick={() => setTracks([...tracks, newTrack()])} className="mt-3 flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
-              <Plus className="size-4" /> Tambah lagu
+              <Plus className="size-4" /> {d.addTrack}
             </button>
           ) : null}
         </Step>
         <Step>
-          <h2 className="mb-4 text-lg font-extrabold">3. Artwork</h2>
+          <h2 className="mb-4 text-lg font-extrabold">{d.step3}</h2>
           <div className="flex flex-wrap items-start gap-6">
-            {cover.url ? <img src={cover.url} alt="Artwork" className="size-48 rounded-lg object-cover shadow" /> : <div className="grid size-48 place-items-center rounded-lg bg-b2b-bg text-sm text-b2b-muted">{cover.uploading ? 'Mengunggah…' : 'Belum ada artwork'}</div>}
+            {cover.url ? <img src={cover.url} alt={d.artworkAlt} className="size-48 rounded-none object-cover shadow" /> : <div className="grid size-48 place-items-center rounded-none bg-b2b-bg text-sm text-b2b-muted">{cover.uploading ? d.uploading : d.noArtwork}</div>}
             <div className="space-y-3">
-              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-b2b-ink px-4 py-2 text-sm font-bold text-b2b-on-ink">
-                <Upload className="size-4" /> Unggah gambar
+              <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-none bg-b2b-ink px-4 py-2 text-sm font-bold text-b2b-on-ink">
+                <Upload className="size-4" /> {d.uploadImage}
                 <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && void onCover(e.target.files[0])} />
               </label>
-              <Field label="atau URL artwork">
+              <Field label={d.orArtworkUrl}>
                 <Input value={cover.url} onChange={(e) => setCover({ ...cover, url: e.target.value })} placeholder="https://…" />
               </Field>
               {cover.warn && <p className="text-xs font-semibold text-amber-700">{cover.warn}</p>}
@@ -273,21 +272,21 @@ export default function NewRelease() {
           </div>
         </Step>
         <Step>
-          <h2 className="mb-1 text-lg font-extrabold">4. Split hak</h2>
-          <p className="mb-4 text-sm text-b2b-muted">Berlaku untuk semua lagu di rilis ini (bisa diubah per lagu). Tiap pihak menerima undangan persetujuan; royalti ditahan sampai split disetujui 100%.</p>
+          <h2 className="mb-1 text-lg font-extrabold">{d.step4}</h2>
+          <p className="mb-4 text-sm text-b2b-muted">{d.splitNote}</p>
           <div className="space-y-6">
-            <SharesEditor title="Master (rekaman)" shares={master} onChange={setMaster} />
-            <SharesEditor title="Publishing (pencipta & penerbit)" shares={publishing} onChange={setPublishing} />
+            <SharesEditor title={d.masterTitle} shares={master} onChange={setMaster} />
+            <SharesEditor title={d.publishingTitle} shares={publishing} onChange={setPublishing} />
           </div>
         </Step>
         <Step>
-          <h2 className="mb-4 text-lg font-extrabold">5. Tinjau & submit</h2>
+          <h2 className="mb-4 text-lg font-extrabold">{d.step5}</h2>
           <div className="flex gap-4">
-            {cover.url && <img src={cover.url} alt="" className="size-24 rounded object-cover" />}
+            {cover.url && <img src={cover.url} alt="" className="size-24 rounded-none object-cover" />}
             <div className="text-sm">
               <p className="text-lg font-extrabold">{meta.title}</p>
               <p className="text-b2b-muted">
-                {meta.type} · {meta.genre} · rilis {fmt.date(meta.release_date)}
+                {meta.type} · {meta.genre} · {d.releaseOn(fmt.date(meta.release_date))}
               </p>
               <ol className="mt-2 list-decimal pl-5">
                 {tracks.map((t, i) => (
@@ -301,10 +300,10 @@ export default function NewRelease() {
               </p>
             </div>
           </div>
-          <p className="mt-4 text-xs text-b2b-muted">Dengan submit, Anda menjamin kepemilikan hak atas rekaman & karya ini (warranty & indemnity). Rilis cover wajib menyertakan lisensi pencipta asli.</p>
-          {submitting && <p className="mt-3 text-sm font-bold">Mengirim…</p>}
+          <p className="mt-4 text-xs text-b2b-muted">{d.warranty}</p>
+          {submitting && <p className="mt-3 text-sm font-bold">{d.sending}</p>}
           {errors.length > 0 && (
-            <ul className="mt-3 space-y-1 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+            <ul className="mt-3 space-y-1 rounded-none bg-red-50 p-3 text-sm text-red-700">
               {errors.map((e, i) => (
                 <li key={i}>
                   {e.path && <strong>{e.path}: </strong>}
@@ -313,7 +312,7 @@ export default function NewRelease() {
               ))}
             </ul>
           )}
-          <p className="mt-3 text-xs text-b2b-muted">Tekan “Complete” untuk mengirim ke antrean review.</p>
+          <p className="mt-3 text-xs text-b2b-muted">{d.completeHint}</p>
         </Step>
       </Stepper>
     </div>

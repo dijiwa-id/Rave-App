@@ -3,18 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>GEMA — Dengar gratis. Datang ke panggungnya. Dukung langsung.</title>
-    <meta name="description" content="GEMA: streaming musik indie gratis kualitas lossless, jadwal manggung di kotamu, dan infrastruktur booking aman untuk artis & promotor." />
-    <meta property="og:title" content="GEMA — Platform Ekosistem Musik Indie & Off-Air" />
+    <title>RAVE — Musik DIY &amp; Indie. Dengar, datang, dukung langsung.</title>
+    <meta name="description" content="RAVE: platform musik DIY &amp; indie — streaming gratis kualitas lossless, jadwal manggung di kotamu, dan booking aman untuk artis &amp; promotor." />
+    <meta property="og:title" content="RAVE — Platform Ekosistem Musik DIY &amp; Indie" />
     <meta property="og:description" content="Dengar gratis. Datang ke panggungnya. Dukung langsung." />
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#181818" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Staatliches&family=Rubik+Dirt&family=Space+Mono:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,400..800&display=swap" rel="stylesheet" />
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Loader boot RAVE (diganti React saat aplikasi siap): piringan berputar + logo tegak di tengah. -->
+    <style>
+      .rave-boot{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(circle at 50% 45%,rgba(11,10,12,.35) 0,rgba(11,10,12,.82) 62%,rgba(11,10,12,.92) 100%),radial-gradient(rgba(237,237,237,.1) 1.2px,transparent 1.7px) 0 0/9px 9px,#181818}
+      .rave-boot__disc{position:relative;width:128px;height:128px}
+      .rave-boot__spin{position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 2px #050505;background:radial-gradient(circle,#181818 0 7%,transparent 7.5%),radial-gradient(circle,#5B2A6E 0 33%,#0b0b0b 33.5% 36%,transparent 36.5%),repeating-radial-gradient(circle,#0d0d0d 0 1.5px,#1a1a1a 1.5px 2.6px);animation:rave-boot-spin 1.8s linear infinite}
+      .rave-boot__shine{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 120deg,transparent 0deg,rgba(255,255,255,.16) 20deg,transparent 55deg,transparent 180deg,rgba(255,255,255,.1) 200deg,transparent 235deg)}
+      .rave-boot__logo{position:absolute;top:50%;left:50%;width:28%;transform:translate(-50%,-50%)}
+      .rave-boot__label{margin-top:20px;text-align:center;font:700 11px 'Space Mono',ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#F4C21F}
+      @keyframes rave-boot-spin{to{transform:rotate(360deg)}}
+      @media (prefers-reduced-motion:reduce){.rave-boot__spin{animation:none}}
+    </style>
+    <div id="root"><div class="rave-boot" role="status" aria-label="Memuat RAVE"><div><div class="rave-boot__disc"><div class="rave-boot__spin"></div><div class="rave-boot__shine"></div><img class="rave-boot__logo" src="/rave-logo.webp" alt="" /></div><div class="rave-boot__label">Memuat…</div></div></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

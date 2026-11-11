@@ -1,5 +1,5 @@
-import { assertTransition, calendarStatusFor, type BookingActor, type BookingStatus } from '@gema/domain';
-import { notFound, publish, uuidv7, type Client } from '@gema/service-kit';
+import { assertTransition, calendarStatusFor, type BookingActor, type BookingStatus } from '@rave/domain';
+import { notFound, publish, uuidv7, type Client } from '@rave/service-kit';
 import type { BookingRow } from './common.js';
 
 const TERMINAL_FREE: BookingStatus[] = ['DECLINED', 'EXPIRED', 'CANCELLED_BY_PROMOTOR', 'CANCELLED_BY_ARTIST', 'FORCE_MAJEURE'];

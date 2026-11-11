@@ -1,4 +1,4 @@
-import type { Client, Job } from '@gema/service-kit';
+import type { Client, Job } from '@rave/service-kit';
 
 /**
  * Delta agregat append-only (tabel agg_deltas). Ingest/consumer hanya menulis delta — tidak menyentuh

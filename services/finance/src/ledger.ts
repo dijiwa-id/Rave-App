@@ -1,6 +1,6 @@
 import pg from 'pg';
-import { assertBalanced, type LedgerLine } from '@gema/domain';
-import { uuidv7, type Client, type Db } from '@gema/service-kit';
+import { assertBalanced, type LedgerLine } from '@rave/domain';
+import { uuidv7, type Client, type Db } from '@rave/service-kit';
 
 pg.types.setTypeParser(1082, (v) => v);
 

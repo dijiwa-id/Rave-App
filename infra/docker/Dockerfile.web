@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1.7
+# Web RAVE (React/Vite) → aset statis di nginx (unprivileged, port 8080). /v1 di-proxy ke gateway.
+#   docker build -f infra/docker/Dockerfile.web -t rave/web .
+ARG NODE_VERSION=22
+
+FROM node:${NODE_VERSION}-alpine AS build
+WORKDIR /repo
+COPY package.json package-lock.json ./
+COPY packages/domain/package.json packages/domain/package.json
+COPY apps/web/package.json apps/web/package.json
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund --workspace=apps/web --workspace=packages/domain --include-workspace-root
+COPY tsconfig.base.json ./
+COPY packages/domain ./packages/domain
+COPY apps/web ./apps/web
+ARG APP_VERSION=0.0.0
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=
+ENV APP_VERSION=${APP_VERSION} GIT_SHA=${GIT_SHA}
+RUN npm run build -w @rave/web \
+ && printf '{"version":"%s","commit":"%s","built_at":"%s"}\n' "$APP_VERSION" "$GIT_SHA" "$BUILD_DATE" > apps/web/dist/version.json
+
+FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+ARG APP_VERSION=0.0.0
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=
+LABEL org.opencontainers.image.title="rave-web" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+# Template diproses envsubst oleh entrypoint nginx (hanya variabel berawalan RAVE_ — aman untuk $uri dkk).
+ENV RAVE_GATEWAY_UPSTREAM=gateway:8080 RAVE_MAX_UPLOAD=2g NGINX_ENVSUBST_FILTER=^RAVE_
+COPY infra/docker/nginx/default.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
+EXPOSE 8080
+HEALTHCHECK --interval=15s --timeout=3s --retries=3 CMD wget -qO- http://127.0.0.1:8080/nginx-health >/dev/null || exit 1

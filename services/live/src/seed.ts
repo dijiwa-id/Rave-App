@@ -1,5 +1,5 @@
-import { SEED, seedId } from '@gema/domain';
-import type { ServiceContext } from '@gema/service-kit';
+import { SEED, seedId, seedSchedule } from '@rave/domain';
+import type { ServiceContext } from '@rave/service-kit';
 import { keyHash, newStreamKey } from './manager.js';
 
 const L = SEED.liveStreams;
@@ -11,7 +11,7 @@ const senja = SEED.artists[0];
  * kanal demo mendapat kunci baru dari server setiap start.
  */
 export async function seed({ db, log }: ServiceContext) {
-  const artist = [senja.id, senja.name, senja.slug, 'https://picsum.photos/seed/gema-artist-senja-kolektif/600/600'];
+  const artist = [senja.id, senja.name, senja.slug, 'https://picsum.photos/seed/rave-artist-senja-kolektif/600/600'];
   const rows: unknown[][] = [
     [
       L.demo, senja.orgId, 'Senja Kolektif', 'ARTIST', ...artist,
@@ -23,8 +23,8 @@ export async function seed({ db, log }: ServiceContext) {
       L.tourBandung, SEED.orgs.pensiPromotor, 'Pensi Nusantara', 'PROMOTOR', ...artist,
       'Pulang ke Utara Tour — Bandung (Live)',
       'Siaran langsung konser penuh dari Dago Tea House. Khusus pemegang tiket — tiket fisik juga berlaku untuk menonton online.',
-      'TICKET', seedId(700, 1), 'pulang-ke-utara-tour-bandung', 'Pulang ke Utara Tour — Bandung', 'Bandung', '2026-10-24T19:00:00+07:00',
-      '2026-10-24T19:00:00+07:00', 'SCHEDULED', null, 0, 0, false,
+      'TICKET', seedId(700, 1), 'pulang-ke-utara-tour-bandung', 'Pulang ke Utara Tour — Bandung', 'Bandung', seedSchedule('2026-10-24T19:00:00+07:00'),
+      seedSchedule('2026-10-24T19:00:00+07:00'), 'SCHEDULED', null, 0, 0, false,
     ],
     [
       L.pastSession, senja.orgId, 'Senja Kolektif', 'ARTIST', ...artist,

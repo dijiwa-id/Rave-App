@@ -17,7 +17,7 @@ import {
   z,
   type Db,
   type ServiceContext,
-} from '@gema/service-kit';
+} from '@rave/service-kit';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 /** Bucket lokal (dev). Produksi: object storage S3-compatible dengan kebijakan bucket yang sama. */
@@ -178,11 +178,16 @@ export function disk() {
   };
 }
 
-/** Nama file di bucket uploads yang masih dipakai katalog. null = katalog tak terjangkau (jangan hapus apa pun). */
+/**
+ * Nama file di bucket uploads yang masih dipakai: katalog (artwork, master & rendisi audio) + library (sampul playlist).
+ * null = salah satu pemilik referensi tak terjangkau → jangan hapus apa pun.
+ */
 async function references(): Promise<Set<string> | null> {
   try {
-    const r = await callService<{ files: string[] }>('platform', 'catalog', '/internal/media/references');
-    return new Set(r.files);
+    const all = await Promise.all(
+      (['catalog', 'library'] as const).map((svc) => callService<{ files: string[] }>('platform', svc, '/internal/media/references')),
+    );
+    return new Set(all.flatMap((r) => r.files));
   } catch {
     return null;
   }
@@ -190,7 +195,7 @@ async function references(): Promise<Set<string> | null> {
 
 async function orphans() {
   const refs = await references();
-  if (!refs) throw conflict('Service katalog tidak terjangkau — pemindaian file yatim dibatalkan demi keamanan');
+  if (!refs) throw conflict('Service katalog/library tidak terjangkau — pemindaian file yatim dibatalkan demi keamanan');
   const files = (await listBucket('uploads')).filter((f) => !refs.has(f.key));
   return files.map((f) => ({ ...f, referenced: false }));
 }

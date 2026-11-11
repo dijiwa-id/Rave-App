@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { config, publish, settings, z, type Client, type ServiceContext } from '@gema/service-kit';
+import { config, publish, settings, z, type Client, type ServiceContext } from '@rave/service-kit';
 import { insertDeltas, type AggDelta, type ArtistCounter } from './aggregates.js';
 import { todayWib, UNKNOWN } from './util.js';
 
@@ -18,9 +18,9 @@ const evt = z
 /**
  * played_ms klien tidak boleh melebihi waktu nyata sejak sesi dibuat (+ toleransi buffering/jam) — tanpa ini
  * satu event `progress` instan dengan played_ms besar langsung menjadi qualified stream (dasar royalti).
- * Jam dipercepat dev (GEMA_FAST_CLOCK, default aktif di non-produksi; ditolak di produksi) melewati batas ini untuk e2e.
+ * Jam dipercepat dev (RAVE_FAST_CLOCK, default aktif di non-produksi; ditolak di produksi) melewati batas ini untuk e2e.
  */
-const FAST_CLOCK = (process.env.GEMA_FAST_CLOCK ?? (config.isDev ? '1' : '0')) === '1';
+const FAST_CLOCK = (process.env.RAVE_FAST_CLOCK ?? (config.isDev ? '1' : '0')) === '1';
 const CLOCK_TOLERANCE_MS = 10_000;
 
 /** Aturan fraud sederhana (REQ-ADM-03). Produksi: model + fitur device/IP/ASN di pipeline streaming. */

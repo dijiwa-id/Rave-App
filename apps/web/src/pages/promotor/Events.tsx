@@ -7,6 +7,7 @@ import type { ArtistSummary, BookingSummary, EventDetail, EventSummary } from '@
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Textarea, toast } from '@/components/ui';
 import { CITIES, Empty, QueryState, Table, useCurrentPromotor } from '@/components/b2b/common';
 import { setting, usePlatformConfig } from '@/lib/platform';
+import { useDict } from '@/lib/i18n';
 
 type OrgEvent = EventSummary & { sold: number; revenue: number; checked_in: number };
 
@@ -24,6 +25,7 @@ function EditEvent({ id, onClose }: { id: string; onClose: () => void }) {
   const q = useQuery({ queryKey: ['event', id], queryFn: () => api<EventDetail>(`/v1/ticketing/events/${id}`) });
   const [f, setF] = useState<null | { title: string; description: string; city: string; venue_name: string; venue_address: string; starts_at: string; ends_at: string; poster_url: string; rules: string }>(null);
   const [busy, setBusy] = useState(false);
+  const t = useDict('b2b').promotor.events;
   const e = q.data;
   if (e && !f)
     setF({
@@ -40,14 +42,14 @@ function EditEvent({ id, onClose }: { id: string; onClose: () => void }) {
   async function save(ev: React.FormEvent) {
     ev.preventDefault();
     if (!f) return;
-    if (new Date(f.ends_at) <= new Date(f.starts_at)) return toast.error('Waktu selesai harus setelah waktu mulai');
+    if (new Date(f.ends_at) <= new Date(f.starts_at)) return toast.error(t.endAfterStart);
     setBusy(true);
     try {
       await api(`/v1/ticketing/events/${id}`, {
         method: 'PATCH',
         body: { ...f, starts_at: new Date(f.starts_at).toISOString(), ends_at: new Date(f.ends_at).toISOString(), poster_url: f.poster_url || null, rules: f.rules || null },
       });
-      toast.success('Event diperbarui');
+      toast.success(t.updated);
       qc.invalidateQueries({ queryKey: ['org-events'] });
       qc.invalidateQueries({ queryKey: ['event', id] });
       onClose();
@@ -58,62 +60,62 @@ function EditEvent({ id, onClose }: { id: string; onClose: () => void }) {
     }
   }
   return (
-    <Modal open onClose={onClose} title="Ubah event" wide>
+    <Modal open onClose={onClose} title={t.editTitle} wide>
       <QueryState q={q}>
         {f && (
           <form onSubmit={save} className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <Field label="Judul">
+              <Field label={t.title}>
                 <Input required minLength={3} value={f.title} onChange={(x) => setF({ ...f, title: x.target.value })} />
               </Field>
             </div>
             <div className="sm:col-span-2">
-              <Field label="Deskripsi">
+              <Field label={t.description}>
                 <Textarea value={f.description} onChange={(x) => setF({ ...f, description: x.target.value })} />
               </Field>
             </div>
-            <Field label="Kota">
+            <Field label={t.city}>
               <Select value={f.city} onChange={(x) => setF({ ...f, city: x.target.value })}>
                 {[...new Set([f.city, ...CITIES])].map((c) => (
                   <option key={c}>{c}</option>
                 ))}
               </Select>
             </Field>
-            <Field label="Venue">
+            <Field label={t.venue}>
               <Input required minLength={2} value={f.venue_name} onChange={(x) => setF({ ...f, venue_name: x.target.value })} />
             </Field>
             <div className="sm:col-span-2">
-              <Field label="Alamat venue">
+              <Field label={t.venueAddress}>
                 <Input value={f.venue_address} onChange={(x) => setF({ ...f, venue_address: x.target.value })} />
               </Field>
             </div>
-            <Field label="Mulai">
+            <Field label={t.starts}>
               <Input type="datetime-local" required value={f.starts_at} onChange={(x) => setF({ ...f, starts_at: x.target.value })} />
             </Field>
-            <Field label="Selesai">
+            <Field label={t.ends}>
               <Input type="datetime-local" required value={f.ends_at} onChange={(x) => setF({ ...f, ends_at: x.target.value })} />
             </Field>
             <div className="sm:col-span-2">
-              <Field label="URL poster">
+              <Field label={t.posterUrl}>
                 <Input type="url" value={f.poster_url} onChange={(x) => setF({ ...f, poster_url: x.target.value })} placeholder="https://…" />
               </Field>
             </div>
             <div className="sm:col-span-2">
-              <Field label="Aturan masuk">
+              <Field label={t.rules}>
                 <Textarea value={f.rules} onChange={(x) => setF({ ...f, rules: x.target.value })} />
               </Field>
             </div>
             {e && e.status !== 'DRAFT' && (
               <p className="text-xs text-b2b-muted sm:col-span-2">
-                Event sudah dipublikasikan. Mengubah tanggal, kota, atau venue akan mengabari semua pemegang tiket dan memberi mereka hak refund penuh selama {optOutDays} hari.
+                {t.publishedNote(optOutDays)}
               </p>
             )}
             <div className="flex gap-2 sm:col-span-2">
               <Button variant="ink" type="submit" loading={busy}>
-                Simpan perubahan
+                {t.saveChanges}
               </Button>
               <Button variant="outline-ink" type="button" onClick={onClose}>
-                Batal
+                {t.cancel}
               </Button>
             </div>
           </form>
@@ -123,8 +125,6 @@ function EditEvent({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
-const STATUS_LABEL: Record<string, string> = { DRAFT: 'Draf', PUBLISHED: 'Dipublikasikan', CANCELLED: 'Dibatalkan', COMPLETED: 'Selesai' };
-
 /** Batalkan event: semua pembeli direfund penuh (termasuk biaya layanan) — tidak dapat diurungkan. */
 function CancelEvent({ event, onClose }: { event: OrgEvent; onClose: () => void }) {
   const qc = useQueryClient();
@@ -132,13 +132,14 @@ function CancelEvent({ event, onClose }: { event: OrgEvent; onClose: () => void 
   const [reason, setReason] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
-  const ok = reason.trim().length >= 10 && confirm.trim().toUpperCase() === 'BATALKAN';
+  const t = useDict('b2b').promotor.events;
+  const ok = reason.trim().length >= 10 && confirm.trim().toUpperCase() === t.confirmWord;
   async function submit() {
     setBusy(true);
     try {
       const r = await api<{ refunds: { requested: number; queued: number } }>(`/v1/ticketing/events/${event.id}/cancel`, { body: { reason: reason.trim() } });
       const n = r.refunds.requested + r.refunds.queued;
-      toast.success(n ? `Event dibatalkan — refund ${fmt.num(n)} order sedang diproses` : 'Event dibatalkan');
+      toast.success(n ? t.cancelledRefunds(fmt.num(n)) : t.cancelled);
       qc.invalidateQueries({ queryKey: ['org-events'] });
       onClose();
     } catch (e) {
@@ -148,28 +149,28 @@ function CancelEvent({ event, onClose }: { event: OrgEvent; onClose: () => void 
     }
   }
   return (
-    <Modal open onClose={onClose} title="Batalkan event">
+    <Modal open onClose={onClose} title={t.cancelTitle}>
       <div className="space-y-4 text-sm">
         <p>
           <strong>{event.title}</strong> · {fmt.dateTime(event.starts_at)}
         </p>
-        <ul className="list-disc space-y-1 rounded-xl border border-red-500/30 bg-red-500/5 p-4 pl-8 text-b2b-ink">
-          <li>{event.sold ? `${fmt.num(event.sold)} tiket terjual akan direfund penuh, termasuk biaya layanan.` : 'Belum ada tiket terjual.'}</li>
-          <li>Dana kembali ke pembeli paling lambat {sla} hari, dan pembeli dikabari otomatis.</li>
-          <li>Penjualan dan reservasi yang sedang berjalan dihentikan. Pembatalan tidak dapat diurungkan.</li>
+        <ul className="list-disc space-y-1 rounded-none border border-red-500/30 bg-red-500/5 p-4 pl-8 text-b2b-ink">
+          <li>{event.sold ? t.soldRefund(fmt.num(event.sold)) : t.noneSold}</li>
+          <li>{t.refundSla(sla)}</li>
+          <li>{t.irreversible}</li>
         </ul>
-        <Field label="Alasan pembatalan" hint="Ditampilkan ke tim GEMA dan dicatat di audit log">
-          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Mis. venue tidak dapat digunakan karena …" />
+        <Field label={t.cancelReason} hint={t.cancelReasonHint}>
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t.cancelReasonPlaceholder} />
         </Field>
-        <Field label='Ketik "BATALKAN" untuk konfirmasi'>
+        <Field label={t.typeToConfirm(t.confirmWord)}>
           <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} />
         </Field>
         <div className="flex justify-end gap-2">
           <Button variant="outline-ink" onClick={onClose}>
-            Kembali
+            {t.back}
           </Button>
           <Button variant="danger" loading={busy} disabled={!ok} onClick={submit}>
-            Batalkan event
+            {t.cancelTitle}
           </Button>
         </div>
       </div>
@@ -188,11 +189,13 @@ export function PromotorEvents() {
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<OrgEvent | null>(null);
+  const t = useDict('b2b').promotor.events;
+  const STATUS_LABEL: Record<string, string> = t.status;
   async function publish(id: string) {
     setBusy(id);
     try {
       await api(`/v1/ticketing/events/${id}/publish`, { body: {} });
-      toast.success('Event dipublikasikan — follower di kota terkait dinotifikasi');
+      toast.success(t.published);
       qc.invalidateQueries({ queryKey: ['org-events'] });
     } catch (e) {
       toast.error(e);
@@ -203,23 +206,23 @@ export function PromotorEvents() {
   return (
     <div>
       <PageHeader
-        title="Event Saya"
-        subtitle="Presale berjenjang: top listener → follower → publik. Kuota ditahan 10 menit saat checkout, tanpa oversell."
+        title={t.pageTitle}
+        subtitle={t.pageSubtitle}
         actions={
           <Link to="/promotor/events/new">
             <Button variant="ink" icon={<Plus className="size-4" />}>
-              Event baru
+              {t.newEvent}
             </Button>
           </Link>
         }
       />
-      <QueryState q={q} empty={q.data && !q.data.data.length ? <Empty title="Belum ada event" body="Buat event dari booking yang sudah BOOKED atau event mandiri." /> : undefined}>
-        <Table head={['Event', 'Tanggal', 'Status', 'Terjual', 'Pendapatan', 'Check-in', '']}>
+      <QueryState q={q} empty={q.data && !q.data.data.length ? <Empty title={t.emptyTitle} body={t.emptyBody} /> : undefined}>
+        <Table head={[t.head.event, t.head.date, t.head.status, t.head.sold, t.head.revenue, t.head.checkin, '']}>
           {q.data?.data.map((e) => (
             <tr key={e.id}>
               <td className="px-4 py-3">
                 <div className="flex items-center gap-3">
-                  {e.poster_url ? <img src={e.poster_url} alt="" className="size-11 rounded object-cover" /> : <div className="size-11 rounded bg-b2b-bg" />}
+                  {e.poster_url ? <img src={e.poster_url} alt="" className="size-11 rounded-none object-cover" /> : <div className="size-11 rounded-none bg-b2b-bg" />}
                   <div>
                     <p className="font-bold">{e.title}</p>
                     <p className="text-xs text-b2b-muted">
@@ -237,23 +240,23 @@ export function PromotorEvents() {
               <td className="px-4 py-3 tabular-nums">{fmt.num(e.checked_in)}</td>
               <td className="space-x-3 px-4 py-3 text-right whitespace-nowrap">
                 {(e.status === 'DRAFT' || e.status === 'PUBLISHED') && (
-                  <button onClick={() => setEditing(e.id)} aria-label={`Ubah ${e.title}`} className="inline-flex items-center gap-1 align-middle text-sm font-bold text-b2b-muted hover:text-b2b-ink">
-                    <Pencil className="size-4" /> Ubah
+                  <button onClick={() => setEditing(e.id)} aria-label={t.editAria(e.title)} className="inline-flex items-center gap-1 align-middle text-sm font-bold text-b2b-muted hover:text-b2b-ink">
+                    <Pencil className="size-4" /> {t.edit}
                   </button>
                 )}
                 {(e.status === 'DRAFT' || e.status === 'PUBLISHED') && (
-                  <button onClick={() => setCancelling(e)} aria-label={`Batalkan ${e.title}`} className="inline-flex items-center gap-1 align-middle text-sm font-bold text-red-600 hover:text-red-700">
-                    <Ban className="size-4" /> Batalkan
+                  <button onClick={() => setCancelling(e)} aria-label={t.cancelAria(e.title)} className="inline-flex items-center gap-1 align-middle text-sm font-bold text-red-600 hover:text-red-700">
+                    <Ban className="size-4" /> {t.cancelShort}
                   </button>
                 )}
                 {e.status === 'DRAFT' && (
                   <Button size="sm" variant="ink" loading={busy === e.id} onClick={() => publish(e.id)}>
-                    Publikasikan
+                    {t.publish}
                   </Button>
                 )}
                 {e.status === 'PUBLISHED' && (
                   <Link to={`/promotor/events/${e.id}/checkin`} className="inline-flex items-center gap-1 text-sm font-bold underline">
-                    <ScanLine className="size-4" /> Check-in
+                    <ScanLine className="size-4" /> {t.checkin}
                   </Link>
                 )}
               </td>
@@ -286,6 +289,9 @@ export function NewEvent() {
   });
   const artists = useQuery({ queryKey: ['catalog-artists'], queryFn: () => api<{ data: ArtistSummary[] }>('/v1/catalog/artists') });
   const booked = bookings.data?.data.filter((b) => ['BOOKED', 'BOOKED_AND_SECURED', 'SHOW_DAY'].includes(b.status)) ?? [];
+  const d = useDict('b2b').promotor;
+  const t = d.newEvent;
+  const te = d.events;
   const [f, setF] = useState({
     booking_id: '',
     title: '',
@@ -296,12 +302,12 @@ export function NewEvent() {
     starts_at: '',
     ends_at: '',
     poster_url: '',
-    rules: 'Dilarang membawa senjata tajam, obat terlarang, dan minuman keras. Tiket tidak dapat dipindahtangankan di luar fitur transfer resmi.',
+    rules: t.defaultRules,
     artist_ids: [] as string[],
   });
   const [types, setTypes] = useState<TT[]>([
-    { name: 'Presale Fan', price: 75_000, quota: 200, max_per_account: 2, sale_starts_at: '', presale: true },
-    { name: 'Reguler', price: 100_000, quota: 800, max_per_account: 4, sale_starts_at: '', presale: false },
+    { name: t.defaultPresale, price: 75_000, quota: 200, max_per_account: 2, sale_starts_at: '', presale: true },
+    { name: t.defaultRegular, price: 100_000, quota: 800, max_per_account: 4, sale_starts_at: '', presale: false },
   ]);
   const [busy, setBusy] = useState(false);
 
@@ -313,7 +319,7 @@ export function NewEvent() {
   const toIso = (local: string) => (local ? new Date(local).toISOString() : undefined);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!f.artist_ids.length) return toast.error('Pilih minimal satu artis line-up');
+    if (!f.artist_ids.length) return toast.error(t.pickArtist);
     setBusy(true);
     try {
       const ev = await api<EventDetail>('/v1/ticketing/events', {
@@ -330,10 +336,10 @@ export function NewEvent() {
           poster_url: f.poster_url || undefined,
           artist_ids: f.artist_ids,
           rules: f.rules || undefined,
-          ticket_types: types.map((t) => ({ ...t, sale_starts_at: toIso(t.sale_starts_at) })),
+          ticket_types: types.map((tt) => ({ ...tt, sale_starts_at: toIso(tt.sale_starts_at) })),
         },
       });
-      toast.success('Event dibuat (draf)');
+      toast.success(t.created);
       qc.invalidateQueries({ queryKey: ['org-events'] });
       nav('/promotor/events');
       return ev;
@@ -345,15 +351,15 @@ export function NewEvent() {
   }
   return (
     <div>
-      <PageHeader title="Event baru" subtitle="Zona waktu event = zona waktu venue. Unggah izin keramaian sebelum publikasi (tanggung jawab promotor)." />
+      <PageHeader title={t.title} subtitle={t.subtitle} />
       <form onSubmit={submit} className="grid gap-6 lg:grid-cols-[1fr_380px]">
         <div className="space-y-6">
-          <Card title="Detail event">
+          <Card title={t.details}>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
-                <Field label="Terhubung ke booking" hint="opsional">
+                <Field label={t.linkedBooking} hint={t.optional}>
                   <Select value={f.booking_id} onChange={(e) => pickBooking(e.target.value)}>
-                    <option value="">Event mandiri</option>
+                    <option value="">{t.standalone}</option>
                     {booked.map((b) => (
                       <option key={b.id} value={b.id}>
                         {b.artist.name} — {b.event_name} ({fmt.date(b.event_date)})
@@ -363,92 +369,92 @@ export function NewEvent() {
                 </Field>
               </div>
               <div className="sm:col-span-2">
-                <Field label="Judul">
+                <Field label={te.title}>
                   <Input required value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} />
                 </Field>
               </div>
               <div className="sm:col-span-2">
-                <Field label="Deskripsi">
+                <Field label={te.description}>
                   <Textarea value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
                 </Field>
               </div>
-              <Field label="Kota">
+              <Field label={te.city}>
                 <Select value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })}>
                   {CITIES.map((c) => (
                     <option key={c}>{c}</option>
                   ))}
                 </Select>
               </Field>
-              <Field label="Venue">
+              <Field label={te.venue}>
                 <Input required value={f.venue_name} onChange={(e) => setF({ ...f, venue_name: e.target.value })} />
               </Field>
               <div className="sm:col-span-2">
-                <Field label="Alamat venue">
+                <Field label={te.venueAddress}>
                   <Input required value={f.venue_address} onChange={(e) => setF({ ...f, venue_address: e.target.value })} />
                 </Field>
               </div>
-              <Field label="Mulai">
+              <Field label={te.starts}>
                 <Input type="datetime-local" required value={f.starts_at} onChange={(e) => setF({ ...f, starts_at: e.target.value })} />
               </Field>
-              <Field label="Selesai">
+              <Field label={te.ends}>
                 <Input type="datetime-local" required value={f.ends_at} onChange={(e) => setF({ ...f, ends_at: e.target.value })} />
               </Field>
               <div className="sm:col-span-2">
-                <Field label="URL poster">
+                <Field label={te.posterUrl}>
                   <Input value={f.poster_url} onChange={(e) => setF({ ...f, poster_url: e.target.value })} placeholder="https://…" />
                 </Field>
               </div>
               <div className="sm:col-span-2">
-                <Field label="Aturan masuk">
+                <Field label={te.rules}>
                   <Textarea value={f.rules} onChange={(e) => setF({ ...f, rules: e.target.value })} />
                 </Field>
               </div>
             </div>
           </Card>
-          <Card title="Kategori tiket">
+          <Card title={t.ticketTypes}>
             <div className="space-y-3">
-              {types.map((t, i) => (
-                <div key={i} className="grid gap-2 rounded-xl border border-b2b-line p-3 sm:grid-cols-6 sm:items-end">
+              {types.map((tt, i) => (
+                <div key={i} className="grid gap-2 rounded-none border border-b2b-line p-3 sm:grid-cols-6 sm:items-end">
                   <div className="sm:col-span-2">
-                    <Field label="Nama">
-                      <Input value={t.name} onChange={(e) => setTypes(types.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+                    <Field label={t.name}>
+                      <Input value={tt.name} onChange={(e) => setTypes(types.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
                     </Field>
                   </div>
-                  <Field label="Harga">
-                    <Input type="number" min={0} step={5000} value={t.price} onChange={(e) => setTypes(types.map((x, j) => (j === i ? { ...x, price: Number(e.target.value) } : x)))} />
+                  <Field label={t.price}>
+                    <Input type="number" min={0} step={5000} value={tt.price} onChange={(e) => setTypes(types.map((x, j) => (j === i ? { ...x, price: Number(e.target.value) } : x)))} />
                   </Field>
-                  <Field label="Kuota">
-                    <Input type="number" min={1} value={t.quota} onChange={(e) => setTypes(types.map((x, j) => (j === i ? { ...x, quota: Number(e.target.value) } : x)))} />
+                  <Field label={t.quota}>
+                    <Input type="number" min={1} value={tt.quota} onChange={(e) => setTypes(types.map((x, j) => (j === i ? { ...x, quota: Number(e.target.value) } : x)))} />
                   </Field>
-                  <Field label="Maks/akun">
-                    <Input type="number" min={1} max={10} value={t.max_per_account} onChange={(e) => setTypes(types.map((x, j) => (j === i ? { ...x, max_per_account: Number(e.target.value) } : x)))} />
+                  <Field label={t.maxPerAccount}>
+                    <Input type="number" min={1} max={10} value={tt.max_per_account} onChange={(e) => setTypes(types.map((x, j) => (j === i ? { ...x, max_per_account: Number(e.target.value) } : x)))} />
                   </Field>
-                  <button type="button" aria-label="Hapus kategori" onClick={() => setTypes(types.filter((_, j) => j !== i))} className="mb-3 justify-self-end text-b2b-muted hover:text-red-600">
+                  <button type="button" aria-label={t.removeType} onClick={() => setTypes(types.filter((_, j) => j !== i))} className="mb-3 justify-self-end text-b2b-muted hover:text-red-600">
                     <Trash2 className="size-4" />
                   </button>
                   <div className="sm:col-span-3">
-                    <Field label="Mulai dijual" hint="kosong = saat publikasi">
-                      <Input type="datetime-local" value={t.sale_starts_at} onChange={(e) => setTypes(types.map((x, j) => (j === i ? { ...x, sale_starts_at: e.target.value } : x)))} />
+                    <Field label={t.saleStarts} hint={t.saleStartsHint}>
+                      <Input type="datetime-local" value={tt.sale_starts_at} onChange={(e) => setTypes(types.map((x, j) => (j === i ? { ...x, sale_starts_at: e.target.value } : x)))} />
                     </Field>
                   </div>
                   <label className="flex items-center gap-2 pb-3 text-sm sm:col-span-3">
-                    <input type="checkbox" checked={t.presale} onChange={(e) => setTypes(types.map((x, j) => (j === i ? { ...x, presale: e.target.checked } : x)))} /> Presale untuk top listener & follower
+                    <input type="checkbox" checked={tt.presale} onChange={(e) => setTypes(types.map((x, j) => (j === i ? { ...x, presale: e.target.checked } : x)))} /> {t.presale}
                   </label>
                 </div>
               ))}
               <button type="button" onClick={() => setTypes([...types, { name: '', price: 0, quota: 100, max_per_account: 4, sale_starts_at: '', presale: false }])} className="flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
-                <Plus className="size-4" /> Tambah kategori
+                <Plus className="size-4" /> {t.addType}
               </button>
             </div>
           </Card>
         </div>
         <div className="space-y-6">
-          <Card title="Line-up">
+          <Card title={t.lineup}>
             <QueryState q={artists}>
               <ul className="max-h-96 space-y-1 overflow-y-auto">
                 {artists.data?.data.map((a) => (
                   <li key={a.id}>
-                    <label className="flex cursor-pointer items-center gap-3 rounded-lg p-1.5 hover:bg-b2b-bg">
+                    <label className="flex cursor-pointer items-center gap-3 rounded-none p-1.5 hover:bg-b2b-bg">
                       <input
                         type="checkbox"
                         checked={f.artist_ids.includes(a.id)}
@@ -464,9 +470,9 @@ export function NewEvent() {
             </QueryState>
           </Card>
           <Button variant="ink" type="submit" loading={busy} className="w-full">
-            Simpan sebagai draf
+            {t.saveDraft}
           </Button>
-          <p className="text-xs text-b2b-muted">Pendapatan tiket ditahan dan dicairkan setelah acara selesai, dikurangi service fee & pajak hiburan (PBJT) sesuai Perda kota venue.</p>
+          <p className="text-xs text-b2b-muted">{t.revenueNote}</p>
         </div>
       </form>
     </div>

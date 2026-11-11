@@ -1,6 +1,6 @@
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
-import { LedgerAccounts, allocate, pct, ticketRefundAmount, withholdingTax, type PaymentPurpose } from '@gema/domain';
-import { badRequest, config, conflict, notFound, publish, settings, unauthorized, uuidv7, type Client } from '@gema/service-kit';
+import { LedgerAccounts, allocate, pct, ticketRefundAmount, withholdingTax, type PaymentPurpose } from '@rave/domain';
+import { badRequest, config, conflict, notFound, publish, settings, unauthorized, uuidv7, type Client } from '@rave/service-kit';
 import { C, D, payableAccount, post } from './ledger.js';
 import { paymentProvider } from './providers.js';
 
@@ -50,7 +50,7 @@ export async function createInvoice(
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      ON CONFLICT (purpose, reference_id) DO UPDATE SET purpose = EXCLUDED.purpose RETURNING *`,
     [id, i.purpose, i.referenceId, amount, i.escrowAmount, i.feeAmount ?? 0, i.payerUserId, i.payerOrgId ?? null, i.description, i.dueAt, va,
-      `00020101021226590014ID.CO.GEMA.WWW0118GEMA${id.slice(0, 8)}5204599953033605405${amount}5802ID5904GEMA6007JAKARTA6304`, i.dependsOn ?? null,
+      `00020101021226590014ID.CO.RAVE.WWW0118RAVE${id.slice(0, 8)}5204599953033605405${amount}5802ID5904RAVE6007JAKARTA6304`, i.dependsOn ?? null,
       JSON.stringify(i.metadata ?? {})],
   );
   return r.rows[0];

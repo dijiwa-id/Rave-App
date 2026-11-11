@@ -1,4 +1,4 @@
-import type { Consumers, ServiceContext } from '@gema/service-kit';
+import type { Consumers, ServiceContext } from '@rave/service-kit';
 import { createInvoice, refundEscrow, refundTicketOrder, releaseEscrow } from './escrow.js';
 import { disputeWindowMs } from './jobs.js';
 

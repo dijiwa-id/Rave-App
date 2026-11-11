@@ -49,7 +49,7 @@ Status implementasi: **Tahap 0–3 selesai** (dokumen, skema, domain murni, temp
 - Endpoint baru: `GET /v1/booking/contracts/:id/preview-url`, `GET /v1/booking/contracts/:id/versions`, `GET /v1/booking/contract-files/*` (token), `GET /v1/booking/verify/:contractId` (publik).
 - Hash: SHA-256 byte PDF draf disimpan di `contracts.draft_sha256` (migrasi 003). Hash final di Tahap 5.
 - Pengaturan baru (Super Admin → Booking Off-Air): `contract.pph21_pct`, `contract.pph23_pct`, `contract.emeterai_threshold`, `contract.emeterai_payer`, `contract.sign_window_days`, `contract.file_url_ttl_sec`.
-- Seed: `legal_profiles` (Pensi Nusantara, Nada Manajemen) dan `rider_versions` per artis. Jalankan `./gema seed` untuk DB dev yang sudah ada.
+- Seed: `legal_profiles` (Pensi Nusantara, Nada Manajemen) dan `rider_versions` per artis. Jalankan `./rave seed` untuk DB dev yang sudah ada.
 
 ## Setup
 

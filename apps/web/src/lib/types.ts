@@ -1,6 +1,6 @@
 // Tipe respons API — cermin dari docs/API.md. Ubah dokumen kontrak dulu bila menambah field.
-import type { AdBreakOutcome, AdCategory, AdCategoryTier, AdPlacement, AdType } from '@gema/domain/ads';
-import type { AdminPermission } from '@gema/domain/settings';
+import type { AdBreakOutcome, AdCategory, AdCategoryTier, AdPlacement, AdType } from '@rave/domain/ads';
+import type { AdminPermission } from '@rave/domain/settings';
 
 export type OrgType = 'ARTIST' | 'MANAGEMENT' | 'LABEL' | 'PROMOTOR' | 'VENUE' | 'CREATOR';
 export interface OrgClaim {
@@ -17,6 +17,8 @@ export interface Me {
   display_name: string;
   avatar_url: string | null;
   city: string | null;
+  /** Bahasa antarmuka pilihan; null = ikuti perangkat / default platform. */
+  locale?: 'id' | 'en' | null;
   genres: string[];
   roles: string[];
   orgs: OrgClaim[];
@@ -24,7 +26,7 @@ export interface Me {
   mfa_enabled: boolean;
   onboarded: boolean;
   premium: boolean;
-  /** Peran internal back office (ADMIN_ROLES di @gema/domain/settings); null = bukan admin. */
+  /** Peran internal back office (ADMIN_ROLES di @rave/domain/settings); null = bukan admin. */
   admin_role?: string | null;
   /** Izin back office efektif ("Peran & Akses"); Super Admin = semua. */
   admin_permissions?: AdminPermission[];
@@ -71,6 +73,15 @@ export interface ArtistSummary extends ArtistRef {
   verified: boolean;
   monthly_listeners: number;
 }
+/** Info audio master lagu (tanpa URL): format, lossless/hi-res, status pengolahan. null = media lama/eksternal. */
+export interface TrackAudio {
+  lossless: boolean;
+  hires: boolean;
+  sample_rate: number | null;
+  bit_depth: number | null;
+  codec: string | null;
+  transcode_status: 'none' | 'pending' | 'processing' | 'done' | 'failed' | 'skipped';
+}
 export interface Track {
   id: string;
   title: string;
@@ -82,6 +93,7 @@ export interface Track {
   has_lyrics: boolean;
   artist: ArtistRef;
   release: { id: string; title: string; cover_url: string | null };
+  audio?: TrackAudio | null;
 }
 export interface ReleaseSummary {
   id: string;
@@ -150,6 +162,8 @@ export interface PlaylistSummary {
   visibility: 'PUBLIC' | 'PRIVATE' | 'COLLAB';
   track_count: number;
   is_editorial: boolean;
+  /** true = sampul diunggah pemilik; false = otomatis dari lagu pertama. */
+  has_custom_cover?: boolean;
 }
 export interface Playlist extends PlaylistSummary {
   items: { item_id: string; added_at: string; track: Track }[];
@@ -162,6 +176,9 @@ export interface PlaybackSession {
   expires_at: string;
   quality: string;
   codec_label: string;
+  requested_quality?: string;
+  /** Kualitas diturunkan: premium (HQ/Lossless khusus Premium) | preview | disabled | unavailable. */
+  quality_capped?: 'premium' | 'preview' | 'disabled' | 'unavailable' | null;
   loudness_gain_db: number;
   preview_only: boolean;
   preview_ms: number | null;
@@ -286,7 +303,12 @@ export interface Contract {
   template_version: string;
   body_markdown: string;
   sha256: string;
-  status: 'SENT' | 'SIGNED' | 'VOID';
+  /** SENT/SIGNED/VOID = kontrak lama; selainnya status kontrak baru (OTP). */
+  status: string;
+  version?: number;
+  contract_no?: string | null;
+  require_artist_ack?: boolean;
+  pdf_ready?: boolean;
   created_at: string;
   signed_at: string | null;
 }
@@ -608,7 +630,7 @@ export interface LiveKeyInfo {
 }
 
 // ---- Iklan — kebijakan penayangan tier Gratis (docs/API.md §11) ----
-export type { AdBreakOutcome, AdCategory, AdCategoryTier, AdPlacement, AdType } from '@gema/domain/ads';
+export type { AdBreakOutcome, AdCategory, AdCategoryTier, AdPlacement, AdType } from '@rave/domain/ads';
 
 export interface AdCreative {
   impression_id: string;
@@ -626,7 +648,7 @@ export interface AdCreative {
   duration_s: number;
   /** null = tidak bisa dilewati. */
   skippable_after_s: number | null;
-  label: 'Iklan' | 'Dari GEMA';
+  label: 'Iklan' | 'Dari RAVE';
   is_house: boolean;
 }
 export interface AdBreakRequest {

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { finished, Readable, Transform, type TransformCallback } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
-import { validateShares } from '@gema/domain';
+import { validateShares } from '@rave/domain';
 import {
   audit,
   badRequest,
@@ -20,10 +20,12 @@ import {
   z,
   type Client,
   type ServiceContext,
-} from '@gema/service-kit';
+} from '@rave/service-kit';
 import { isUuid, releaseFull } from './queries.js';
 import { canManageArtist } from './routes.js';
 import { imageSize, UPLOAD_DIR, uploadsBytes, wavInfo } from './storage.js';
+import { ffmpegPath, initialTranscodeStatus, probeAudio } from './audio.js';
+import { AUDIO_UPLOAD_TYPES, type AudioMeta } from '@rave/domain/audio';
 import { publishArtist } from './artists.js';
 
 const trackInput = z.object({
@@ -54,6 +56,37 @@ const releaseInput = z.object({
 const splitInput = z.object({ party_name: z.string().trim().min(1).max(120), email: z.string().email().optional().nullable(), pct: z.number().positive().max(100) });
 
 const EDITABLE = ['DRAFT', 'REJECTED'];
+
+/**
+ * Validasi master audio. Dengan ffmpeg: semua format yang dikenali (WAV, FLAC, AIFF, ALAC/AAC-M4A, MP3, OGG, Opus).
+ * Tanpa ffmpeg (fallback): hanya header WAV. Master lossless wajib memenuhi minimum `transcoding.min_*`.
+ */
+async function inspectAudio(path: string, head: Buffer, warnings: string[]): Promise<AudioMeta> {
+  let m: AudioMeta | null = null;
+  if (ffmpegPath()) m = await probeAudio(path);
+  else {
+    const w = wavInfo(head);
+    if (w) m = { format: 'wav', codec: `pcm_s${w.bitDepth}le`, lossless: true, sample_rate: w.sampleRate, bit_depth: w.bitDepth, channels: 2, bitrate_kbps: 0, duration_ms: w.durationMs };
+  }
+  if (!m) throw unprocessable('File audio tidak dikenali (didukung: WAV, FLAC, AIFF, ALAC/AAC M4A, MP3, OGG, Opus)');
+  if (!m.duration_ms && m.codec !== 'unknown') warnings.push('Durasi tidak terbaca dari berkas');
+  if (m.duration_ms && m.duration_ms < 1000) throw unprocessable('Audio terlalu pendek (minimal 1 detik)');
+  const minRate = settings.num('transcoding.min_sample_rate_hz') || 44_100;
+  const minBits = settings.num('transcoding.min_bit_depth') || 16;
+  if (m.lossless) {
+    if (m.sample_rate < minRate || m.bit_depth < minBits) throw unprocessable(`Master minimal ${minBits}-bit/${minRate / 1000} kHz (diterima ${m.bit_depth}-bit/${m.sample_rate / 1000} kHz)`);
+    if (m.bit_depth < 24) warnings.push('Disarankan master 24-bit');
+  } else {
+    if (m.sample_rate && m.sample_rate < minRate) throw unprocessable(`Sample rate minimal ${minRate / 1000} kHz (diterima ${m.sample_rate / 1000} kHz)`);
+    warnings.push(`Master lossy (${m.codec.toUpperCase()}${m.bitrate_kbps ? ' ' + m.bitrate_kbps + ' kbps' : ''}): hanya tersedia kualitas standar — unggah WAV/FLAC/AIFF/ALAC agar tersedia Lossless untuk pelanggan Premium`);
+    if (m.bitrate_kbps && m.bitrate_kbps < 256) warnings.push('Bitrate di bawah 256 kbps: kualitas tinggi (AAC 320) tidak dibuat');
+  }
+  return m;
+}
+
+/** Sampul playlist pengguna: ringan (≤ 8 MB) namun tetap tajam di layar retina (≥ 300 px). */
+const PLAYLIST_COVER_MAX_MB = 8;
+const PLAYLIST_COVER_MIN_PX = 300;
 
 /** Header yang ditahan di memori untuk validasi (WAV fmt/data, dimensi PNG/JPEG). */
 const HEAD_BYTES = 512 * 1024;
@@ -104,11 +137,23 @@ async function receiveUpload(src: Readable, path: string, maxMb: number) {
   return { bytes: meter.bytes, head: meter.head() };
 }
 
-/** GEMA sebagai pendaftar ISRC bila artis tidak punya (REQ-STU-01). Format ID-GM1-YY-NNNNN. */
+/** RAVE sebagai pendaftar ISRC bila artis tidak punya (REQ-STU-01). Format ID-GM1-YY-NNNNN. */
 async function generateIsrc(tx: Client) {
   const yy = String(new Date().getFullYear()).slice(2);
   const r = await tx.query(`SELECT nextval('isrc_seq') AS n`);
   return `ID-GM1-${yy}-${String(r.rows[0].n).padStart(5, '0')}`;
+}
+
+/** Durasi lagu kosong (0) diisi dari metadata master yang terbaca server — browser tidak bisa membaca durasi AIFF/ALAC dll. */
+async function syncAudioDurations(q: { query: (sql: string, params: unknown[]) => Promise<unknown> }, releaseId: string) {
+  await q.query(
+    `UPDATE tracks t SET duration_ms = (u.audio_meta->>'duration_ms')::int
+       FROM uploads u
+      WHERE t.release_id = $1 AND t.duration_ms = 0 AND u.audio_meta IS NOT NULL
+        AND (u.audio_meta->>'duration_ms')::int > 0
+        AND u.stored_name = split_part(t.audio_url, '/v1/catalog/media/', 2)`,
+    [releaseId],
+  );
 }
 
 async function insertTracks(tx: Client, releaseId: string, artistId: string, tracks: z.infer<typeof trackInput>[], startNo = 1) {
@@ -119,6 +164,7 @@ async function insertTracks(tx: Client, releaseId: string, artistId: string, tra
       [uuidv7(), releaseId, artistId, t.title, n++, t.duration_ms ?? 0, t.explicit ?? false, t.isrc ?? (await generateIsrc(tx)), t.audio_url ?? null],
     );
   }
+  await syncAudioDurations(tx, releaseId);
 }
 
 async function splitsOf(db: { query: (s: string, p?: unknown[]) => Promise<any[]> }, trackId: string) {
@@ -276,6 +322,7 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       if (!sets.length) throw badRequest('Tidak ada perubahan');
       vals.push(id);
       await db.query(`UPDATE tracks SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
+      if ('audio_url' in b) await syncAudioDurations(db, t.release_id);
       const out = await releaseFull(db, t.release_id);
       delete out.artist_id;
       return out;
@@ -294,21 +341,31 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       const b = z
         .object({
           kind: z.enum(['audio', 'artwork']),
+          /** playlist = sampul playlist pengguna (fan): gambar saja, ≤ 8 MB, ≥ 300 px. */
+          purpose: z.enum(['release', 'playlist']).default('release'),
           filename: z.string().min(1).max(200),
-          content_type: z.string().min(3).max(100),
+          // Boleh kosong: browser sering tidak mengenali .flac/.aiff → MIME ditentukan dari ekstensi di bawah.
+          content_type: z.string().max(100),
           size: z.number().int().positive(),
         })
         .parse(req.body);
-      // Kebijakan upload dari pengaturan platform (Super Admin → Storage & Retensi).
-      const maxMb = settings.num('storage.max_upload_mb');
+      if (b.kind === 'audio') {
+        const ext0 = (b.filename.match(/\.[a-z0-9]{2,5}$/i)?.[0] ?? '').toLowerCase();
+        const ct = b.content_type.toLowerCase();
+        // MIME tak baku/kosong dari browser (x-flac, x-aiff, x-m4a, octet-stream) → MIME standar menurut ekstensi.
+        if (AUDIO_UPLOAD_TYPES[ext0] && (!ct.startsWith('audio/') || /^audio\/x-(flac|aiff|m4a)$/.test(ct))) b.content_type = AUDIO_UPLOAD_TYPES[ext0];
+      }
+      if (b.purpose === 'playlist' && b.kind !== 'artwork') throw badRequest('Sampul playlist harus berupa gambar');
+      // Kebijakan upload dari pengaturan platform (Super Admin → Storage & Retensi). Sampul playlist dibatasi lebih kecil.
+      const maxMb = b.purpose === 'playlist' ? Math.min(PLAYLIST_COVER_MAX_MB, settings.num('storage.max_upload_mb')) : settings.num('storage.max_upload_mb');
       if (b.size > maxMb * 1024 * 1024) throw unprocessable(`Ukuran file melebihi batas ${maxMb} MB`);
       const allowed = settings.get<string[]>(b.kind === 'audio' ? 'storage.allowed_audio_types' : 'storage.allowed_image_types');
       if (!allowed.includes(b.content_type.toLowerCase())) throw unprocessable(`Tipe file ${b.content_type} tidak diizinkan untuk ${b.kind} (diizinkan: ${allowed.join(', ')})`);
-      if ((await uploadsBytes(db)) + b.size > settings.num('storage.quota_uploads_gb') * 1024 ** 3) throw unprocessable('Kuota penyimpanan upload platform penuh. Hubungi admin GEMA.');
+      if ((await uploadsBytes(db)) + b.size > settings.num('storage.quota_uploads_gb') * 1024 ** 3) throw unprocessable('Kuota penyimpanan upload platform penuh. Hubungi admin RAVE.');
       const id = uuidv7();
       const ext = (b.filename.match(/\.[a-z0-9]{2,5}$/i)?.[0] ?? (b.kind === 'audio' ? '.wav' : '.jpg')).toLowerCase();
       const stored = `${id}${ext}`;
-      await db.query(`INSERT INTO uploads (id, user_id, kind, filename, content_type, size, stored_name) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [
+      await db.query(`INSERT INTO uploads (id, user_id, kind, filename, content_type, size, stored_name, purpose) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [
         id,
         req.user!.sub,
         b.kind,
@@ -316,9 +373,24 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
         b.content_type,
         b.size,
         stored,
+        b.purpose,
       ]);
       reply.status(201);
       return { upload_id: id, upload_url: `/v1/studio/uploads/${id}`, public_url: `/v1/catalog/media/${stored}` };
+    });
+
+    // Status pengolahan audio (format master, rendisi, transcoding) — dipolling Studio setelah upload.
+    s.get('/v1/studio/uploads/:id', async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isUuid(id)) throw notFound('Upload');
+      const u = await db.one(
+        `SELECT id, kind, filename, size, completed_at, audio_meta, renditions, transcode_status, transcode_error, transcoded_at
+           FROM uploads WHERE id = $1 AND user_id = $2`,
+        [id, req.user!.sub],
+      );
+      if (!u) throw notFound('Upload');
+      const r = (u.renditions ?? {}) as Record<string, { codec_label: string; bytes?: number }>;
+      return { ...u, renditions: Object.fromEntries(Object.entries(r).map(([q, x]) => [q, { codec_label: x.codec_label, bytes: x.bytes ?? null }])) };
     });
 
     // Body biner upload (audio/artwork) diteruskan sebagai stream mentah — parser hanya berlaku di scope ini, rute JSON lain tidak terpengaruh.
@@ -352,37 +424,40 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
             const part = join(UPLOAD_DIR, `${u.stored_name}.${uuidv7()}.part`);
             const warnings: string[] = [];
             let meta: Record<string, unknown> = {};
+            let audioMeta: AudioMeta | null = null;
             let size = 0;
             try {
-              const { bytes, head } = await receiveUpload(src, part, settings.num('storage.max_upload_mb'));
+              const { bytes, head } = await receiveUpload(src, part, u.purpose === 'playlist' ? Math.min(PLAYLIST_COVER_MAX_MB, settings.num('storage.max_upload_mb')) : settings.num('storage.max_upload_mb'));
               size = bytes;
               if (!bytes) throw badRequest('Body biner kosong (kirim dengan content-type audio/* atau image/*)');
               if (u.kind === 'artwork') {
                 const dim = imageSize(head);
-                if (!dim) throw unprocessable('Artwork harus JPEG/PNG yang valid');
+                if (!dim) throw unprocessable(u.purpose === 'playlist' ? 'Sampul harus JPEG/PNG yang valid' : 'Artwork harus JPEG/PNG yang valid');
                 meta = dim;
-                if (dim.width !== dim.height) warnings.push('Artwork sebaiknya persegi (1:1)');
-                if (dim.width < 3000) warnings.push(`Resolusi ${dim.width}×${dim.height} di bawah standar 3000×3000 px`);
-              } else {
-                // Durasi WAV dari ukuran chunk data di header (bukan panjang buffer).
-                const w = wavInfo(head);
-                if (w) {
-                  meta = w;
-                  if (w.sampleRate < 44100 || w.bitDepth < 16) throw unprocessable(`Master minimal 16-bit/44,1 kHz (diterima ${w.bitDepth}-bit/${w.sampleRate} Hz)`);
-                  if (w.bitDepth < 24) warnings.push('Disarankan master 24-bit');
-                } else if (!/flac|mpeg|mp3|mp4|m4a/.test(u.content_type)) {
-                  throw unprocessable('File audio tidak dikenali');
-                } else if (/mpeg|mp3|mp4|m4a/.test(u.content_type)) {
-                  warnings.push('Format lossy hanya untuk dev; produksi wajib WAV/FLAC');
+                if (u.purpose === 'playlist') {
+                  if (Math.min(dim.width, dim.height) < PLAYLIST_COVER_MIN_PX) throw unprocessable(`Sampul minimal ${PLAYLIST_COVER_MIN_PX}×${PLAYLIST_COVER_MIN_PX} px (diterima ${dim.width}×${dim.height})`);
+                  if (dim.width !== dim.height) warnings.push('Sampul bukan persegi — ditampilkan terpotong di tengah (1:1)');
+                } else {
+                  if (dim.width !== dim.height) warnings.push('Artwork sebaiknya persegi (1:1)');
+                  if (dim.width < 3000) warnings.push(`Resolusi ${dim.width}×${dim.height} di bawah standar 3000×3000 px`);
                 }
+              } else {
+                audioMeta = await inspectAudio(part, head, warnings);
+                meta = { ...audioMeta };
               }
               await rename(part, join(UPLOAD_DIR, u.stored_name)); // atomik: file final tidak pernah setengah jadi
             } catch (e) {
               await rm(part, { force: true }).catch(() => {});
               throw e;
             }
-            await db.query(`UPDATE uploads SET completed_at = now(), size = $2 WHERE id = $1`, [id, size]);
-            return { public_url: `/v1/catalog/media/${u.stored_name}`, meta, warnings };
+            const transcode = u.kind === 'audio' && audioMeta ? initialTranscodeStatus() : 'none';
+            await db.query(`UPDATE uploads SET completed_at = now(), size = $2, audio_meta = $3, transcode_status = $4 WHERE id = $1`, [
+              id,
+              size,
+              audioMeta ? JSON.stringify(audioMeta) : null,
+              transcode,
+            ]);
+            return { public_url: `/v1/catalog/media/${u.stored_name}`, meta, warnings, transcode_status: transcode };
           } catch (e) {
             // Body belum habis dibaca (ditolak lebih awal) → tutup koneksi setelah respons, jangan menguras sisa upload.
             if (src instanceof Readable && !src.readableEnded) reply.header('connection', 'close');
@@ -397,7 +472,12 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       const { id } = req.params as { id: string };
       const r = await loadRelease(req, id);
       if (!EDITABLE.includes(r.status)) throw conflict(`Rilis sudah berstatus ${r.status}`);
-      const tracks = await db.query(`SELECT id, title, audio_url FROM tracks WHERE release_id = $1 ORDER BY track_number`, [id]);
+      const tracks = await db.query(
+        `SELECT t.id, t.title, t.audio_url, u.transcode_status, u.transcode_error
+           FROM tracks t LEFT JOIN uploads u ON u.stored_name = split_part(t.audio_url, '/v1/catalog/media/', 2)
+          WHERE t.release_id = $1 ORDER BY t.track_number`,
+        [id],
+      );
       const errors: { path: string; message: string }[] = [];
       if (!r.cover_url) errors.push({ path: 'cover_url', message: 'Artwork wajib diunggah' });
       if (!tracks.length) errors.push({ path: 'tracks', message: 'Minimal satu lagu' });
@@ -405,6 +485,8 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       if (!tracks.some((t) => t.audio_url)) errors.push({ path: 'tracks', message: 'Minimal satu lagu memiliki file audio' });
       for (const t of tracks) {
         if (!t.audio_url) errors.push({ path: `tracks.${t.id}.audio_url`, message: `"${t.title}" belum memiliki audio` });
+        // Tanpa rendisi standar, master lossless tidak bisa diputar pengguna Gratis — unggah ulang bila transcoding gagal.
+        if (t.transcode_status === 'failed') errors.push({ path: `tracks.${t.id}.audio_url`, message: `"${t.title}": pengolahan audio gagal (${String(t.transcode_error ?? '').slice(0, 120)}) — unggah ulang file master` });
         const sp = await splitsOf(db, t.id);
         for (const [type, list] of [
           ['MASTER', sp.master],

@@ -6,18 +6,21 @@
 import cors from '@fastify/cors';
 import proxy from '@fastify/http-proxy';
 import rateLimit from '@fastify/rate-limit';
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply, type RawServerBase, type RouteGenericInterface } from 'fastify';
 import {
   config,
   INSTANCE_ID,
+  localizeDetail,
+  reqLocale,
   serviceUrl,
   settings,
   startSettingsListener,
   startSettingsPolling,
   verifyAccessToken,
+  BUILD_INFO,
   type AuthUser,
   type ServiceName,
-} from '@gema/service-kit';
+} from '@rave/service-kit';
 import { createPgRateLimit, type PgRateLimit } from './rate-store.js';
 
 type Upstream = Exclude<ServiceName, 'gateway'>;
@@ -103,13 +106,24 @@ const app = Fastify({
   bodyLimit: 2048 * 1024 * 1024, // upload master audio (dev; batas efektif = storage.max_upload_mb). Produksi: presigned URL langsung ke object storage.
 });
 
-// Pengaturan platform (maintenance, modul, rate limit): real-time lewat LISTEN `gema_settings` di setiap replika;
+// Pengaturan platform (maintenance, modul, rate limit): real-time lewat LISTEN `rave_settings` di setiap replika;
 // polling 30 dtk hanya jaring pengaman (gateway tidak punya event bus).
 const settingsPoll = startSettingsPolling('gateway', 30_000);
 settingsPoll.unref();
 const settingsListener = startSettingsListener('gateway', { log: (o, m) => app.log.warn(o, m) });
 
-await app.register(cors, { origin: true, credentials: true, exposedHeaders: ['Idempotent-Replayed', 'X-Request-Id'] });
+/**
+ * CORS: `CORS_ORIGINS` (daftar origin dipisah koma, atau `*`). Default dev: semua origin; default produksi: hanya
+ * PUBLIC_WEB_URL — web produksi dilayani nginx dari origin yang sama, jadi origin asing tidak perlu (dan tidak boleh) lolos.
+ */
+function corsOrigin(): boolean | string[] {
+  const raw = process.env.CORS_ORIGINS?.trim();
+  if (raw === '*') return true;
+  if (raw) return raw.split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean);
+  if (config.isDev) return true;
+  return process.env.PUBLIC_WEB_URL ? [new URL(process.env.PUBLIC_WEB_URL).origin] : false;
+}
+await app.register(cors, { origin: corsOrigin(), credentials: true, exposedHeaders: ['Idempotent-Replayed', 'X-Request-Id'] });
 
 /**
  * Kelas rate limit dari path saja (tanpa query string) dengan pola ber-anchor — query seperti `?x=/ingest/`
@@ -160,11 +174,14 @@ await app.register(rateLimit, {
     const cls = rateClass(edgePath(req));
     return (sub ? `u:${sub}` : `ip:${req.ip}`) + (cls ? ':' + cls : '');
   },
-  errorResponseBuilder: (_req, ctx) => ({
+  errorResponseBuilder: (req, ctx) => ({
     type: 'about:blank',
     title: 'Too Many Requests',
     status: 429,
-    detail: `Terlalu banyak permintaan. Coba lagi dalam ${Math.ceil(ctx.ttl / 1000)} detik.`,
+    detail:
+      reqLocale(req) === 'en'
+        ? `Too many requests. Try again in ${Math.ceil(ctx.ttl / 1000)} seconds.`
+        : `Terlalu banyak permintaan. Coba lagi dalam ${Math.ceil(ctx.ttl / 1000)} detik.`,
   }),
 });
 
@@ -196,7 +213,7 @@ app.addHook('onRequest', async (req, reply) => {
       return reply
         .status(401)
         .type('application/problem+json')
-        .send({ type: 'about:blank', title: 'Unauthorized', status: 401, detail: 'Token tidak valid atau kedaluwarsa' });
+        .send({ type: 'about:blank', title: 'Unauthorized', status: 401, detail: localizeDetail('Token tidak valid atau kedaluwarsa', reqLocale(req)) });
     }
   }
   edge.set(req, { path, sub: user?.sub ?? null });
@@ -204,10 +221,10 @@ app.addHook('onRequest', async (req, reply) => {
   const mod = MODULE_PREFIXES.find(([p]) => path === p || path.startsWith(p + '/'));
   if (mod && req.method !== 'OPTIONS' && !isAdmin && !settings.bool(mod[1])) {
     return reply.status(503).type('application/problem+json').send({
-      type: 'https://gema.id/problems/module-disabled',
-      title: 'Modul dinonaktifkan',
+      type: 'https://rave.id/problems/module-disabled',
+      title: reqLocale(req) === 'en' ? 'Module disabled' : 'Modul dinonaktifkan',
       status: 503,
-      detail: `${mod[2]} sedang dinonaktifkan oleh admin GEMA.`,
+      detail: reqLocale(req) === 'en' ? `${mod[2]} is currently disabled by the RAVE admin.` : `${mod[2]} sedang dinonaktifkan oleh admin RAVE.`,
     });
   }
   if (READ_METHODS.has(req.method)) return;
@@ -219,15 +236,17 @@ app.addHook('onRequest', async (req, reply) => {
     !PLAYBACK_WRITES.some((re) => re.test(path))
   ) {
     return reply.status(503).header('retry-after', '300').type('application/problem+json').send({
-      type: 'https://gema.id/problems/maintenance',
-      title: 'Sedang pemeliharaan',
+      type: 'https://rave.id/problems/maintenance',
+      title: reqLocale(req) === 'en' ? 'Under maintenance' : 'Sedang pemeliharaan',
       status: 503,
       detail: settings.get<string>('maintenance.message'),
     });
   }
 });
 
-app.get('/healthz', async () => ({ status: 'ok', service: 'gateway', instance: INSTANCE_ID, rate_limit_store: RATE_LIMIT_STORE }));
+app.get('/healthz', async () => ({ status: 'ok', service: 'gateway', instance: INSTANCE_ID, rate_limit_store: RATE_LIMIT_STORE, version: BUILD_INFO.version }));
+// Versi build yang sedang berjalan (publik, tanpa rahasia) — dipakai web, smoke test pasca-deploy, dan status page.
+app.get('/v1/version', async () => BUILD_INFO);
 
 // Status agregat semua service (untuk dashboard ops / smoke test). Di-cache 5 dtk agar tidak memicu fan-out per permintaan.
 let statusCache: { at: number; v: Promise<{ ok: boolean; services: { service: string; ok: boolean; ms: number }[] }> } | null = null;
@@ -243,13 +262,16 @@ async function checkStatus() {
       const t = Date.now();
       try {
         const r = await fetch(serviceUrl(u) + '/readyz', { signal: AbortSignal.timeout(1500) });
-        return { service: u, ok: r.ok, ms: Date.now() - t };
+        const body = r.ok ? ((await r.json().catch(() => ({}))) as { version?: string }) : {};
+        return { service: u, ok: r.ok, ms: Date.now() - t, version: body.version ?? null };
       } catch {
-        return { service: u, ok: false, ms: Date.now() - t };
+        return { service: u, ok: false, ms: Date.now() - t, version: null };
       }
     }),
   );
-  return { ok: results.every((r) => r.ok), services: results };
+  // `version_drift`: service berjalan dengan versi berbeda dari gateway (deploy setengah jalan / image tertinggal).
+  const drift = results.filter((r) => r.version && r.version !== BUILD_INFO.version).map((r) => r.service);
+  return { ok: results.every((r) => r.ok), version: BUILD_INFO.version, version_drift: drift, services: results };
 }
 
 for (const [prefix, upstream] of ROUTES) {
@@ -265,8 +287,35 @@ for (const [prefix, upstream] of ROUTES) {
         const { expect: _expect, ...rest } = headers;
         return { ...rest, 'x-request-id': req.id, 'x-forwarded-for': req.ip };
       },
+      onError: (reply, { error }) => upstreamError(reply, error, upstream),
     },
   });
+}
+
+/**
+ * Galat koneksi ke upstream (service restart/mati/macet). Bawaan reply-from memetakan ECONNREFUSED ke 500 —
+ * di sini dijawab 503 + Retry-After (tidak tersedia sementara; klien web mengulang 5xx) atau 504 (timeout),
+ * dalam format RFC 9457 seperti galat lain. Galat lain diteruskan apa adanya.
+ */
+const UNAVAILABLE = new Set(['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EHOSTUNREACH', 'UND_ERR_SOCKET', 'UND_ERR_CLOSED']);
+const TIMEOUT = new Set(['UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'ETIMEDOUT']);
+function upstreamError(reply: FastifyReply<RouteGenericInterface, RawServerBase>, error: Error, upstream: string) {
+  const e = error as Error & { code?: string; statusCode?: number; cause?: { code?: string } };
+  const code = e.cause?.code ?? e.code ?? '';
+  const status = UNAVAILABLE.has(code) || e.statusCode === 503 ? 503 : TIMEOUT.has(code) || e.statusCode === 504 ? 504 : 0;
+  if (!status) return reply.send(error);
+  reply.request.log.warn({ upstream, code }, 'upstream tidak tersedia');
+  if (status === 503) reply.header('retry-after', '5');
+  return reply
+    .status(status)
+    .type('application/problem+json')
+    .send({
+      type: 'https://rave.id/problems/upstream-unavailable',
+      title: status === 503 ? 'Layanan sementara tidak tersedia' : 'Layanan tidak merespons tepat waktu',
+      status,
+      detail: `Service ${upstream} sedang tidak dapat dihubungi. Coba lagi sebentar lagi.`,
+      instance: reply.request.url,
+    });
 }
 
 app.setNotFoundHandler((req, reply) => {

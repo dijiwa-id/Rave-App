@@ -1,5 +1,5 @@
-import { SEED } from '@gema/domain';
-import type { ServiceContext } from '@gema/service-kit';
+import { SEED } from '@rave/domain';
+import type { ServiceContext } from '@rave/service-kit';
 import { C, D, payableAccount, post } from './ledger.js';
 
 /** Saldo awal wallet Senja Kolektif (royalti 2 bulan + tip) agar halaman Keuangan Studio terisi. Idempoten. */

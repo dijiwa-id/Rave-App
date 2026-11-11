@@ -6,6 +6,7 @@ import { api, ApiError, fmt } from '@/lib/api';
 import type { CalendarSlot } from '@/lib/types';
 import { Button, Card, cx, Field, Input, Modal, PageHeader, Select, toast } from '@/components/ui';
 import { useCurrentArtist } from '@/components/b2b/common';
+import { localeTag, useDict } from '@/lib/i18n';
 
 // Warna status kalender (status = identitas kategorikal → label teks selalu menyertai).
 export const CAL_STATUS: Record<string, { label: string; cls: string }> = {
@@ -36,19 +37,20 @@ export function MonthGrid({ month, onMonth, cell, onDayClick }: { month: Date; o
     });
   }, [month]);
   const today = iso(new Date());
+  const t = useDict('b2b').studio.calendar;
   return (
-    <div className="rounded-xl border border-b2b-line bg-b2b-card">
+    <div className="rounded-none border border-b2b-line bg-b2b-card">
       <div className="flex items-center justify-between border-b border-b2b-line px-4 py-3">
-        <button aria-label="Bulan sebelumnya" onClick={() => onMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="rounded-full p-1.5 hover:bg-b2b-bg">
+        <button aria-label={t.prevMonth} onClick={() => onMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="rounded-none p-1.5 hover:bg-b2b-bg">
           <ChevronLeft className="size-5" />
         </button>
-        <p className="font-extrabold">{month.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}</p>
-        <button aria-label="Bulan berikutnya" onClick={() => onMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="rounded-full p-1.5 hover:bg-b2b-bg">
+        <p className="font-extrabold">{month.toLocaleDateString(localeTag(), { month: 'long', year: 'numeric' })}</p>
+        <button aria-label={t.nextMonth} onClick={() => onMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="rounded-none p-1.5 hover:bg-b2b-bg">
           <ChevronRight className="size-5" />
         </button>
       </div>
       <div className="grid grid-cols-7 border-b border-b2b-line text-center text-xs font-bold text-b2b-muted">
-        {['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'].map((d) => (
+        {t.weekdays.map((d) => (
           <div key={d} className="py-2">
             {d}
           </div>
@@ -81,7 +83,7 @@ export function CalendarLegend({ keys }: { keys: string[] }) {
   return (
     <div className="flex flex-wrap gap-2">
       {keys.map((k) => (
-        <span key={k} className={cx('rounded border px-2 py-0.5 text-[11px] font-bold', CAL_STATUS[k].cls)}>
+        <span key={k} className={cx('rounded-none border px-2 py-0.5 text-[11px] font-bold', CAL_STATUS[k].cls)}>
           {CAL_STATUS[k].label}
         </span>
       ))}
@@ -101,6 +103,7 @@ export default function CalendarPage() {
   const [block, setBlock] = useState<null | { start_date: string; end_date: string; status: 'BLOCKED' | 'TRAVEL'; note: string }>(null);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<CalendarSlot | null>(null);
+  const t = useDict('b2b').studio.calendar;
 
   const slotsOn = (d: string) => (q.data?.data ?? []).filter((s) => s.start_date <= d && s.end_date >= d);
 
@@ -108,11 +111,11 @@ export default function CalendarPage() {
     setBusy(true);
     try {
       await api(`/v1/booking/artists/${aid}/calendar/blocks`, { body: { ...block, note: block!.note || undefined } });
-      toast.success('Tanggal diblokir');
+      toast.success(t.blocked);
       setBlock(null);
       qc.invalidateQueries({ queryKey: ['calendar', aid] });
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) toast.error('Bentrok: tanggal sudah terisi booking/blok lain.');
+      if (e instanceof ApiError && e.status === 409) toast.error(t.conflict);
       else toast.error(e);
     } finally {
       setBusy(false);
@@ -131,18 +134,18 @@ export default function CalendarPage() {
   return (
     <div>
       <PageHeader
-        title="Kalender"
-        subtitle="Satu kalender untuk semua tawaran. Sistem menjamin tidak ada dua Booked di slot yang sama; hold kedaluwarsa otomatis 72 jam."
+        title={t.title}
+        subtitle={t.subtitle}
         actions={
           <Button variant="ink" onClick={() => setBlock({ start_date: iso(new Date()), end_date: iso(new Date()), status: 'BLOCKED', note: '' })}>
-            Blok tanggal
+            {t.blockDate}
           </Button>
         }
       />
       <div className="mb-4">
         <CalendarLegend keys={['HOLD_1', 'HOLD_2', 'PENDING_CONTRACT', 'BOOKED', 'BOOKED_AND_SECURED', 'BLOCKED', 'TRAVEL']} />
       </div>
-      {q.error ? <Card><p className="text-sm text-red-600">Gagal memuat kalender: {(q.error as Error).message}</p></Card> : null}
+      {q.error ? <Card><p className="text-sm text-red-600">{t.loadFailed((q.error as Error).message)}</p></Card> : null}
       <MonthGrid
         month={month}
         onMonth={setMonth}
@@ -156,7 +159,7 @@ export default function CalendarPage() {
                 if (s.booking_id) nav(`/studio/bookings/${s.booking_id}`);
                 else setSelected(s);
               }}
-              className={cx('block w-full truncate rounded border px-1.5 py-0.5 text-left text-[10px] font-bold', (CAL_STATUS[s.status] ?? CAL_STATUS.BLOCKED).cls)}
+              className={cx('block w-full truncate rounded-none border px-1.5 py-0.5 text-left text-[10px] font-bold', (CAL_STATUS[s.status] ?? CAL_STATUS.BLOCKED).cls)}
               title={`${CAL_STATUS[s.status]?.label ?? s.status}${s.note ? ' — ' + s.note : ''}`}
             >
               {CAL_STATUS[s.status]?.label ?? s.status}
@@ -165,35 +168,35 @@ export default function CalendarPage() {
           ))
         }
       />
-      <p className="mt-3 text-xs text-b2b-muted">Sinkronisasi Google Calendar/iCal (tampil “Busy”) akan tersedia di pengaturan integrasi.</p>
+      <p className="mt-3 text-xs text-b2b-muted">{t.syncNote}</p>
 
-      <Modal open={!!block} onClose={() => setBlock(null)} title="Blok tanggal">
+      <Modal open={!!block} onClose={() => setBlock(null)} title={t.blockDate}>
         {block && (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Dari">
+              <Field label={t.from}>
                 <Input type="date" value={block.start_date} onChange={(e) => setBlock({ ...block, start_date: e.target.value, end_date: e.target.value > block.end_date ? e.target.value : block.end_date })} />
               </Field>
-              <Field label="Sampai">
+              <Field label={t.to}>
                 <Input type="date" min={block.start_date} value={block.end_date} onChange={(e) => setBlock({ ...block, end_date: e.target.value })} />
               </Field>
             </div>
-            <Field label="Jenis">
+            <Field label={t.kind}>
               <Select value={block.status} onChange={(e) => setBlock({ ...block, status: e.target.value as 'BLOCKED' | 'TRAVEL' })}>
-                <option value="BLOCKED">Blocked (pribadi/rekaman)</option>
-                <option value="TRAVEL">Travel</option>
+                <option value="BLOCKED">{t.blockedOption}</option>
+                <option value="TRAVEL">{t.travelOption}</option>
               </Select>
             </Field>
-            <Field label="Catatan" hint="privat">
+            <Field label={t.note} hint={t.private}>
               <Input value={block.note} onChange={(e) => setBlock({ ...block, note: e.target.value })} />
             </Field>
             <Button variant="ink" loading={busy} onClick={save}>
-              Simpan
+              {t.save}
             </Button>
           </div>
         )}
       </Modal>
-      <Modal open={!!selected} onClose={() => setSelected(null)} title={CAL_STATUS[selected?.status ?? '']?.label ?? 'Slot'}>
+      <Modal open={!!selected} onClose={() => setSelected(null)} title={CAL_STATUS[selected?.status ?? '']?.label ?? t.slot}>
         {selected && (
           <div className="space-y-3 text-sm">
             <p>
@@ -202,7 +205,7 @@ export default function CalendarPage() {
             {selected.note && <p className="text-b2b-muted">{selected.note}</p>}
             {['BLOCKED', 'TRAVEL'].includes(selected.status) && (
               <Button variant="danger" size="sm" icon={<Trash2 className="size-4" />} onClick={() => remove(selected.id)}>
-                Hapus blok
+                {t.removeBlock}
               </Button>
             )}
           </div>

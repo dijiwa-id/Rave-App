@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { createReadStream, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { BRANDING_MAX_BYTES, BRANDING_PUBLIC_PREFIX, BRANDING_SLOTS, SETTINGS, type BrandingSlot } from '@gema/domain/settings';
-import { audit, badRequest, notFound, requireSuperAdmin, settings, unprocessable, type ServiceContext } from '@gema/service-kit';
+import { BRANDING_MAX_BYTES, BRANDING_PUBLIC_PREFIX, BRANDING_SLOTS, SETTINGS, type BrandingSlot } from '@rave/domain/settings';
+import { audit, badRequest, notFound, requireSuperAdmin, settings, unprocessable, type ServiceContext } from '@rave/service-kit';
 import { BUCKETS, invalidateBucket } from './storage.js';
 
 type ImageType = keyof typeof BRANDING_MAX_BYTES;
@@ -18,6 +18,9 @@ export function brandingReferences(): Set<string> {
     if (d.type === 'image') {
       const v = settings.get<string>(d.key);
       if (v?.startsWith(BRANDING_PUBLIC_PREFIX)) out.add(v.slice(BRANDING_PUBLIC_PREFIX.length));
+    } else if (d.type === 'partners') {
+      for (const pt of settings.get<{ logo?: string }[]>(d.key) ?? [])
+        if (pt?.logo?.startsWith(BRANDING_PUBLIC_PREFIX)) out.add(pt.logo.slice(BRANDING_PUBLIC_PREFIX.length));
     }
   return out;
 }

@@ -1,4 +1,4 @@
-import type { Job } from '@gema/service-kit';
+import type { Job } from '@rave/service-kit';
 import { AUTO_COMPLETE_MS, FAST_CLOCK, todayWib, type BookingRow } from './common.js';
 import { completeBooking, } from './routes-bookings.js';
 import { loadBooking, transition } from './repo.js';

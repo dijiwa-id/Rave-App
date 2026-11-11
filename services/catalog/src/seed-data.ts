@@ -222,7 +222,7 @@ export const SHOWS: SeedShow[] = [
   {
     kind: 'PODCAST',
     title: 'Ruang Dengar',
-    publisher: 'GEMA Originals',
+    publisher: 'RAVE Originals',
     category: 'musik',
     description: 'Obrolan santai di balik lagu: proses kreatif, rekaman rumahan, dan cerita panggung musisi indie Indonesia.',
     episodes: [
@@ -278,7 +278,7 @@ export const SHOWS: SeedShow[] = [
   {
     kind: 'FICTION',
     title: 'Rumah di Ujung Gang',
-    publisher: 'GEMA Originals',
+    publisher: 'RAVE Originals',
     category: 'misteri',
     description: 'Serial misteri audio: seorang jurnalis muda menyelidiki rumah kosong yang lampunya menyala setiap malam.',
     age_rating: '13+',

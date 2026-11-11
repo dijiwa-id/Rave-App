@@ -1,6 +1,6 @@
-import type { Consumers, ServiceContext } from '@gema/service-kit';
-import { BOOKING_STATUS_LABEL, type BookingStatus } from '@gema/domain/booking';
-import { TICKET_REFUND_REASON_LABEL, type TicketRefundReason } from '@gema/domain';
+import type { Consumers, ServiceContext } from '@rave/service-kit';
+import { BOOKING_STATUS_LABEL, type BookingStatus } from '@rave/domain/booking';
+import { TICKET_REFUND_REASON_LABEL, type TicketRefundReason } from '@rave/domain';
 import { artistRecipients, notifyFollowers, notifyUsers, orgRecipients, rupiah } from './notify.js';
 
 export function consumers(_ctx: ServiceContext): Consumers {
@@ -33,7 +33,7 @@ export function consumers(_ctx: ServiceContext): Consumers {
     'iam.user.registered': async (e, tx) => {
       await notifyUsers(tx, [e.payload.userId], e.id, {
         category: 'system',
-        title: 'Selamat datang di GEMA',
+        title: 'Selamat datang di RAVE',
         body: 'Dengar gratis. Datang ke panggungnya. Dukung langsung.',
         link: '/app',
       });
@@ -154,7 +154,7 @@ export function consumers(_ctx: ServiceContext): Consumers {
     'booking.dispute.resolved': async (e, tx) => {
       const p = e.payload;
       const outcome = p.outcome === 'RELEASE_TO_ARTIST' ? 'dana diteruskan ke artis' : 'dana dikembalikan ke promotor';
-      const msg = { category: 'booking' as const, title: 'Hasil mediasi dispute', body: `Admin GEMA telah memutus dispute: ${outcome}.` };
+      const msg = { category: 'booking' as const, title: 'Hasil mediasi dispute', body: `Admin RAVE telah memutus dispute: ${outcome}.` };
       if (p.artistId) await notifyUsers(tx, await artistRecipients(tx, p.artistId), e.id, { ...msg, link: `/studio/bookings/${p.bookingId}` });
       await notifyUsers(tx, await orgRecipients(tx, p.promotorOrgId), e.id, { ...msg, link: `/promotor/bookings/${p.bookingId}` });
     },

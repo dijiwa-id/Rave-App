@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { ADMIN_ROLES } from '@gema/domain/settings';
-import { audit, conflict, forbidden, nextCursor, notFound, pageParams, publish, requirePermission, requireRole, requireService, requireSuperAdmin, z, type ServiceContext } from '@gema/service-kit';
+import { ADMIN_ROLES } from '@rave/domain/settings';
+import { audit, conflict, forbidden, nextCursor, notFound, pageParams, publish, requirePermission, requireRole, requireService, requireSuperAdmin, z, type ServiceContext } from '@rave/service-kit';
 import { buildMe } from './core.js';
 import { kycOut } from './routes.js';
 

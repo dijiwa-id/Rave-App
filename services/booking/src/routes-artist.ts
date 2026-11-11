@@ -9,7 +9,7 @@ import {
   kSafe,
   validateShares,
   type BookingStatus,
-} from '@gema/domain';
+} from '@rave/domain';
 import {
   audit,
   badRequest,
@@ -25,7 +25,7 @@ import {
   type AuthUser,
   type Db,
   type ServiceContext,
-} from '@gema/service-kit';
+} from '@rave/service-kit';
 import { assertManageArtist, canManageArtist, isVerifiedPromotor } from './common.js';
 
 /** Batas kandidat discovery yang diperkaya statistik (selaras EPK_BATCH_MAX di playback). */

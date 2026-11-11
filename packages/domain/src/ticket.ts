@@ -31,7 +31,7 @@ export const TICKET_REFUND_REASON_LABEL: Record<TicketRefundReason, string> = {
   rescheduled: 'Jadwal atau venue event berubah',
   buyer_request: 'Permintaan pembeli',
   late_payment: 'Pembayaran diterima setelah reservasi berakhir',
-  admin: 'Keputusan tim GEMA',
+  admin: 'Keputusan tim RAVE',
 };
 
 /** Kebijakan dari pengaturan Super Admin (`refund.*`). */

@@ -1,6 +1,6 @@
-# Arsitektur GEMA — Implementasi v0.1
+# Arsitektur RAVE — Implementasi v0.1
 
-Acuan: **GEMA_BRD_TDD_v2.0** (Bab 9–11). Dokumen ini mencatat bagaimana desain di TDD diwujudkan di repositori ini, dan di mana implementasi saat ini sengaja berbeda (dengan alasan + jalur migrasi).
+Acuan: **BRD/TDD v2.0** (Bab 9–11). Dokumen ini mencatat bagaimana desain di TDD diwujudkan di repositori ini, dan di mana implementasi saat ini sengaja berbeda (dengan alasan + jalur migrasi).
 
 ## 1. Gambaran
 
@@ -33,7 +33,7 @@ Acuan: **GEMA_BRD_TDD_v2.0** (Bab 9–11). Dokumen ini mencatat bagaimana desain
 | Prinsip | Implementasi |
 |---|---|
 | Pisahkan lalu lintas konsumen & transaksi | `playback` (media plane) dan `finance` adalah service terpisah dengan pool DB sendiri; lonjakan streaming tidak menyentuh booking/finance. |
-| Modular monolith → microservices | Atas permintaan proyek, langsung **microservices** dengan bounded context TDD §10.3. Risiko kompleksitas (§17) dimitigasi dengan `@gema/service-kit` (bootstrap seragam) & satu monorepo. |
+| Modular monolith → microservices | Atas permintaan proyek, langsung **microservices** dengan bounded context TDD §10.3. Risiko kompleksitas (§17) dimitigasi dengan `@rave/service-kit` (bootstrap seragam) & satu monorepo. |
 | Event-driven, outbox | Setiap service menulis event ke tabel `outbox` di transaksi domain yang sama (`publish(tx, …)`); relay memublikasikan ke bus. Konsumen idempoten (offset transaksional di driver pg; tabel `processed_events` di driver Kafka). Event gagal → `bus.dead_letters`. |
 | Uang & kontrak adalah kode | State machine booking, matriks pembatalan, alokasi split, ledger double-entry ada di `packages/domain` (murni, ter-unit-test). Bukan di n8n. |
 | TypeScript end-to-end | Backend, frontend, domain bersama. Kontrak API: `docs/API.md` (langkah berikut: OpenAPI 3.1 ter-generate). |
@@ -91,10 +91,10 @@ Semua service boleh dijalankan >1 replika di belakang load balancer biasa — **
 | Aspek | Mekanisme |
 |---|---|
 | Identitas | `INSTANCE_ID` (`host-pid-acak`, bisa di-override env) muncul di log (`instance`) dan `GET /internal/stats`. |
-| Pengaturan platform | `applyChanges` mengirim `pg_notify('gema_settings', versi)` di transaksi yang sama; **setiap** replika (termasuk platform & gateway) LISTEN dan me-refresh ≤ ~1 dtk. Event `platform.settings.updated` (consumer group → satu replika per service) & refresh berkala (60 dtk service, 30 dtk gateway) tetap ada sebagai jaring pengaman; snapshot berversi sehingga jalur yang datang belakangan tidak menimpa versi lebih baru. |
+| Pengaturan platform | `applyChanges` mengirim `pg_notify('rave_settings', versi)` di transaksi yang sama; **setiap** replika (termasuk platform & gateway) LISTEN dan me-refresh ≤ ~1 dtk. Event `platform.settings.updated` (consumer group → satu replika per service) & refresh berkala (60 dtk service, 30 dtk gateway) tetap ada sebagai jaring pengaman; snapshot berversi sehingga jalur yang datang belakangan tidak menimpa versi lebih baru. |
 | Event bus | Driver `pg`: consumer group = nama service, offset dikunci `FOR UPDATE SKIP LOCKED` → tiap event diproses sekali per service. Driver `kafka`: groupId = nama service → Kafka membagi partisi antar-replika; idempotensi via `processed_events`. Relay outbox aman paralel (`SKIP LOCKED`). |
 | Rate limit gateway | `RATE_LIMIT_STORE=pg` → hitungan fixed window bersama di tabel UNLOGGED `gateway.rate_limits` (dibuat saat start, satu upsert atomik per permintaan, pool kecil, timeout pendek). DB bermasalah → **fail open** (diizinkan + log warn dibatasi). Default `memory` (per replika, dev). |
-| Live | Registri `live.instances` (heartbeat 5 dtk, mati bila > 15 dtk). `streams.owner_instance` = replika yang memegang publisher & transcoder; watchdog hanya mengurus siaran miliknya atau mengambil alih (UPDATE bersyarat) siaran yang pemiliknya mati. `live.max_concurrent` dihitung global di DB. Potongan ingest browser yang mendarat di replika lain diteruskan ke `LIVE_INTERNAL_URL` pemilik (token service) atau 409 bila pemilik mati. Kanal demo hanya di satu replika (kunci advisory sesi `gema.live.demo`). |
+| Live | Registri `live.instances` (heartbeat 5 dtk, mati bila > 15 dtk). `streams.owner_instance` = replika yang memegang publisher & transcoder; watchdog hanya mengurus siaran miliknya atau mengambil alih (UPDATE bersyarat) siaran yang pemiliknya mati. `live.max_concurrent` dihitung global di DB. Potongan ingest browser yang mendarat di replika lain diteruskan ke `LIVE_INTERNAL_URL` pemilik (token service) atau 409 bila pemilik mati. Kanal demo hanya di satu replika (kunci advisory sesi `rave.live.demo`). |
 
 Syarat deploy:
 - **`LIVE_DIR` harus volume bersama** (NFS/EFS/RWX PVC) untuk semua replika live — segmen HLS ditulis pemilik dan dilayani replika mana pun. (Produksi besar: ganti dengan object storage + CDN.)

@@ -1,14 +1,15 @@
 import type { ReactNode } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { BOOKING_STATUS_LABEL, type BookingStatus } from '@gema/domain/booking';
+import type { BookingStatus } from '@rave/domain/booking';
+import { dict } from '@/lib/i18n';
 import { artistOrgs, promotorOrgs, useAuth } from '@/stores/auth';
 import type { OrgClaim } from '@/lib/types';
 import { Badge, cx, ErrorState, Spinner } from '@/components/ui';
 
 // ---------- Konteks org aktif (Studio: artis, Promotor: org promotor) ----------
 export const useB2BContext = create<{ artistOrgId: string | null; promotorOrgId: string | null; set: (p: Partial<{ artistOrgId: string; promotorOrgId: string }>) => void }>()(
-  persist((set) => ({ artistOrgId: null, promotorOrgId: null, set: (p) => set(p) }), { name: 'gema-b2b-context' }),
+  persist((set) => ({ artistOrgId: null, promotorOrgId: null, set: (p) => set(p) }), { name: 'rave-b2b-context' }),
 );
 
 /** Artis yang sedang dikelola di Artist Studio (org dengan artist_id). */
@@ -31,7 +32,7 @@ export function OrgSwitcher({ orgs, value, onChange, label }: { orgs: OrgClaim[]
   return (
     <label className="block">
       <span className="mb-1 block px-1 text-[11px] font-bold tracking-wide text-b2b-muted uppercase">{label}</span>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-lg border border-b2b-line bg-b2b-bg px-3 py-2 text-sm font-bold text-b2b-ink">
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-none border border-b2b-line bg-b2b-bg px-3 py-2 text-sm font-bold text-b2b-ink">
         {orgs.map((o) => (
           <option key={o.id} value={o.id}>
             {o.name}
@@ -63,20 +64,17 @@ const TONE: Partial<Record<BookingStatus, 'neutral' | 'green' | 'blue' | 'amber'
   DISPUTED: 'red',
 };
 export function BookingStatusBadge({ status }: { status: string }) {
-  return <Badge tone={TONE[status as BookingStatus] ?? 'neutral'}>{BOOKING_STATUS_LABEL[status as BookingStatus] ?? status}</Badge>;
+  return <Badge tone={TONE[status as BookingStatus] ?? 'neutral'}>{bookingStatusLabel(status)}</Badge>;
 }
 
-export const CATEGORY_LABEL: Record<string, string> = {
-  KAMPUS: 'Kampus',
-  PENSI: 'Pensi Sekolah',
-  FESTIVAL: 'Festival',
-  KORPORAT: 'Korporat',
-  WEDDING: 'Wedding/Private',
-  CAFE_CLUB: 'Café/Club',
-  SHOWCASE: 'Showcase',
-};
-export const FORMAT_LABEL: Record<string, string> = { FULL_BAND: 'Full Band', AKUSTIK: 'Akustik', DJ_SOLO: 'DJ/Solo' };
-export const ZONE_LABEL: Record<string, string> = { DALAM_KOTA: 'Dalam kota', JAWA: 'Jawa', LUAR_JAWA: 'Luar Jawa', LUAR_NEGERI: 'Luar negeri' };
+// Label dibaca dari kamus saat render (bahasa aktif) — bukan konstanta modul.
+export const bookingStatusLabel = (s: string) => (dict('b2b').bookingStatus as Record<string, string>)[s] ?? s;
+export const categoryLabels = (): Record<string, string> => dict('b2b').category;
+export const formatLabels = (): Record<string, string> => dict('b2b').format;
+export const zoneLabels = (): Record<string, string> => dict('b2b').zone;
+export const categoryLabel = (k: string) => categoryLabels()[k] ?? k;
+export const formatLabel = (k: string) => formatLabels()[k] ?? k;
+export const zoneLabel = (k: string) => zoneLabels()[k] ?? k;
 export const CITIES = ['Jakarta', 'Bandung', 'Yogyakarta', 'Surabaya', 'Malang', 'Bali', 'Medan', 'Semarang', 'Makassar', 'Solo'];
 export const GENRES = ['indie-pop', 'folk', 'akustik', 'rock', 'post-punk', 'indie-rock', 'r-n-b', 'soul', 'shoegaze', 'dream-pop', 'hip-hop', 'pop', 'electronic', 'jazz'];
 
@@ -95,7 +93,7 @@ export function QueryState({ q, children, empty }: { q: { isLoading: boolean; er
 
 export function Table({ head, children, className }: { head: ReactNode[]; children: ReactNode; className?: string }) {
   return (
-    <div className={cx('overflow-x-auto rounded-xl border border-b2b-line bg-b2b-card', className)}>
+    <div className={cx('overflow-x-auto rounded-none border border-b2b-line bg-b2b-card', className)}>
       <table className="w-full text-left text-sm">
         <thead className="border-b border-b2b-line bg-b2b-bg/60 text-xs font-bold tracking-wide text-b2b-muted uppercase">
           <tr>
@@ -114,7 +112,7 @@ export function Table({ head, children, className }: { head: ReactNode[]; childr
 
 export function Empty({ title, body, action }: { title: string; body?: string; action?: ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed border-b2b-line bg-b2b-card px-6 py-12 text-center">
+    <div className="rounded-none border border-dashed border-b2b-line bg-b2b-card px-6 py-12 text-center">
       <p className="font-bold text-b2b-ink">{title}</p>
       {body && <p className="mx-auto mt-1 max-w-md text-sm text-b2b-muted">{body}</p>}
       {action && <div className="mt-4">{action}</div>}
@@ -183,4 +181,14 @@ export function downloadText(filename: string, text: string, type = 'text/csv') 
   a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Sapaan sesuai jam lokal pengguna — dipakai judul dasbor agar terasa personal. */
+export function greeting(d = new Date()): string {
+  const h = d.getHours();
+  const g = dict('b2b').greeting;
+  if (h < 11) return g.morning;
+  if (h < 15) return g.midday;
+  if (h < 18) return g.afternoon;
+  return g.evening;
 }

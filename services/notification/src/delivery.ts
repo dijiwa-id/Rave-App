@@ -1,4 +1,4 @@
-import type { Job } from '@gema/service-kit';
+import type { Job } from '@rave/service-kit';
 
 /**
  * Worker kanal luar (push FCM/APNs, email, WhatsApp Business API).

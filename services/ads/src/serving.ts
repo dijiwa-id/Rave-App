@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { AD_OUTCOME_LABEL, categoryViolation, evaluateAdBreak, type AdBreakOutcome, type AdPlacement, type AdPolicy, type ListenerAdState } from '@gema/domain/ads';
-import { callService, conflict, notFound, requireAuth, settings, uuidv7, z, type AuthUser, type Db, type ServiceContext } from '@gema/service-kit';
+import { AD_OUTCOME_LABEL, categoryViolation, evaluateAdBreak, type AdBreakOutcome, type AdPlacement, type AdPolicy, type ListenerAdState } from '@rave/domain/ads';
+import { callService, conflict, notFound, requireAuth, settings, uuidv7, z, type AuthUser, type Db, type ServiceContext } from '@rave/service-kit';
 
 /** Kebijakan efektif dari pengaturan platform (Super Admin → Pengaturan → Iklan). */
 export function currentPolicy(): AdPolicy {
@@ -192,7 +192,7 @@ function creativeOut(impressionId: string, c: any) {
     theme_color: c.theme_color,
     duration_s: c.duration_s,
     skippable_after_s: skippable ? Math.min(settings.num('ads.skip_after_seconds'), c.duration_s) : null,
-    label: c.is_house ? 'Dari GEMA' : 'Iklan',
+    label: c.is_house ? 'Dari RAVE' : 'Iklan',
     is_house: c.is_house,
   };
 }

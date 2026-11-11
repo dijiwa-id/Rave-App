@@ -8,6 +8,7 @@ import { QueryState, Table, useCurrentArtist } from '@/components/b2b/common';
 import { KycForm } from '@/components/b2b/OrgOnboarding';
 import { useModule } from '@/components/ModuleGate';
 import { managementOrgs, useAuth } from '@/stores/auth';
+import { useDict } from '@/lib/i18n';
 
 interface OrgDetail {
   id: string;
@@ -32,6 +33,7 @@ function ManagementPanel({ orgId, myRole }: { orgId: string; myRole?: string }) 
   const [mgmt, setMgmt] = useState('');
   const [busy, setBusy] = useState(false);
   const canLink = ['OWNER', 'ADMIN'].includes(myRole ?? '');
+  const t = useDict('b2b').studio.team;
   async function link() {
     setBusy(true);
     try {
@@ -39,7 +41,7 @@ function ManagementPanel({ orgId, myRole }: { orgId: string; myRole?: string }) 
       await forceRefresh();
       useAuth.getState().setUser(await api<Me>('/v1/me'));
       qc.invalidateQueries({ queryKey: ['org', orgId] });
-      toast.success('Artis masuk roster manajemen');
+      toast.success(t.linked);
     } catch (e) {
       toast.error(e);
     } finally {
@@ -47,25 +49,25 @@ function ManagementPanel({ orgId, myRole }: { orgId: string; myRole?: string }) 
     }
   }
   return (
-    <Card title="Manajemen">
+    <Card title={t.management}>
       <QueryState q={q}>
         {q.data?.managed_by?.length ? (
           <ul className="space-y-1 text-sm">
             {q.data.managed_by.map((m) => (
               <li key={m.id} className="flex items-center justify-between">
                 <span className="font-semibold">{m.name}</span>
-                <Badge tone="purple">Mengelola artis ini</Badge>
+                <Badge tone="purple">{t.managesThis}</Badge>
               </li>
             ))}
           </ul>
         ) : (
-          <p className="text-sm text-b2b-muted">Artis ini belum dikelola manajemen.</p>
+          <p className="text-sm text-b2b-muted">{t.notManaged}</p>
         )}
       </QueryState>
       {canLink && candidates.length > 0 ? (
         <div className="mt-4 flex flex-wrap items-end gap-2">
           <div className="min-w-56 flex-1">
-            <Field label="Tautkan ke roster manajemen Anda">
+            <Field label={t.linkToRoster}>
               <Select value={mgmt || candidates[0].id} onChange={(e) => setMgmt(e.target.value)}>
                 {candidates.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -76,12 +78,12 @@ function ManagementPanel({ orgId, myRole }: { orgId: string; myRole?: string }) 
             </Field>
           </div>
           <Button variant="ink" loading={busy} onClick={link}>
-            Tautkan
+            {t.link}
           </Button>
         </div>
       ) : (
         <p className="mt-3 text-xs text-b2b-muted">
-          Ingin dikelola manajemen? Undang manajer Anda sebagai <strong>Admin</strong> di panel Anggota; manajer lalu menautkan artis ini ke rosternya dari halaman ini.
+          {t.wantMgmtPre}<strong>{t.wantMgmtAdmin}</strong>{t.wantMgmtPost}
         </p>
       )}
     </Card>
@@ -96,13 +98,14 @@ export function TeamPanel({ orgId, myRole }: { orgId: string; myRole?: string })
   const [role, setRole] = useState('MEMBER');
   const [busy, setBusy] = useState(false);
   const canInvite = !myRole || ['OWNER', 'ADMIN'].includes(myRole);
+  const t = useDict('b2b').studio.team;
   async function invite(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     try {
       await api(`/v1/orgs/${orgId}/members`, { body: { email, role } });
       setEmail('');
-      toast.success('Anggota ditambahkan');
+      toast.success(t.memberAdded);
       qc.invalidateQueries({ queryKey: ['org', orgId] });
     } catch (err) {
       toast.error(err);
@@ -111,9 +114,9 @@ export function TeamPanel({ orgId, myRole }: { orgId: string; myRole?: string })
     }
   }
   return (
-    <Card title={<span>Anggota {q.data?.name ? `· ${q.data.name}` : ''} {q.data?.verified && <Badge tone="green">Terverifikasi</Badge>}</span>}>
+    <Card title={<span>{t.members} {q.data?.name ? `· ${q.data.name}` : ''} {q.data?.verified && <Badge tone="green">{t.verified}</Badge>}</span>}>
       <QueryState q={q}>
-        <Table head={['Nama', 'Email', 'Peran', 'Bergabung']}>
+        <Table head={[t.head.name, t.head.email, t.head.role, t.head.joined]}>
           {q.data?.members.map((m) => (
             <tr key={m.user_id ?? m.id ?? m.email}>
               <td className="px-4 py-2.5 font-semibold">{m.display_name ?? '—'}</td>
@@ -129,11 +132,11 @@ export function TeamPanel({ orgId, myRole }: { orgId: string; myRole?: string })
       {canInvite && (
         <form onSubmit={invite} className="mt-4 flex flex-wrap items-end gap-2">
           <div className="min-w-56 flex-1">
-            <Field label="Undang via email">
-              <Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nama@email.com" />
+            <Field label={t.inviteByEmail}>
+              <Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t.emailPlaceholder} />
             </Field>
           </div>
-          <Field label="Peran">
+          <Field label={t.role}>
             <Select value={role} onChange={(e) => setRole(e.target.value)}>
               <option value="ADMIN">Admin</option>
               <option value="FINANCE">Finance</option>
@@ -142,11 +145,11 @@ export function TeamPanel({ orgId, myRole }: { orgId: string; myRole?: string })
             </Select>
           </Field>
           <Button variant="ink" type="submit" loading={busy}>
-            Undang
+            {t.invite}
           </Button>
         </form>
       )}
-      <p className="mt-3 text-xs text-b2b-muted">Aksi sensitif (ubah rate card, terima offer, tanda tangan, ubah rekening) tercatat di audit log. Owner/Finance wajib MFA.</p>
+      <p className="mt-3 text-xs text-b2b-muted">{t.auditNote}</p>
     </Card>
   );
 }
@@ -160,15 +163,16 @@ function FeeSplits({ artistId }: { artistId: string }) {
   });
   const [items, setItems] = useState<SplitItem[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const t = useDict('b2b').studio.team;
   useEffect(() => {
-    if (q.data && !items) setItems(q.data.items.length ? q.data.items : [{ label: 'Artis/Band', pct: 80 }, { label: 'Manajemen fee', pct: 20 }]);
+    if (q.data && !items) setItems(q.data.items.length ? q.data.items : [{ label: t.defaultArtist, pct: 80 }, { label: t.defaultMgmt, pct: 20 }]);
   }, [q.data, items]);
   const total = Math.round((items ?? []).reduce((a, x) => a + (Number(x.pct) || 0), 0) * 100) / 100;
   async function save() {
     setBusy(true);
     try {
       await api(`/v1/booking/artists/${artistId}/fee-splits`, { method: 'PUT', body: { items } });
-      toast.success('Split fee disimpan — berlaku otomatis saat pencairan');
+      toast.success(t.feeSaved);
     } catch (e) {
       toast.error(e);
     } finally {
@@ -177,15 +181,15 @@ function FeeSplits({ artistId }: { artistId: string }) {
   }
   return (
     <Card
-      title="Split fee show (band, additional, kru, manajemen)"
-      action={<span className={`text-sm font-extrabold ${total === 100 ? 'text-emerald-600' : 'text-red-600'}`}>Total {total}%</span>}
+      title={t.feeTitle}
+      action={<span className={`text-sm font-extrabold ${total === 100 ? 'text-emerald-600' : 'text-red-600'}`}>{t.total(total)}</span>}
     >
       <div className="space-y-2">
         {(items ?? []).map((it, i) => (
           <div key={i} className="grid grid-cols-[1fr_100px_24px] gap-2">
-            <Input value={it.label} placeholder="mis. Gitaris, Kru, Manajemen" onChange={(e) => setItems(items!.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
-            <Input type="number" min={0} max={100} step={0.5} value={it.pct} onChange={(e) => setItems(items!.map((x, j) => (j === i ? { ...x, pct: Number(e.target.value) } : x)))} aria-label="Persen" />
-            <button aria-label="Hapus" onClick={() => setItems(items!.filter((_, j) => j !== i))} className="text-b2b-muted hover:text-red-600">
+            <Input value={it.label} placeholder={t.feePlaceholder} onChange={(e) => setItems(items!.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
+            <Input type="number" min={0} max={100} step={0.5} value={it.pct} onChange={(e) => setItems(items!.map((x, j) => (j === i ? { ...x, pct: Number(e.target.value) } : x)))} aria-label={t.percent} />
+            <button aria-label={t.remove} onClick={() => setItems(items!.filter((_, j) => j !== i))} className="text-b2b-muted hover:text-red-600">
               <Trash2 className="size-4" />
             </button>
           </div>
@@ -193,13 +197,13 @@ function FeeSplits({ artistId }: { artistId: string }) {
       </div>
       <div className="mt-3 flex items-center justify-between">
         <button onClick={() => setItems([...(items ?? []), { label: '', pct: 0 }])} className="flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
-          <Plus className="size-4" /> Tambah pihak
+          <Plus className="size-4" /> {t.addParty}
         </button>
         <Button variant="ink" size="sm" loading={busy} disabled={total !== 100} onClick={save}>
-          Simpan split
+          {t.saveSplit}
         </Button>
       </div>
-      <p className="mt-3 text-xs text-b2b-muted">Ditetapkan sekali dan dieksekusi otomatis oleh escrow saat pencairan (setelah komisi platform & PPh).</p>
+      <p className="mt-3 text-xs text-b2b-muted">{t.feeNote}</p>
     </Card>
   );
 }
@@ -207,9 +211,10 @@ function FeeSplits({ artistId }: { artistId: string }) {
 export default function StudioTeam() {
   const artist = useCurrentArtist()!;
   const booking = useModule('booking');
+  const t = useDict('b2b').studio.team;
   return (
     <div>
-      <PageHeader title="Tim, Split Fee & KYC" subtitle="Satu manajemen dapat mengelola banyak artis; satu artis dapat punya manajemen dan label." />
+      <PageHeader title={t.title} subtitle={t.subtitle} />
       <div className="grid gap-6 lg:grid-cols-2">
         <TeamPanel orgId={artist.id} myRole={artist.role} />
         {booking && <FeeSplits artistId={artist.artist_id!} />}

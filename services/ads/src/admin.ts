@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { AD_CATEGORIES, AD_FIXED_RULES, AD_OUTCOME_LABEL, categoryViolation, evaluateAdBreak, type AdBreakOutcome } from '@gema/domain/ads';
-import { audit, badRequest, conflict, forbidden, hasPermission, HttpError, isSuperAdmin, notFound, requirePermission, requireRole, settings, uuidv7, z, type Db, type ServiceContext } from '@gema/service-kit';
+import { AD_CATEGORIES, AD_FIXED_RULES, AD_OUTCOME_LABEL, categoryViolation, evaluateAdBreak, type AdBreakOutcome } from '@rave/domain/ads';
+import { audit, badRequest, conflict, forbidden, hasPermission, HttpError, isSuperAdmin, notFound, requirePermission, requireRole, settings, uuidv7, z, type Db, type ServiceContext } from '@rave/service-kit';
 import { currentPolicy, eligibility, isUuid } from './serving.js';
 
 const STATUSES = ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'PAUSED', 'ENDED'] as const;
@@ -46,7 +46,7 @@ function policyErrors(c: CampaignInput): { path: string; message: string }[] {
   if (c.type === 'audio' && !c.audio_url) e.push({ path: 'audio_url', message: 'Iklan audio wajib berkas audio' });
   for (const k of ['image_url', 'audio_url', 'click_url'] as const) {
     const u = c[k];
-    // Tautan internal ("/premium", "/app/live") diizinkan untuk promosi GEMA; tautan luar wajib HTTPS.
+    // Tautan internal ("/premium", "/app/live") diizinkan untuk promosi RAVE; tautan luar wajib HTTPS.
     if (u && !u.startsWith('https://') && !(c.is_house && u.startsWith('/'))) e.push({ path: k, message: 'Wajib URL HTTPS' });
   }
   if (c.end_at && c.start_at && new Date(c.end_at) <= new Date(c.start_at)) e.push({ path: 'end_at', message: 'Harus setelah tanggal mulai' });
@@ -113,7 +113,7 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
     return r;
   }
   const reject422 = (errors: { path: string; message: string }[]) =>
-    new HttpError(422, 'Unprocessable Entity', errors[0].message, { type: 'https://gema.id/problems/ad-policy', errors });
+    new HttpError(422, 'Unprocessable Entity', errors[0].message, { type: 'https://rave.id/problems/ad-policy', errors });
 
   async function save(db: Db, id: string, c: CampaignInput, status: string, req: FastifyRequest, insert: boolean) {
     const vals = [

@@ -1,5 +1,5 @@
-import { CONTRACT_STATUS_LABEL, type ContractStatus } from '@gema/domain';
-import type { Client, Job } from '@gema/service-kit';
+import { CONTRACT_STATUS_LABEL, type ContractStatus } from '@rave/domain';
+import type { Client, Job } from '@rave/service-kit';
 import type { ContractData } from './contract-data.js';
 import { renderContractHtml } from './contract-template.js';
 import { renderPdf } from './contract-pdf.js';

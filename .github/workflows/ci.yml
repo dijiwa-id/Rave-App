@@ -4,17 +4,21 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16-alpine
-        env: { POSTGRES_USER: gema, POSTGRES_PASSWORD: gema, POSTGRES_DB: gema }
+        env: { POSTGRES_USER: rave, POSTGRES_PASSWORD: rave, POSTGRES_DB: rave }
         ports: ['55432:5432']
-        options: --health-cmd "pg_isready -U gema" --health-interval 5s --health-retries 20
+        options: --health-cmd "pg_isready -U rave" --health-interval 5s --health-retries 20
     env:
-      DATABASE_URL: postgres://gema:gema@127.0.0.1:55432/gema
+      DATABASE_URL: postgres://rave:rave@127.0.0.1:55432/rave
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,4 +31,24 @@ jobs:
       - name: Migrasi + seed semua service
         run: npm run seed
       - name: Typecheck & build web
-        run: npm run build -w @gema/web
+        run: npm run build -w @rave/web
+
+  docker:
+    # Pastikan Dockerfile & compose tetap bisa dibangun (tanpa push).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Validasi compose
+        run: |
+          docker compose -f docker-compose.yml config -q
+          cp .env.production.example .env.production
+          sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci/' .env.production
+          docker compose -f docker-compose.prod.yml --env-file .env.production config -q
+      - name: Build image (gateway, booking, web)
+        run: |
+          for svc in gateway booking; do
+            docker buildx build -f infra/docker/Dockerfile.service --target runtime --build-arg SERVICE=$svc \
+              --cache-from type=gha --cache-to type=gha,mode=max -t rave-$svc:ci --load .
+          done
+          docker buildx build -f infra/docker/Dockerfile.web --cache-from type=gha --cache-to type=gha,mode=max -t rave-web:ci --load .

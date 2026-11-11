@@ -20,7 +20,7 @@ import {
   z,
   type AuthUser,
   type ServiceContext,
-} from '@gema/service-kit';
+} from '@rave/service-kit';
 import { createInvoice, invoiceView, processPgEvent, processRefundEvent, settleRefund, signPayload, verifySignature, type PgEvent } from './escrow.js';
 import { C, D, SOURCES, payableAccount, post, serial, walletBalances } from './ledger.js';
 

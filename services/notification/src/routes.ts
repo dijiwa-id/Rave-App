@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { nextCursor, notFound, pageParams, requireAuth, z, type ServiceContext } from '@gema/service-kit';
+import { nextCursor, notFound, pageParams, requireAuth, z, type ServiceContext } from '@rave/service-kit';
 
 const prefSchema = z.object({
   category: z.enum(['booking', 'payment', 'event', 'release', 'system', 'social']),

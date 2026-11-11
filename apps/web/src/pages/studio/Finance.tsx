@@ -6,11 +6,13 @@ import { useAuth } from '@/stores/auth';
 import { setting, usePlatformConfig } from '@/lib/platform';
 import { Button, Card, Field, Input, Modal, PageHeader, Select, Stat, toast } from '@/components/ui';
 import { Empty, QueryState, Table, useCurrentArtist } from '@/components/b2b/common';
-
-const SOURCE: Record<string, string> = { royalty: 'Royalti', offair: 'Off-air', ticket: 'Tiket', merch: 'Merch', tip: 'Tip' };
+import { useDict } from '@/lib/i18n';
 
 /** Wallet penerima (REQ-PAY-02): saldo per sumber + penarikan ke rekening terverifikasi. */
-export function WalletPanel({ parties, title = 'Keuangan' }: { parties: { id: string; name: string; role?: string }[]; title?: string }) {
+export function WalletPanel({ parties, title: titleProp }: { parties: { id: string; name: string; role?: string }[]; title?: string }) {
+  const t = useDict('b2b').studio.finance;
+  const SOURCE: Record<string, string> = t.sources;
+  const title = titleProp ?? t.title;
   const [partyId, setPartyId] = useState(parties[0]?.id);
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['wallet', partyId], queryFn: () => api<Wallet>(`/v1/finance/wallets/${partyId}`), enabled: !!partyId });
@@ -27,7 +29,7 @@ export function WalletPanel({ parties, title = 'Keuangan' }: { parties: { id: st
         body: { party_id: partyId, amount: payout!.amount, bank_account: { bank: payout!.bank, number: payout!.number, holder: payout!.holder } },
         idempotencyKey: true,
       });
-      toast.success('Penarikan diajukan');
+      toast.success(t.payoutRequested);
       setPayout(null);
       qc.invalidateQueries({ queryKey: ['wallet', partyId] });
     } catch (e) {
@@ -41,7 +43,7 @@ export function WalletPanel({ parties, title = 'Keuangan' }: { parties: { id: st
     <div>
       <PageHeader
         title={title}
-        subtitle="Saldo terpisah per sumber. Royalti bulan N terbit paling lambat tanggal 15 bulan N+1; fee off-air cair H+1 setelah acara selesai."
+        subtitle={t.subtitle}
         actions={
           <>
             {parties.length > 1 && (
@@ -54,7 +56,7 @@ export function WalletPanel({ parties, title = 'Keuangan' }: { parties: { id: st
               </Select>
             )}
             <Button variant="ink" disabled={!b?.total || !canPayout} onClick={() => setPayout({ amount: b?.total ?? 0, bank: 'BCA', number: '', holder: party?.name ?? '' })}>
-              Tarik saldo
+              {t.withdraw}
             </Button>
           </>
         }
@@ -63,24 +65,24 @@ export function WalletPanel({ parties, title = 'Keuangan' }: { parties: { id: st
         {b && (
           <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
-              <Stat label="Total" value={fmt.idrShort(b.total)} />
+              <Stat label={t.total} value={fmt.idrShort(b.total)} />
               {Object.entries(SOURCE).map(([k, l]) => (
                 <Stat key={k} label={l} value={fmt.idrShort((b as any)[k])} />
               ))}
             </div>
-            <Card title="Riwayat transaksi">
+            <Card title={t.history}>
               {!q.data!.transactions.length ? (
-                <Empty title="Belum ada transaksi" />
+                <Empty title={t.emptyTitle} body={t.emptyBody} />
               ) : (
-                <Table head={['Tanggal', 'Sumber', 'Keterangan', 'Jumlah']}>
-                  {q.data!.transactions.map((t) => (
-                    <tr key={t.id}>
-                      <td className="px-4 py-2.5 whitespace-nowrap">{fmt.dateTime(t.created_at)}</td>
-                      <td className="px-4 py-2.5">{SOURCE[t.source] ?? t.source}</td>
-                      <td className="px-4 py-2.5">{t.description}</td>
-                      <td className={`px-4 py-2.5 text-right font-bold tabular-nums ${t.amount < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
-                        {t.amount < 0 ? '− ' : '+ '}
-                        {fmt.idr(Math.abs(t.amount))}
+                <Table head={[t.head.date, t.head.source, t.head.description, t.head.amount]}>
+                  {q.data!.transactions.map((tx) => (
+                    <tr key={tx.id}>
+                      <td className="px-4 py-2.5 whitespace-nowrap">{fmt.dateTime(tx.created_at)}</td>
+                      <td className="px-4 py-2.5">{SOURCE[tx.source] ?? tx.source}</td>
+                      <td className="px-4 py-2.5">{tx.description}</td>
+                      <td className={`px-4 py-2.5 text-right font-bold tabular-nums ${tx.amount < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                        {tx.amount < 0 ? '− ' : '+ '}
+                        {fmt.idr(Math.abs(tx.amount))}
                       </td>
                     </tr>
                   ))}
@@ -90,30 +92,30 @@ export function WalletPanel({ parties, title = 'Keuangan' }: { parties: { id: st
           </div>
         )}
       </QueryState>
-      <Modal open={!!payout} onClose={() => setPayout(null)} title="Tarik saldo">
+      <Modal open={!!payout} onClose={() => setPayout(null)} title={t.withdraw}>
         {payout && (
           <div className="space-y-3">
-            <Field label="Jumlah (Rp)" hint={`Minimal ${fmt.idr(minPayout)}`}>
+            <Field label={t.amount} hint={t.min(fmt.idr(minPayout))}>
               <Input type="number" min={minPayout} max={b?.total} value={payout.amount} onChange={(e) => setPayout({ ...payout, amount: Number(e.target.value) })} />
             </Field>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Bank">
+              <Field label={t.bank}>
                 <Select value={payout.bank} onChange={(e) => setPayout({ ...payout, bank: e.target.value })}>
                   {['BCA', 'Mandiri', 'BNI', 'BRI', 'CIMB Niaga', 'Permata', 'BSI', 'Jago'].map((x) => (
                     <option key={x}>{x}</option>
                   ))}
                 </Select>
               </Field>
-              <Field label="Nomor rekening">
+              <Field label={t.accountNumber}>
                 <Input required inputMode="numeric" value={payout.number} onChange={(e) => setPayout({ ...payout, number: e.target.value })} />
               </Field>
             </div>
-            <Field label="Nama pemilik rekening">
+            <Field label={t.accountHolder}>
               <Input value={payout.holder} onChange={(e) => setPayout({ ...payout, holder: e.target.value })} />
             </Field>
-            <p className="text-xs text-b2b-muted">Nama pemilik divalidasi (account name inquiry). Perubahan rekening baru aktif setelah masa tunggu 24 jam.</p>
+            <p className="text-xs text-b2b-muted">{t.holderNote}</p>
             <Button variant="ink" loading={busy} disabled={!payout.number || payout.amount < minPayout} onClick={submit}>
-              Ajukan penarikan
+              {t.submit}
             </Button>
           </div>
         )}

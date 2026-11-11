@@ -1,5 +1,5 @@
-import type { Client, Job } from '@gema/service-kit';
-import { uuidv7 } from '@gema/service-kit';
+import type { Client, Job } from '@rave/service-kit';
+import { uuidv7 } from '@rave/service-kit';
 
 export interface NewNotification {
   category: 'booking' | 'payment' | 'event' | 'release' | 'system' | 'social';

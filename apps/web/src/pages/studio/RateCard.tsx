@@ -4,7 +4,8 @@ import { Plus, Trash2 } from 'lucide-react';
 import { api, fmt } from '@/lib/api';
 import type { RateCard, RateItem } from '@/lib/types';
 import { Button, Card, Field, Input, PageHeader, Select, toast } from '@/components/ui';
-import { CATEGORY_LABEL, FORMAT_LABEL, QueryState, ZONE_LABEL, useCurrentArtist } from '@/components/b2b/common';
+import { categoryLabels, formatLabels, QueryState, zoneLabels, useCurrentArtist } from '@/components/b2b/common';
+import { useDict } from '@/lib/i18n';
 
 const blank = (): RateItem => ({
   category: 'KAMPUS',
@@ -24,6 +25,7 @@ export default function RateCardPage() {
   const q = useQuery({ queryKey: ['rate-card', aid], queryFn: () => api<RateCard>(`/v1/booking/artists/${aid}/rate-card`) });
   const [rc, setRc] = useState<Omit<RateCard, 'artist_id' | 'from_fee'> | null>(null);
   const [saving, setSaving] = useState(false);
+  const t = useDict('b2b').studio.rateCard;
   useEffect(() => {
     if (q.data && !rc) setRc({ visibility: q.data.visibility, valid_from: q.data.valid_from, valid_to: q.data.valid_to, items: q.data.items.length ? q.data.items : [blank()] });
   }, [q.data, rc]);
@@ -40,7 +42,7 @@ export default function RateCardPage() {
         body: { ...rc, valid_from: rc!.valid_from || undefined, valid_to: rc!.valid_to || undefined },
       });
       qc.setQueryData(['rate-card', aid], r);
-      toast.success('Rate card disimpan (tercatat di audit log)');
+      toast.success(t.saved);
     } catch (e) {
       toast.error(e);
     } finally {
@@ -52,11 +54,11 @@ export default function RateCardPage() {
   return (
     <div>
       <PageHeader
-        title="Rate Card"
-        subtitle="Tarif per kategori acara, format, durasi, dan zona. Label dapat menetapkan harga minimum roster."
+        title={t.title}
+        subtitle={t.subtitle}
         actions={
           <Button variant="ink" loading={saving} disabled={!rc} onClick={save}>
-            Simpan
+            {t.save}
           </Button>
         }
       />
@@ -65,31 +67,31 @@ export default function RateCardPage() {
           <div className="space-y-6">
             <Card>
               <div className="grid gap-4 sm:grid-cols-4">
-                <Field label="Visibilitas">
+                <Field label={t.visibility}>
                   <Select value={rc.visibility} onChange={(e) => setRc({ ...rc, visibility: e.target.value as RateCard['visibility'] })}>
-                    <option value="PUBLIC">Publik (“mulai dari”)</option>
-                    <option value="VERIFIED_PROMOTOR">Hanya promotor terverifikasi</option>
-                    <option value="BY_REQUEST">By request</option>
+                    <option value="PUBLIC">{t.public}</option>
+                    <option value="VERIFIED_PROMOTOR">{t.verifiedOnly}</option>
+                    <option value="BY_REQUEST">{t.byRequest}</option>
                   </Select>
                 </Field>
-                <Field label="Berlaku dari">
+                <Field label={t.validFrom}>
                   <Input type="date" value={rc.valid_from ?? ''} onChange={(e) => setRc({ ...rc, valid_from: e.target.value || null })} />
                 </Field>
-                <Field label="Berlaku sampai">
+                <Field label={t.validTo}>
                   <Input type="date" value={rc.valid_to ?? ''} onChange={(e) => setRc({ ...rc, valid_to: e.target.value || null })} />
                 </Field>
-                <div className="rounded-xl bg-b2b-bg p-3">
-                  <p className="text-xs font-semibold text-b2b-muted uppercase">Tampil sebagai</p>
-                  <p className="text-lg font-extrabold">{rc.visibility === 'BY_REQUEST' ? 'By request' : `Mulai ${fmt.idrShort(minFee)}`}</p>
+                <div className="rounded-none bg-b2b-bg p-3">
+                  <p className="text-xs font-semibold text-b2b-muted uppercase">{t.shownAs}</p>
+                  <p className="text-lg font-extrabold">{rc.visibility === 'BY_REQUEST' ? t.byRequest : t.from(fmt.idrShort(minFee))}</p>
                 </div>
               </div>
             </Card>
-            <div className="overflow-x-auto rounded-xl border border-b2b-line bg-b2b-card">
+            <div className="overflow-x-auto rounded-none border border-b2b-line bg-b2b-card">
               <table className="w-full min-w-[960px] text-sm">
                 <thead className="border-b border-b2b-line bg-b2b-bg/60 text-left text-xs font-bold text-b2b-muted uppercase">
                   <tr>
-                    {['Kategori', 'Format', 'Zona', 'Durasi (mnt)', 'Fee artis', 'Estimasi rider', 'Akomodasi', 'Transport', ''].map((h) => (
-                      <th key={h} className="px-3 py-3">
+                    {[t.head.category, t.head.format, t.head.zone, t.head.duration, t.head.fee, t.head.rider, t.head.accommodation, t.head.transport, ''].map((h, hi) => (
+                      <th key={hi} className="px-3 py-3">
                         {h}
                       </th>
                     ))}
@@ -100,7 +102,7 @@ export default function RateCardPage() {
                     <tr key={i}>
                       <td className="px-2 py-2">
                         <Select value={it.category} onChange={(e) => upd(i, { category: e.target.value })}>
-                          {Object.entries(CATEGORY_LABEL).map(([k, v]) => (
+                          {Object.entries(categoryLabels()).map(([k, v]) => (
                             <option key={k} value={k}>
                               {v}
                             </option>
@@ -109,7 +111,7 @@ export default function RateCardPage() {
                       </td>
                       <td className="px-2 py-2">
                         <Select value={it.format} onChange={(e) => upd(i, { format: e.target.value })}>
-                          {Object.entries(FORMAT_LABEL).map(([k, v]) => (
+                          {Object.entries(formatLabels()).map(([k, v]) => (
                             <option key={k} value={k}>
                               {v}
                             </option>
@@ -118,7 +120,7 @@ export default function RateCardPage() {
                       </td>
                       <td className="px-2 py-2">
                         <Select value={it.zone} onChange={(e) => upd(i, { zone: e.target.value })}>
-                          {Object.entries(ZONE_LABEL).map(([k, v]) => (
+                          {Object.entries(zoneLabels()).map(([k, v]) => (
                             <option key={k} value={k}>
                               {v}
                             </option>
@@ -135,13 +137,13 @@ export default function RateCardPage() {
                         <Input type="number" min={0} step={500000} value={it.rider_estimate} onChange={(e) => upd(i, { rider_estimate: Number(e.target.value) })} />
                       </td>
                       <td className="px-3 py-2 text-center">
-                        <input type="checkbox" aria-label="Akomodasi ditanggung promotor" checked={it.accommodation_by_promotor} onChange={(e) => upd(i, { accommodation_by_promotor: e.target.checked })} />
+                        <input type="checkbox" aria-label={t.accommodationAria} checked={it.accommodation_by_promotor} onChange={(e) => upd(i, { accommodation_by_promotor: e.target.checked })} />
                       </td>
                       <td className="px-3 py-2 text-center">
-                        <input type="checkbox" aria-label="Transport ditanggung promotor" checked={it.transport_by_promotor} onChange={(e) => upd(i, { transport_by_promotor: e.target.checked })} />
+                        <input type="checkbox" aria-label={t.transportAria} checked={it.transport_by_promotor} onChange={(e) => upd(i, { transport_by_promotor: e.target.checked })} />
                       </td>
                       <td className="px-2 py-2">
-                        <button aria-label="Hapus baris" onClick={() => setRc({ ...rc, items: rc.items.filter((_, j) => j !== i) })} className="text-b2b-muted hover:text-red-600">
+                        <button aria-label={t.removeRow} onClick={() => setRc({ ...rc, items: rc.items.filter((_, j) => j !== i) })} className="text-b2b-muted hover:text-red-600">
                           <Trash2 className="size-4" />
                         </button>
                       </td>
@@ -151,11 +153,11 @@ export default function RateCardPage() {
               </table>
               <div className="border-t border-b2b-line p-3">
                 <button onClick={() => setRc({ ...rc, items: [...rc.items, blank()] })} className="flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
-                  <Plus className="size-4" /> Tambah tarif
+                  <Plus className="size-4" /> {t.addRate}
                 </button>
               </div>
             </div>
-            <p className="text-xs text-b2b-muted">Centang = ditanggung promotor. Pajak (PPh) dipotong saat pencairan sesuai status pajak penerima.</p>
+            <p className="text-xs text-b2b-muted">{t.note}</p>
           </div>
         )}
       </QueryState>

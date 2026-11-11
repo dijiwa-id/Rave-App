@@ -72,7 +72,7 @@ export async function renderPdf(html: string, footer: { contractNo: string; vers
       headerTemplate: '<span></span>',
       footerTemplate: `<div style="width:100%;font:8px sans-serif;color:#555;padding:0 18mm;display:flex;justify-content:space-between">
         <span>${esc(footer.contractNo)} · Versi ${footer.version}${footer.note ? ' · ' + esc(footer.note) : ''}</span>
-        <span>GEMA — Dokumen elektronik · Halaman <span class="pageNumber"></span>/<span class="totalPages"></span></span></div>`,
+        <span>RAVE — Dokumen elektronik · Halaman <span class="pageNumber"></span>/<span class="totalPages"></span></span></div>`,
       margin: { top: '22mm', bottom: '24mm', left: '18mm', right: '18mm' },
     });
     return { pdf: Buffer.from(pdf), blocked };

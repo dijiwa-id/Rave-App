@@ -1,5 +1,5 @@
-import { SEED, SEED_CITIES, SEED_TRACKS } from '@gema/domain';
-import type { ServiceContext } from '@gema/service-kit';
+import { SEED, SEED_CITIES, SEED_TRACKS } from '@rave/domain';
+import type { ServiceContext } from '@rave/service-kit';
 import { todayWib } from './util.js';
 
 // Harus selaras dengan services/catalog/src/seed-data.ts (MONTHLY_LISTENERS).

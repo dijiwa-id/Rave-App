@@ -1,4 +1,4 @@
-import type { AdminPermission } from '@gema/domain/settings';
+import type { AdminPermission } from '@rave/domain/settings';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Me, OrgClaim, TokenResponse } from '@/lib/types';
@@ -22,14 +22,14 @@ export const useAuth = create<AuthState>()(
       setUser: (user) => set({ user }),
       clear: () => set({ accessToken: null, refreshToken: null, user: null }),
     }),
-    { name: 'gema-auth' },
+    { name: 'rave-auth' },
   ),
 );
 
 // Sinkron antar-tab: token yang diperbarui / logout di tab lain langsung berlaku di tab ini.
 if (typeof window !== 'undefined')
   window.addEventListener('storage', (e) => {
-    if (e.key === 'gema-auth') void useAuth.persist.rehydrate();
+    if (e.key === 'rave-auth') void useAuth.persist.rehydrate();
   });
 
 export const hasRole = (u: Me | null, ...roles: string[]) => !!u && (u.roles.includes('admin') || roles.some((r) => u.roles.includes(r)));

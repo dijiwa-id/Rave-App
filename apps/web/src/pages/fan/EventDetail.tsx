@@ -10,13 +10,9 @@ import { colorFor, DarkError } from '@/components/fan';
 import { cx, Modal, PageLoader, toast } from '@/components/ui';
 import { EventLiveCard } from '@/components/live/EventLiveCard';
 import { setting, usePlatformConfig } from '@/lib/platform';
+import { localeTag, useDict } from '@/lib/i18n';
 
-const METHODS = [
-  ['QRIS', 'QRIS'],
-  ['VA', 'Virtual Account'],
-  ['EWALLET', 'E-wallet'],
-  ['CARD', 'Kartu'],
-] as const;
+const METHODS = ['QRIS', 'VA', 'EWALLET', 'CARD'] as const;
 
 function Countdown({ until }: { until: string }) {
   const [now, setNow] = useState(Date.now());
@@ -29,7 +25,8 @@ function Countdown({ until }: { until: string }) {
 }
 
 function Checkout({ order, invoice, onClose }: { order: Order; invoice: Invoice; onClose: () => void }) {
-  const [method, setMethod] = useState<(typeof METHODS)[number][0]>('QRIS');
+  const [method, setMethod] = useState<(typeof METHODS)[number]>('QRIS');
+  const d = useDict('fan');
   const nav = useNavigate();
   async function pay() {
     await api(`/v1/finance/invoices/${invoice.id}/simulate-pay`, { body: { method }, idempotencyKey: `pay-${invoice.id}` });
@@ -42,7 +39,7 @@ function Checkout({ order, invoice, onClose }: { order: Order; invoice: Invoice;
   }
   return (
     <div className="space-y-5">
-      <div className="rounded-lg bg-black/30 p-4 text-sm">
+      <div className="rounded-none bg-black/30 p-4 text-sm">
         {order.items.map((it) => (
           <p key={it.ticket_type_id} className="flex justify-between">
             <span>
@@ -53,44 +50,44 @@ function Checkout({ order, invoice, onClose }: { order: Order; invoice: Invoice;
         ))}
         <hr className="my-3 border-white/10" />
         <p className="flex justify-between text-base font-bold">
-          <span>Total tagihan</span>
+          <span>{d.event.totalDue}</span>
           <span>{fmt.idr(invoice.amount)}</span>
         </p>
-        <p className="mt-2 flex items-center gap-1.5 text-xs text-gema-muted">
-          <Clock className="size-3.5" /> Kuota ditahan selama <Countdown until={order.reserved_until} />
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-rave-muted">
+          <Clock className="size-3.5" /> {d.event.heldFor} <Countdown until={order.reserved_until} />
         </p>
       </div>
       <fieldset>
-        <legend className="mb-2 text-sm font-bold">Metode pembayaran</legend>
+        <legend className="mb-2 text-sm font-bold">{d.event.paymentMethod}</legend>
         <div className="grid grid-cols-2 gap-2">
-          {METHODS.map(([v, l]) => (
-            <button key={v} type="button" onClick={() => setMethod(v)} aria-pressed={method === v} className={cx('rounded-lg border px-3 py-2.5 text-sm font-bold', method === v ? 'border-gema-primary bg-gema-primary/10 text-gema-primary-text' : 'border-white/20 hover:border-white/50')}>
-              {l}
+          {METHODS.map((v) => (
+            <button key={v} type="button" onClick={() => setMethod(v)} aria-pressed={method === v} className={cx('rounded-none border px-3 py-2.5 text-sm font-bold', method === v ? 'border-rave-primary bg-rave-primary/10 text-rave-primary-text' : 'border-white/20 hover:border-white/50')}>
+              {d.event.methods[v]}
             </button>
           ))}
         </div>
-        {method === 'VA' && invoice.va_number && <p className="mt-2 text-xs text-gema-muted">No. VA: <span className="font-mono text-white">{invoice.va_number}</span></p>}
+        {method === 'VA' && invoice.va_number && <p className="mt-2 text-xs text-rave-muted">{d.event.vaNumber} <span className="font-mono text-white">{invoice.va_number}</span></p>}
       </fieldset>
       <div className="flex justify-center">
         <SlideCommit
-          label={`Geser untuk bayar ${fmt.idrShort(invoice.amount)}`}
-          doneLabel="Pembayaran berhasil"
-          errorLabel="Pembayaran gagal"
+          label={d.event.slideToPay(fmt.idrShort(invoice.amount))}
+          doneLabel={d.event.paySuccess}
+          errorLabel={d.event.payFailed}
           onConfirm={pay}
           onDone={() => {
-            toast.success('Tiket terbit! Lihat di Tiket Saya.');
+            toast.success(d.event.ticketsIssued);
             onClose();
             nav('/app/tickets');
           }}
           onError={(e) => toast.error(e)}
           width={340}
-          handleColor="#DA1C5C"
-          successColor="#DA1C5C"
+          handleColor="#8A2F3F"
+          successColor="#8A2F3F"
         />
       </div>
-      <p className="flex items-start gap-2 text-xs text-gema-muted">
-        <ShieldCheck className="size-4 shrink-0 text-gema-primary-text" />
-        Sandbox pembayaran (dev). Dana tiket ditahan dan dicairkan ke promotor setelah acara selesai.
+      <p className="flex items-start gap-2 text-xs text-rave-muted">
+        <ShieldCheck className="size-4 shrink-0 text-rave-primary-text" />
+        {d.event.sandboxNote}
       </p>
     </div>
   );
@@ -99,14 +96,15 @@ function Checkout({ order, invoice, onClose }: { order: Order; invoice: Invoice;
 /** Ringkasan kebijakan refund platform (`refund.*`) — ditampilkan sebelum pembeli membayar. */
 function RefundPolicyNote() {
   const cfg = usePlatformConfig();
+  const d = useDict('fan');
   const buyer = setting<boolean>(cfg, 'refund.buyer_request_enabled', false);
   const pct = setting<number>(cfg, 'refund.buyer_refund_pct', 80);
   const days = setting<number>(cfg, 'refund.buyer_deadline_days', 7);
   const sla = setting<number>(cfg, 'refund.event_cancel_sla_days', 14);
   return (
-    <p className="mt-3 text-xs leading-relaxed text-gema-muted">
-      {buyer ? `Refund ${pct}% harga tiket bisa diajukan sampai H-${days}. ` : 'Tiket tidak dapat direfund atas permintaan sendiri. '}
-      Event batal atau jadwal berubah: refund penuh termasuk biaya layanan, maks. {sla} hari. QR dinamis tidak dapat di-screenshot.
+    <p className="mt-3 text-xs leading-relaxed text-rave-muted">
+      {buyer ? d.event.refundBuyer(pct, days) : d.event.refundNoBuyer}
+      {d.event.refundPolicy(sla)}
     </p>
   );
 }
@@ -116,6 +114,7 @@ export default function EventDetail() {
   const key = slug ?? idOrSlug;
   const token = useAuth((s) => s.accessToken);
   const nav = useNavigate();
+  const d = useDict('fan');
   const q = useQuery({ queryKey: ['event', key], queryFn: () => api<EventDetailT>(`/v1/ticketing/events/${key}`) });
   const [qty, setQty] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
@@ -155,24 +154,24 @@ export default function EventDetail() {
         ) : (
           <div className="absolute inset-0 opacity-60" style={{ background: `linear-gradient(135deg, ${colorFor(e.id)}, ${colorFor(e.slug)}66)` }} />
         )}
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#121212]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#181818]" />
         <div className="relative flex flex-col gap-8 md:flex-row md:items-end">
           {e.poster_url ? (
-            <img src={e.poster_url} alt={`Poster ${e.title}`} className="size-56 rounded-lg object-cover shadow-2xl md:size-72" />
+            <img src={e.poster_url} alt={d.event.poster(e.title)} className="size-56 rounded-none object-cover shadow-2xl md:size-72" />
           ) : (
-            <div role="img" aria-label={`Poster ${e.title}`} className="grid size-56 shrink-0 place-items-center rounded-lg shadow-2xl md:size-72" style={{ background: `linear-gradient(135deg, ${colorFor(e.id)}, ${colorFor(e.slug)})` }}>
+            <div role="img" aria-label={d.event.poster(e.title)} className="grid size-56 shrink-0 place-items-center rounded-none shadow-2xl md:size-72" style={{ background: `linear-gradient(135deg, ${colorFor(e.id)}, ${colorFor(e.slug)})` }}>
               <Ticket className="size-16 text-white/70" />
             </div>
           )}
           <div>
-            <p className="text-sm font-bold">Event</p>
+            <p className="text-sm font-bold">{d.event.kicker}</p>
             <h1 className="my-3 text-4xl font-black tracking-tighter md:text-6xl">{e.title}</h1>
             <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-white/85">
               <span className="flex items-center gap-1.5">
-                <CalendarDays className="size-4" /> {start.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                <CalendarDays className="size-4" /> {start.toLocaleDateString(localeTag(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
               </span>
               <span className="flex items-center gap-1.5">
-                <Clock className="size-4" /> {start.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} waktu setempat
+                <Clock className="size-4" /> {start.toLocaleTimeString(localeTag(), { hour: '2-digit', minute: '2-digit' })} {d.event.localTime}
               </span>
               <span className="flex items-center gap-1.5">
                 <MapPin className="size-4" /> {e.venue_name}, {e.city}
@@ -185,56 +184,56 @@ export default function EventDetail() {
       <div className="grid gap-10 px-4 md:px-8 lg:grid-cols-[3fr_2fr]">
         <div>
           <section className="mb-10">
-            <h2 className="mb-4 text-2xl font-bold">Line-up</h2>
+            <h2 className="mb-4 text-2xl font-bold">{d.event.lineup}</h2>
             <div className="flex flex-wrap gap-3">
               {e.artists.map((a) => (
-                <Link key={a.id} to={`/app/artist/${a.id}`} className="rounded-full bg-white/10 px-5 py-2 font-bold hover:bg-white/20">
+                <Link key={a.id} to={`/app/artist/${a.id}`} className="rounded-none bg-white/10 px-5 py-2 font-bold hover:bg-white/20">
                   {a.name}
                 </Link>
               ))}
             </div>
           </section>
           <section className="mb-10">
-            <h2 className="mb-4 text-2xl font-bold">Tentang event</h2>
-            <p className="leading-relaxed whitespace-pre-line text-gema-muted">{e.description}</p>
+            <h2 className="mb-4 text-2xl font-bold">{d.event.about}</h2>
+            <p className="leading-relaxed whitespace-pre-line text-rave-muted">{e.description}</p>
           </section>
           <section className="mb-10">
-            <h2 className="mb-4 text-2xl font-bold">Venue</h2>
-            <div className="rounded-lg bg-white/5 p-5">
+            <h2 className="mb-4 text-2xl font-bold">{d.event.venue}</h2>
+            <div className="rounded-none bg-white/5 p-5">
               <p className="font-bold">{e.venue_name}</p>
-              <p className="text-sm text-gema-muted">{e.venue_address}</p>
-              <a href={`https://www.google.com/maps/search/${encodeURIComponent(`${e.venue_name} ${e.venue_address} ${e.city}`)}`} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-bold text-gema-primary-text hover:underline">
-                Buka di peta →
+              <p className="text-sm text-rave-muted">{e.venue_address}</p>
+              <a href={`https://www.google.com/maps/search/${encodeURIComponent(`${e.venue_name} ${e.venue_address} ${e.city}`)}`} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-bold text-rave-primary-text hover:underline">
+                {d.event.openMap}
               </a>
             </div>
           </section>
           {e.rules && (
             <section className="mb-10">
               <h2 className="mb-4 flex items-center gap-2 text-2xl font-bold">
-                <Info className="size-6" /> Aturan masuk
+                <Info className="size-6" /> {d.event.rules}
               </h2>
-              <p className="text-sm whitespace-pre-line text-gema-muted">{e.rules}</p>
+              <p className="text-sm whitespace-pre-line text-rave-muted">{e.rules}</p>
             </section>
           )}
         </div>
 
         <aside className="lg:sticky lg:top-20 lg:self-start">
           <EventLiveCard eventId={e.id} />
-          <div className="rounded-xl bg-gema-elevated p-5">
+          <div className="rounded-none bg-rave-elevated p-5">
             <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
-              <Ticket className="size-5" /> Tiket
+              <Ticket className="size-5" /> {d.event.tickets}
             </h2>
             {e.status !== 'PUBLISHED' ? (
-              <p className="text-sm text-gema-muted">
+              <p className="text-sm text-rave-muted">
                 {e.status === 'CANCELLED'
-                  ? 'Event ini dibatalkan penyelenggara. Pemegang tiket menerima refund penuh secara otomatis.'
+                  ? d.event.cancelled
                   : e.status === 'COMPLETED'
-                    ? 'Event ini sudah selesai.'
-                    : 'Penjualan tiket belum dibuka.'}
+                    ? d.event.completed
+                    : d.event.notOnSale}
               </p>
             ) : (
             <>
-            {!e.ticket_types.length && <p className="text-sm text-gema-muted">Penjualan tiket belum dibuka.</p>}
+            {!e.ticket_types.length && <p className="text-sm text-rave-muted">{d.event.notOnSale}</p>}
             <ul className="space-y-3">
               {e.ticket_types.map((t) => {
                 const n = qty[t.id] ?? 0;
@@ -242,26 +241,26 @@ export default function EventDetail() {
                 const soldOut = t.remaining <= 0;
                 const max = Math.min(t.max_per_account, t.remaining);
                 return (
-                  <li key={t.id} className="rounded-lg border border-white/10 p-3">
+                  <li key={t.id} className="rounded-none border border-white/10 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="font-bold">
                           {t.name}
-                          {t.presale && <span className="ml-2 rounded bg-gema-primary/20 px-1.5 py-0.5 text-[10px] font-bold text-gema-primary-text uppercase">Presale fan</span>}
+                          {t.presale && <span className="ml-2 rounded-none bg-rave-primary/20 px-1.5 py-0.5 text-[10px] font-bold text-rave-primary-text uppercase">{d.event.presale}</span>}
                         </p>
                         <p className="text-sm">{fmt.idr(t.price)}</p>
-                        <p className="text-xs text-gema-muted">
-                          {soldOut ? 'Habis' : notYet ? `Dibuka ${fmt.dateTime(t.sale_starts_at)}` : `Sisa ${fmt.num(t.remaining)} · maks ${t.max_per_account}/akun`}
+                        <p className="text-xs text-rave-muted">
+                          {soldOut ? d.event.soldOut : notYet ? d.event.opens(fmt.dateTime(t.sale_starts_at)) : d.event.remaining(fmt.num(t.remaining), t.max_per_account)}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button aria-label={`Kurangi ${t.name}`} disabled={!n} onClick={() => setQty({ ...qty, [t.id]: n - 1 })} className="grid size-8 place-items-center rounded-full border border-white/30 disabled:opacity-30">
+                        <button aria-label={d.event.decrease(t.name)} disabled={!n} onClick={() => setQty({ ...qty, [t.id]: n - 1 })} className="grid size-8 place-items-center rounded-full border border-white/30 disabled:opacity-30">
                           <Minus className="size-4" />
                         </button>
                         <span className="w-5 text-center font-bold tabular-nums" aria-live="polite">
                           {n}
                         </span>
-                        <button aria-label={`Tambah ${t.name}`} disabled={soldOut || !!notYet || n >= max} onClick={() => setQty({ ...qty, [t.id]: n + 1 })} className="grid size-8 place-items-center rounded-full border border-white/30 disabled:opacity-30">
+                        <button aria-label={d.event.increase(t.name)} disabled={soldOut || !!notYet || n >= max} onClick={() => setQty({ ...qty, [t.id]: n + 1 })} className="grid size-8 place-items-center rounded-full border border-white/30 disabled:opacity-30">
                           <Plus className="size-4" />
                         </button>
                       </div>
@@ -271,11 +270,11 @@ export default function EventDetail() {
               })}
             </ul>
             <div className="mt-5 flex items-center justify-between">
-              <span className="text-sm text-gema-muted">{count} tiket</span>
+              <span className="text-sm text-rave-muted">{d.event.ticketCount(count)}</span>
               <span className="text-lg font-black">{fmt.idr(total)}</span>
             </div>
-            <button disabled={!count || busy} onClick={order} className="mt-4 w-full rounded-full bg-gema-primary py-3.5 font-bold text-white transition hover:scale-[1.02] disabled:opacity-40">
-              {busy ? 'Menahan kuota…' : token ? 'Beli tiket' : 'Masuk untuk membeli'}
+            <button disabled={!count || busy} onClick={order} className="mt-4 w-full rounded-none bg-rave-primary py-3.5 font-bold text-rave-on-primary transition hover:scale-[1.02] disabled:opacity-40">
+              {busy ? d.event.holding : token ? d.event.buy : d.event.signInToBuy}
             </button>
             <RefundPolicyNote />
             </>
@@ -284,7 +283,7 @@ export default function EventDetail() {
         </aside>
       </div>
 
-      <Modal open={!!checkout} onClose={() => setCheckout(null)} title="Pembayaran" theme="dark">
+      <Modal open={!!checkout} onClose={() => setCheckout(null)} title={d.event.payment} theme="dark">
         {checkout && <Checkout {...checkout} onClose={() => setCheckout(null)} />}
       </Modal>
     </div>

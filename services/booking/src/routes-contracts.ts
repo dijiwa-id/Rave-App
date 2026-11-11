@@ -1,8 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { diffSnapshots } from '@gema/domain';
-import { forbidden, notFound, requireAuth, settings, type Client, type Db, type ServiceContext } from '@gema/service-kit';
+import { diffSnapshots } from '@rave/domain';
+import { forbidden, notFound, requireAuth, settings, z, type Client, type Db, type ServiceContext } from '@rave/service-kit';
 import { partyOf, type BookingRow } from './common.js';
 import { contractStatusLabel } from './contract-jobs.js';
+import { requestSignOtp, verifySignOtp } from './contract-sign.js';
 import { readContractFile, signFileToken, verifyFileToken } from './contract-storage.js';
 
 type Q = Db | Client;
@@ -42,6 +43,23 @@ export async function contractRoutes(app: FastifyInstance, { db }: ServiceContex
       kind: final ? 'FINAL' : 'DRAFT',
       sha256: final ? k.final_sha256 : k.draft_sha256,
     };
+  });
+
+  // ---- Tanda tangan e-sign (native OTP): urutan Promotor → Manajemen → (Artis) ditegakkan di backend ----
+  app.post('/v1/booking/contracts/:id/sign/request-otp', { preHandler: requireAuth }, async (req) => requestSignOtp(db, req, (req.params as any).id));
+  app.post('/v1/booking/contracts/:id/sign/verify-otp', { preHandler: requireAuth }, async (req) => {
+    const { code } = z.object({ code: z.string().regex(/^\d{6}$/, 'Kode OTP 6 digit') }).parse(req.body);
+    return verifySignOtp(db, req, (req.params as any).id, code);
+  });
+
+  // ---- Jejak audit (append-only): pihak dalam kontrak & admin ----
+  app.get('/v1/booking/contracts/:id/audit-log', { preHandler: requireAuth }, async (req) => {
+    const { k } = await loadForParty(req, db, (req.params as any).id);
+    const rows = await db.query(
+      `SELECT id, action, actor_party, actor_id, ip_address, user_agent, data, created_at FROM contract_audit WHERE contract_id=$1 ORDER BY id`,
+      [k.id],
+    );
+    return { data: rows };
   });
 
   // ---- Riwayat versi + diff variabel antar versi (versi lama read-only) ----

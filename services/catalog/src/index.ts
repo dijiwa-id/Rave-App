@@ -1,10 +1,11 @@
-import { createService, config, type ServiceContext } from '@gema/service-kit';
+import { createService, config, type ServiceContext } from '@rave/service-kit';
 import type { FastifyInstance } from 'fastify';
 import { adminRoutes, scheduledReleaseJob } from './admin.js';
 import { consumers, listenersDecayJob } from './consumers.js';
 import { publicRoutes } from './routes.js';
 import { seed } from './seed.js';
 import { studioRoutes } from './studio.js';
+import { transcodeJob } from './audio.js';
 
 async function routes(app: FastifyInstance, ctx: ServiceContext) {
   await publicRoutes(app, ctx);
@@ -19,7 +20,7 @@ const svc = createService({
   migrationsDir: new URL('../migrations/', import.meta.url),
   routes,
   consumers,
-  jobs: [scheduledReleaseJob, listenersDecayJob],
+  jobs: [scheduledReleaseJob, listenersDecayJob, transcodeJob],
   stats: async ({ db }) =>
     (await db.one(
       `SELECT (SELECT count(*) FROM artists)::int AS artists,

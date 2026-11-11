@@ -7,7 +7,7 @@ export type ThemeChoice = 'light' | 'dark' | 'system';
 
 /** Pilihan tema dasbor milik pengguna (per perangkat). null = ikut default platform. */
 export const useThemePref = create<{ choice: ThemeChoice | null; set: (c: ThemeChoice | null) => void }>()(
-  persist((set) => ({ choice: null, set: (choice) => set({ choice }) }), { name: 'gema-dashboard-theme' }),
+  persist((set) => ({ choice: null, set: (choice) => set({ choice }) }), { name: 'rave-dashboard-theme' }),
 );
 
 const media = () => window.matchMedia('(prefers-color-scheme: dark)');

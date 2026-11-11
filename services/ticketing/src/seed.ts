@@ -1,9 +1,9 @@
-import { SEED, seedId } from '@gema/domain';
-import { publish, type ServiceContext } from '@gema/service-kit';
+import { SEED, seedId, seedSchedule } from '@rave/domain';
+import { publish, type ServiceContext } from '@rave/service-kit';
 
 const A = Object.fromEntries(SEED.artists.map((a) => [a.slug, a.id]));
 
-const EVENTS = [
+const EVENTS_RAW = [
   {
     n: 1, slug: 'pulang-ke-utara-tour-bandung', title: 'Pulang ke Utara Tour — Bandung', city: 'Bandung', venue: 'Dago Tea House', address: 'Jl. Bukit Dago Selatan No. 53, Bandung',
     start: '2026-10-24T19:00:00+07:00', end: '2026-10-24T23:00:00+07:00', artists: [A['senja-kolektif'], A['arunika']],
@@ -36,6 +36,8 @@ const EVENTS = [
   },
 ];
 
+const EVENTS = EVENTS_RAW.map((e) => ({ ...e, start: seedSchedule(e.start), end: seedSchedule(e.end) }));
+
 export async function seed({ db, log }: ServiceContext) {
   await db.tx(async (tx) => {
     for (const a of SEED.artists) await tx.query(`INSERT INTO artists (id, name, slug) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING`, [a.id, a.name, a.slug]);
@@ -46,9 +48,9 @@ export async function seed({ db, log }: ServiceContext) {
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'PUBLISHED',$14, now()) ON CONFLICT (id) DO NOTHING`,
         [
           id, e.slug, SEED.orgs.pensiPromotor, e.title,
-          `${e.title} menghadirkan penampilan langsung dari artis independen terbaik. Dipersembahkan oleh Pensi Nusantara bersama GEMA.`,
-          e.city, e.venue, e.address, e.start, e.end, `https://picsum.photos/seed/gema-event-${e.n}/800/1000`, e.artists,
-          'Usia 17+. Tiket QR berputar di aplikasi GEMA — screenshot tidak berlaku. Dilarang membawa makanan & minuman dari luar.',
+          `${e.title} menghadirkan penampilan langsung dari artis independen terbaik. Dipersembahkan oleh Pensi Nusantara bersama RAVE.`,
+          e.city, e.venue, e.address, e.start, e.end, `https://picsum.photos/seed/rave-event-${e.n}/800/1000`, e.artists,
+          'Usia 17+. Tiket QR berputar di aplikasi RAVE — screenshot tidak berlaku. Dilarang membawa makanan & minuman dari luar.',
           SEED.users.promotor,
         ],
       );

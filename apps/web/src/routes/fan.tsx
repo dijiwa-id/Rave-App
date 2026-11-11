@@ -26,7 +26,15 @@ export const publicRoutes: RouteObject[] = [
   { path: '/developer', element: page(() => import('@/pages/company/Developers')) },
   { path: '/iklan', element: page(() => import('@/pages/company/Advertise')) },
   { path: '/investor', element: page(() => import('@/pages/company/Investors')) },
-  // URL publik terindeks (REQ-WEB-03): gema.id/a/{slug}, gema.id/e/{slug}
+  // Bantuan & dokumen legal (tautan footer & sidebar aplikasi)
+  { path: '/bantuan', element: page(() => import('@/pages/company/Help')) },
+  { path: '/berita', element: page(() => import('@/pages/company/News')) },
+  { path: '/berita/:slug', element: page(() => import('@/pages/company/NewsArticlePage')) },
+  { path: '/ketentuan', element: page(() => import('@/pages/company/Terms')) },
+  { path: '/privasi', element: page(() => import('@/pages/company/Privacy')) },
+  { path: '/hak-cipta', element: page(() => import('@/pages/company/Copyright')) },
+  { path: '/cookie', element: page(() => import('@/pages/company/Cookies')) },
+  // URL publik terindeks (REQ-WEB-03): rave.id/a/{slug}, rave.id/e/{slug}
   {
     element: <FanLayout />,
     errorElement: <RouteError />,

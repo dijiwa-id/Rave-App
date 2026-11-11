@@ -1,6 +1,6 @@
 import Handlebars from 'handlebars';
 import QRCode from 'qrcode';
-import { formatIdr } from '@gema/domain';
+import { formatIdr } from '@rave/domain';
 import { SPK_TEMPLATE_VERSION, type ContractData } from './contract-data.js';
 
 const hb = Handlebars.create();
@@ -68,9 +68,9 @@ export const LOCKED_CLAUSE_TEXT = {
   force_majeure:
     'Force majeure meliputi bencana alam, kebijakan pemerintah yang melarang acara, kerusuhan, wabah, dan kejadian lain di luar kendali wajar para pihak yang dibuktikan dengan dokumen resmi. Dana yang ditahan di rekening bersama digunakan untuk penjadwalan ulang paling lambat 90 hari, atau dikembalikan setelah dikurangi biaya riil yang sudah terjadi dan dapat dibuktikan.',
   safety:
-    'Pihak Pertama bertanggung jawab atas perizinan keramaian, keamanan, dan keselamatan acara, serta mengunggah bukti izin ke GEMA sebelum hari-H. Asuransi acara bersifat opsional.',
+    'Pihak Pertama bertanggung jawab atas perizinan keramaian, keamanan, dan keselamatan acara, serta mengunggah bukti izin ke RAVE sebelum hari-H. Asuransi acara bersifat opsional.',
   dispute:
-    'Musyawarah → mediasi GEMA (keputusan maksimal 14 hari kerja; sengketa diajukan paling lambat 24 jam setelah acara, dana dibekukan) → arbitrase atau pengadilan negeri domisili Pihak Pertama.',
+    'Musyawarah → mediasi RAVE (keputusan maksimal 14 hari kerja; sengketa diajukan paling lambat 24 jam setelah acara, dana dibekukan) → arbitrase atau pengadilan negeri domisili Pihak Pertama.',
   radius:
     'Pihak Kedua tidak tampil di acara publik berbayar lain dalam radius 30 km dari venue selama 14 hari sebelum tanggal acara, kecuali disetujui Pihak Pertama.',
 } as const;
@@ -128,7 +128,7 @@ const TEMPLATE = `<!doctype html>
  NPWP {{dash management.npwp_mask}}<br>Alamat: {{dash management.address}}
  {{#if management.bank}}<br>Rekening: {{management.bank.name}} {{management.bank.account_mask}} a.n. {{management.bank.holder}}{{/if}}</td></tr>
 <tr><th>Pengisi Acara (Artis)</th><td><b>{{artist.stage_name}}</b>{{#if artist.city}}, {{artist.city}}{{/if}}, dikelola oleh Pihak Kedua.</td></tr>
-<tr><th>Platform Fasilitator</th><td>PT GEMA menyediakan sistem kontrak elektronik, rekening bersama (escrow) melalui mitra berizin, dan mediasi. GEMA bukan pihak dalam pertunjukan.</td></tr></table>
+<tr><th>Platform Fasilitator</th><td>PT RAVE menyediakan sistem kontrak elektronik, rekening bersama (escrow) melalui mitra berizin, dan mediasi. RAVE bukan pihak dalam pertunjukan.</td></tr></table>
 
 <h2>2. Detail Pertunjukan</h2>
 <table>
@@ -145,7 +145,7 @@ const TEMPLATE = `<!doctype html>
 <p>2. Pajak: {{#if (eq money.tax.kind "PPH23")}}PPh 23{{else}}PPh 21{{/if}} {{money.tax.pct}}% = {{idr money.tax.tax}}, dipotong dari nilai kontrak; nilai bersih diterima Pihak Kedua {{idr money.tax.nett}}. Bukti potong tersedia di aplikasi.</p>
 <table class="cols"><tr><th>Termin</th><th>%</th><th>Nominal</th><th>Jatuh tempo</th></tr>
 {{#each schedule}}<tr><td>{{label}}</td><td>{{pct}}%</td><td>{{idr amount}}</td><td>{{due_text}}</td></tr>{{/each}}</table>
-<p>3. Seluruh pembayaran dilakukan ke rekening bersama (escrow) mitra berizin yang ditunjuk GEMA atas nama booking ini. Dana dicairkan H+1 setelah pertunjukan selesai bila tidak ada sengketa.</p>
+<p>3. Seluruh pembayaran dilakukan ke rekening bersama (escrow) mitra berizin yang ditunjuk RAVE atas nama booking ini. Dana dicairkan H+1 setelah pertunjukan selesai bila tidak ada sengketa.</p>
 {{#if money.emeterai.required}}<p>4. Dokumen ini bernilai di atas {{idr money.emeterai.threshold}} sehingga dibubuhi e-Meterai; bea meterai ditanggung {{payer money.emeterai.payer}}.</p>{{/if}}
 <p>Pembagian hasil: Manajemen {{terms.fee_split.management_pct}}%, Artis {{terms.fee_split.artist_pct}}%, komisi platform {{terms.fee_split.platform_pct}}%.</p>
 
@@ -154,7 +154,7 @@ const TEMPLATE = `<!doctype html>
 <h2>6. Pembatalan, Reschedule & Force Majeure</h2>
 <table class="cols"><tr><th>Pihak & waktu pembatalan</th><th>Dana DP</th><th>Dana pelunasan</th></tr>
 {{#each matrix}}<tr><td>{{this.[0]}}</td><td>{{this.[1]}}</td><td>{{this.[2]}}</td></tr>{{/each}}</table>
-<p>Komisi platform dan biaya pembayaran yang telah terjadi tidak direfund kecuali pembatalan disebabkan kesalahan sistem GEMA.</p>
+<p>Komisi platform dan biaya pembayaran yang telah terjadi tidak direfund kecuali pembatalan disebabkan kesalahan sistem RAVE.</p>
 <p class="locked">{{lockedText.force_majeure}}</p>
 <h2>7. Radius & Eksklusivitas</h2><p class="locked">{{lockedText.radius}}</p>
 <h2>8. Keamanan, Keselamatan & Perizinan</h2><p class="locked">{{lockedText.safety}}</p>

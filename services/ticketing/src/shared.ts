@@ -1,5 +1,5 @@
-import type { TicketRefundReason } from '@gema/domain';
-import { callService, publish, settings, type Client } from '@gema/service-kit';
+import type { TicketRefundReason } from '@rave/domain';
+import { callService, publish, settings, type Client } from '@rave/service-kit';
 
 export interface Q {
   query(sql: string, params?: unknown[]): Promise<{ rows: any[]; rowCount: number | null }>;

@@ -1,5 +1,5 @@
 {
-  "name": "@gema/service-kit",
+  "name": "@rave/service-kit",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
-    "@gema/domain": "*",
+    "@rave/domain": "*",
     "fastify": "^5.2.0",
     "jose": "^5.9.6",
     "kafkajs": "^2.2.4",

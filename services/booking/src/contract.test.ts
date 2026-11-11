@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canTransition } from '@gema/domain';
+import { canTransition } from '@rave/domain';
 import { renderContract, TEMPLATE_VERSION } from './contract.js';
 
 const b: any = {

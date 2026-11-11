@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { badRequest, forbidden, notFound, publish, requireAuth, unprocessable, uuidv7, z, type ServiceContext } from '@gema/service-kit';
+import { badRequest, forbidden, notFound, publish, requireAuth, requireService, unprocessable, uuidv7, z, type ServiceContext } from '@rave/service-kit';
 import { hydrateTracks } from './hydrate.js';
 
 const MAX_ITEMS = 10_000;
@@ -11,6 +11,8 @@ function summary(p: any) {
     title: p.title,
     description: p.description,
     cover_url: p.cover_url ?? p.first_cover ?? null,
+    /** true = sampul diunggah/dipilih pemilik; false = otomatis dari lagu pertama. */
+    has_custom_cover: !!p.cover_url,
     owner: { id: p.owner_id, name: p.owner_name },
     visibility: p.visibility,
     track_count: p.track_count ?? 0,
@@ -52,6 +54,13 @@ export async function routes(app: FastifyInstance, { db, log }: ServiceContext) 
   }
 
   // ---------- Publik ----------
+  // Berkas sampul playlist di bucket uploads catalog yang masih dipakai — dipakai panel Storage (platform)
+  // agar sampul unggahan pengguna tidak dianggap file yatim lalu terhapus.
+  app.get('/internal/media/references', { preHandler: requireService }, async () => {
+    const rows = await db.query<{ u: string }>(`SELECT DISTINCT cover_url AS u FROM playlists WHERE cover_url LIKE '/v1/catalog/media/%'`);
+    return { files: rows.map((r) => r.u.split('/v1/catalog/media/')[1].split(/[?#]/)[0]) };
+  });
+
   app.get('/v1/library/playlists/featured', async (req) => {
     const { tag } = req.query as { tag?: string };
     const rows = await db.query(`${PLAYLIST_SELECT} WHERE p.is_editorial AND ($1::text IS NULL OR $1 = ANY(p.tags)) ORDER BY p.sort_order, p.created_at`, [tag ?? null]);
@@ -168,7 +177,13 @@ export async function routes(app: FastifyInstance, { db, log }: ServiceContext) 
       title: z.string().trim().min(1).max(100),
       description: z.string().max(300).nullable().optional(),
       visibility: z.enum(['PUBLIC', 'PRIVATE', 'COLLAB']).optional(),
-      cover_url: z.string().url().nullable().optional(),
+      // Berkas unggahan (bucket uploads catalog) atau URL https eksternal.
+      cover_url: z
+        .string()
+        .max(1000)
+        .refine((u) => /^\/v1\/catalog\/media\/[\w.-]+\.(jpe?g|png|webp)$/i.test(u) || /^https:\/\/\S+$/i.test(u), 'Sampul harus berkas unggahan atau URL https')
+        .nullable()
+        .optional(),
     });
     a.post('/v1/library/playlists', async (req, reply) => {
       const b = plBody.parse(req.body);

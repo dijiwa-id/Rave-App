@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { audit, config, requireSuperAdmin, serviceHeaders, serviceUrl, settings, z, type Db, type ServiceContext } from '@gema/service-kit';
+import { audit, config, requireSuperAdmin, serviceHeaders, serviceUrl, settings, z, type Db, type ServiceContext } from '@rave/service-kit';
 import { lastBackupAt } from './backups.js';
 import { bucketBytes, disk } from './storage.js';
 

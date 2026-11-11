@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { deflateSync } from 'node:zlib';
-import { SEED, seedId } from '@gema/domain';
+import { SEED, seedId } from '@rave/domain';
 
 const BASE = process.env.GATEWAY ?? 'http://127.0.0.1:8080';
 let passed = 0;
@@ -41,9 +41,20 @@ function check(name: string, cond: boolean, info?: unknown) {
   }
 }
 
+/** Endpoint OTP dibatasi per IP di gateway (security.rate_limit_otp_per_minute); e2e login banyak akun dari satu IP → tunggu jendela berikutnya. */
+async function callOtpClass(method: string, path: string, body: unknown) {
+  for (let attempt = 0; ; attempt++) {
+    const r = await call(null, method, path, body);
+    if (r.status !== 429 || attempt >= 2) return r;
+    const wait = Number(/(\d+) detik/.exec(r.data?.detail ?? '')?.[1] ?? 30) + 1;
+    console.log(`  … rate limit OTP gateway, menunggu ${wait} dtk`);
+    await new Promise((res) => setTimeout(res, wait * 1000));
+  }
+}
+
 async function login(email: string) {
-  const otp = await call(null, 'POST', '/v1/auth/otp', { channel: 'email', destination: email });
-  const tok = await call(null, 'POST', '/v1/auth/token', { grant_type: 'otp', destination: email, code: otp.data?.dev_code });
+  const otp = await callOtpClass('POST', '/v1/auth/otp', { channel: 'email', destination: email });
+  const tok = await callOtpClass('POST', '/v1/auth/token', { grant_type: 'otp', destination: email, code: otp.data?.dev_code });
   if (tok.status !== 200) throw new Error(`login ${email} gagal: ${JSON.stringify(tok.data)}`);
   return tok.data as { access_token: string; refresh_token: string; user: any };
 }
@@ -103,8 +114,8 @@ const bad = await call('rusak.token.x', 'GET', '/v1/me');
 check('token rusak ditolak di gateway (401)', bad.status === 401);
 const internal = await call(null, 'GET', '/internal/tracks/x/media');
 check('/internal/* tidak terekspos (404)', internal.status === 404);
-const ref = await call(null, 'POST', '/v1/auth/token', { grant_type: 'refresh_token', refresh_token: fan.refresh_token });
-const reuse = await call(null, 'POST', '/v1/auth/token', { grant_type: 'refresh_token', refresh_token: fan.refresh_token });
+const ref = await callOtpClass('POST', '/v1/auth/token', { grant_type: 'refresh_token', refresh_token: fan.refresh_token });
+const reuse = await callOtpClass('POST', '/v1/auth/token', { grant_type: 'refresh_token', refresh_token: fan.refresh_token });
 check('refresh token berotasi & reuse ditolak', ref.status === 200 && reuse.status === 401, [ref.status, reuse.status]);
 const F = ref.data.access_token as string;
 
@@ -115,13 +126,83 @@ const search = await call(F, 'GET', '/v1/catalog/search?q=hujn');
 check('pencarian toleran typo ("hujn")', search.data?.tracks?.some((t: any) => /hujan/i.test(t.title)), search.data?.tracks?.map((t: any) => t.title));
 const track = search.data.tracks[0];
 const sess = await call(F, 'POST', '/v1/playback/sessions', { track_id: track.id, quality: 'lossless' });
-check('sesi playback + URL bertanda tangan', [200, 201].includes(sess.status) && sess.data.codec_label === 'FLAC 16/44.1' && !sess.data.preview_only, sess.data);
+check('sesi playback + URL bertanda tangan', [200, 201].includes(sess.status) && !!sess.data.stream_url && !sess.data.preview_only, sess.data);
+// HQ & Lossless khusus Premium: fan Gratis diturunkan ke AAC 160, Premium mendapat AAC 320.
+check('fan Gratis minta Lossless → AAC 160 (quality_capped=premium)', sess.data?.quality === 'normal' && sess.data.codec_label === 'AAC 160' && sess.data.quality_capped === 'premium', sess.data);
+const P2 = (await login(SEED.emails.premium)).access_token;
+const premSess = await call(P2, 'POST', '/v1/playback/sessions', { track_id: track.id, quality: 'high' });
+check('fan Premium minta Tinggi → AAC 320', premSess.data?.quality === 'high' && premSess.data.codec_label === 'AAC 320' && premSess.data.quality_capped === null, premSess.data);
 const stream = await call(null, 'GET', sess.data.stream_url);
 check('stream 302 ke media', stream.status === 302, stream.status);
 const tampered = await call(null, 'GET', sess.data.stream_url.replace(/sig=../, 'sig=00'));
 check('URL dimanipulasi ditolak', tampered.status === 403, tampered.status);
 const anon = await call(null, 'POST', '/v1/playback/sessions', { track_id: track.id, quality: 'auto' });
 check('anonim = pratinjau 30 dtk', anon.data?.preview_only === true && anon.data?.preview_ms === 30000, anon.data);
+
+console.log('\n▶ Master multi-format & rendisi (Artist Studio)');
+{
+  const { execFileSync } = await import('node:child_process');
+  const { readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const FFM = createRequire(import.meta.url)('ffmpeg-static') as string;
+  const AT = (await login(SEED.emails.artist)).access_token;
+  const flacPath = `${tmpdir()}/rave-e2e-${process.pid}.flac`;
+  execFileSync(FFM, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=96000:duration=3', '-c:a', 'flac', '-sample_fmt', 's32', '-bits_per_raw_sample', '24', flacPath]);
+  const flac = readFileSync(flacPath);
+  rmSync(flacPath, { force: true });
+  // MIME kosong (umum untuk .flac di browser Windows) → ditentukan dari ekstensi.
+  const init = await call(AT, 'POST', '/v1/studio/uploads', { kind: 'audio', filename: 'e2e-master.flac', content_type: '', size: flac.length });
+  const put = await fetch(BASE + init.data?.upload_url, { method: 'PUT', headers: { authorization: `Bearer ${AT}`, 'content-type': 'application/octet-stream' }, body: new Uint8Array(flac) });
+  const up = await put.json();
+  check('upload master FLAC 24/96: probe lossless + antre transcoding', put.status === 200 && up.meta?.lossless === true && up.meta?.bit_depth === 24 && up.meta?.sample_rate === 96000 && up.transcode_status === 'pending', up);
+  const done = await until(() => call(AT, 'GET', `/v1/studio/uploads/${init.data?.upload_id}`), (r) => ['done', 'failed'].includes(r.data?.transcode_status), 90_000, 1000);
+  check('transcoding → AAC 64/160/320 + FLAC 24/96', done.data?.transcode_status === 'done' && Object.keys(done.data.renditions ?? {}).sort().join() === 'high,lossless,low,normal' && done.data.renditions.lossless?.codec_label === 'FLAC 24/96', done.data);
+  const baseUrl = String(up.public_url).replace(/\.flac$/, '');
+  const std = await fetch(`${BASE}${baseUrl}.normal.m4a`);
+  check('rendisi standar dapat diputar (audio/mp4)', std.status === 200 && std.headers.get('content-type') === 'audio/mp4', std.status);
+  const [hq, ll] = await Promise.all([fetch(`${BASE}${baseUrl}.high.m4a`), fetch(`${BASE}${baseUrl}.lossless.flac`)]);
+  check('rendisi Premium tanpa URL bertanda tangan ditolak (403)', hq.status === 403 && ll.status === 403, [hq.status, ll.status]);
+  const rng = await fetch(`${BASE}${baseUrl}.normal.m4a`, { headers: { range: 'bytes=0-99' } });
+  check('media mendukung Range (206) untuk seek', rng.status === 206 && (await rng.arrayBuffer()).byteLength === 100, rng.status);
+  const other = await call(F, 'GET', `/v1/studio/uploads/${init.data?.upload_id}`);
+  check('status upload hanya untuk pemiliknya', other.status === 404 || other.status === 403, other.status);
+  const bad = await call(AT, 'POST', '/v1/studio/uploads', { kind: 'audio', filename: 'bukan-audio.flac', content_type: 'audio/flac', size: 64 });
+  const badPut = await fetch(BASE + bad.data?.upload_url, { method: 'PUT', headers: { authorization: `Bearer ${AT}`, 'content-type': 'audio/flac' }, body: new Uint8Array(64).fill(7) });
+  check('berkas bukan audio ditolak (422)', badPut.status === 422, badPut.status);
+}
+
+console.log('\n▶ Sampul playlist pengguna');
+{
+  const { execFileSync } = await import('node:child_process');
+  const { readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const FFM = createRequire(import.meta.url)('ffmpeg-static') as string;
+  const img = (size: string) => {
+    const f = `${tmpdir()}/rave-e2e-cover-${process.pid}-${size}.png`;
+    execFileSync(FFM, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `color=c=0x5b2a6e:s=${size}`, '-frames:v', '1', f]);
+    const b = readFileSync(f);
+    rmSync(f, { force: true });
+    return b;
+  };
+  const up = async (buf: Buffer) => {
+    const init = await call(F, 'POST', '/v1/studio/uploads', { kind: 'artwork', purpose: 'playlist', filename: 'sampul.png', content_type: 'image/png', size: buf.length });
+    const put = await fetch(BASE + init.data?.upload_url, { method: 'PUT', headers: { authorization: `Bearer ${F}`, 'content-type': 'image/png' }, body: new Uint8Array(buf) });
+    return { status: put.status, data: await put.json() };
+  };
+  const pl = await call(F, 'POST', '/v1/library/playlists', { title: 'E2E Sampul', visibility: 'PRIVATE' });
+  check('playlist baru tanpa sampul kustom', pl.status === 201 && pl.data?.has_custom_cover === false, pl.data);
+  const ok = await up(img('600x600'));
+  check('fan mengunggah sampul 600×600', ok.status === 200 && ok.data?.meta?.width === 600, ok.data);
+  const set = await call(F, 'PATCH', `/v1/library/playlists/${pl.data?.id}`, { cover_url: ok.data?.public_url });
+  check('sampul dipasang (has_custom_cover)', set.data?.cover_url === ok.data?.public_url && set.data?.has_custom_cover === true, set.data);
+  const tiny = await up(img('100x100'));
+  check('sampul < 300 px ditolak (422)', tiny.status === 422, tiny.status);
+  const evil = await call(F, 'PATCH', `/v1/library/playlists/${pl.data?.id}`, { cover_url: 'javascript:alert(1)' });
+  check('cover_url berbahaya ditolak (400)', evil.status === 400, evil.status);
+  const clear = await call(F, 'PATCH', `/v1/library/playlists/${pl.data?.id}`, { cover_url: null });
+  check('hapus sampul → otomatis lagi', clear.data?.has_custom_cover === false, clear.data);
+  await call(F, 'DELETE', `/v1/library/playlists/${pl.data?.id}`);
+}
 const plays = await call(F, 'POST', '/v1/events/play', {
   events: [
     { session_id: sess.data.session_id, track_id: track.id, type: 'start', position_ms: 0, played_ms: 0, at: new Date().toISOString() },
@@ -186,7 +267,7 @@ check('order PAID via event finance.payment.succeeded', paid.data?.status === 'P
 const mine = await call(F, 'GET', '/v1/ticketing/tickets/mine');
 const ticket = mine.data.data.find((t: any) => t.event.id === ev.id && t.status === 'VALID');
 const qr = await call(F, 'GET', `/v1/ticketing/tickets/${ticket.id}/qr`);
-check('QR berputar diterbitkan', /^GEMA1\./.test(qr.data?.payload ?? ''), qr.data);
+check('QR berputar diterbitkan', /^RAVE1\./.test(qr.data?.payload ?? ''), qr.data);
 const P = promotor.access_token;
 const ci = await call(P, 'POST', '/v1/ticketing/checkin', { event_id: ev.id, payload: qr.data.payload, gate: 'A' });
 const ci2 = await call(P, 'POST', '/v1/ticketing/checkin', { event_id: ev.id, payload: qr.data.payload, gate: 'B' });
@@ -249,20 +330,51 @@ const prev = await until(
   1000,
 );
 check('PDF draf kontrak dirender (preview-url)', prev.status === 200 && prev.data?.kind === 'DRAFT' && prev.data?.sha256?.length === 64, prev.data);
-const pdfRes = await fetch(BASE + prev.data.url);
-const pdfBuf = Buffer.from(await pdfRes.arrayBuffer());
-check('signed URL mengunduh PDF dengan hash cocok', pdfRes.status === 200 && pdfBuf.subarray(0, 5).toString() === '%PDF-' && (await import('node:crypto')).createHash('sha256').update(pdfBuf).digest('hex') === prev.data.sha256, [pdfRes.status, pdfBuf.length]);
-const tamperedPdf = await call(null, 'GET', prev.data.url.slice(0, -3) + 'abc');
-check('signed URL dimanipulasi ditolak (403)', tamperedPdf.status === 403, tamperedPdf.status);
+// Tanpa PDF (mis. Chromium tidak tersedia di host) langkah unduhan dicatat gagal, bukan membuat seluruh suite crash.
+if (prev.status === 200 && prev.data?.url) {
+  const pdfRes = await fetch(BASE + prev.data.url);
+  const pdfBuf = Buffer.from(await pdfRes.arrayBuffer());
+  check('signed URL mengunduh PDF dengan hash cocok', pdfRes.status === 200 && pdfBuf.subarray(0, 5).toString() === '%PDF-' && (await import('node:crypto')).createHash('sha256').update(pdfBuf).digest('hex') === prev.data.sha256, [pdfRes.status, pdfBuf.length]);
+  const tamperedPdf = await call(null, 'GET', prev.data.url.slice(0, -3) + 'abc');
+  check('signed URL dimanipulasi ditolak (403)', tamperedPdf.status === 403, tamperedPdf.status);
+} else {
+  check('signed URL mengunduh PDF dengan hash cocok', false, 'dilewati: PDF draf tidak dirender');
+  check('signed URL dimanipulasi ditolak (403)', false, 'dilewati: PDF draf tidak dirender');
+}
 const outsider = await call(fan.access_token, 'GET', `/v1/booking/contracts/${KID}/preview-url`);
 check('pihak luar tidak bisa meminta pratinjau (403)', outsider.status === 403, outsider.status);
 const vfy = await call(null, 'GET', `/v1/booking/verify/${KID}`);
-check('verifikasi publik: status & hash tanpa data sensitif', vfy.status === 200 && vfy.data?.sha256 === prev.data.sha256 && !JSON.stringify(vfy.data).match(/nik|npwp|rekening|bank|\*{4}/i), vfy.data);
+check('verifikasi publik: status & hash tanpa data sensitif', vfy.status === 200 && vfy.data?.sha256 === prev.data?.sha256 && !JSON.stringify(vfy.data).match(/nik|npwp|rekening|bank|\*{4}/i), vfy.data);
 const vers = await call(M, 'GET', `/v1/booking/contracts/${KID}/versions`);
 check('riwayat versi memuat v1', vers.data?.data?.length === 1 && vers.data.data[0].version === 1, vers.data);
-await call(P, 'POST', `/v1/booking/bookings/${B}/sign`, { signer_name: 'Promotor E2E' }, true);
-const signed = await call(M, 'POST', `/v1/booking/bookings/${B}/sign`, { signer_name: 'Manajer E2E' }, true);
-check('tanda tangan kedua pihak (SIGNED)', signed.data?.status === 'SIGNED', signed.data?.status);
+// ---- E-sign native OTP: urutan, RBAC, rate limit, sekali pakai, audit ----
+const legacySign = await call(P, 'POST', `/v1/booking/bookings/${B}/sign`, { signer_name: 'Lewat jalur lama' }, true);
+check('jalur tanda tangan lama tanpa OTP ditolak untuk kontrak baru (409)', legacySign.status === 409, legacySign.status);
+const outOfTurn = await call(M, 'POST', `/v1/booking/contracts/${KID}/sign/request-otp`, {});
+check('manajemen tidak bisa minta OTP sebelum giliran (409)', outOfTurn.status === 409, outOfTurn.status);
+const strangerOtp = await call(fan.access_token, 'POST', `/v1/booking/contracts/${KID}/sign/request-otp`, {});
+check('pihak luar tidak bisa minta OTP (403)', strangerOtp.status === 403, strangerOtp.status);
+const otp1 = await call(P, 'POST', `/v1/booking/contracts/${KID}/sign/request-otp`, {});
+check('promotor minta OTP (kode dev tersedia)', otp1.status === 200 && /^\d{6}$/.test(otp1.data?.dev_code ?? '') && otp1.data?.party === 'promotor', otp1.data);
+const cooldown = await call(P, 'POST', `/v1/booking/contracts/${KID}/sign/request-otp`, {});
+check('permintaan OTP beruntun dibatasi (429)', cooldown.status === 429, cooldown.status);
+const wrong = await call(P, 'POST', `/v1/booking/contracts/${KID}/sign/verify-otp`, { code: otp1.data.dev_code === '000000' ? '111111' : '000000' });
+check('OTP salah ditolak (422)', wrong.status === 422, wrong.data);
+const okSign = await call(P, 'POST', `/v1/booking/contracts/${KID}/sign/verify-otp`, { code: otp1.data.dev_code });
+check('promotor menandatangani → menunggu manajemen', okSign.data?.status === 'AWAITING_MANAGEMENT_SIGN', okSign.data);
+const otpReuse = await call(P, 'POST', `/v1/booking/contracts/${KID}/sign/verify-otp`, { code: otp1.data.dev_code });
+check('OTP sekali pakai & tidak bisa tanda tangan dua kali (409/422)', [409, 422].includes(otpReuse.status), otpReuse.status);
+const otp2 = await call(M, 'POST', `/v1/booking/contracts/${KID}/sign/request-otp`, {});
+const signed = await (async () => {
+  await call(M, 'POST', `/v1/booking/contracts/${KID}/sign/verify-otp`, { code: otp2.data.dev_code });
+  return call(M, 'GET', `/v1/booking/bookings/${B}`);
+})();
+check('tanda tangan kedua pihak (SIGNED)', signed.data?.status === 'SIGNED' && signed.data?.contract?.status === 'ACTIVE', [signed.data?.status, signed.data?.contract?.status]);
+const sigAudit = await call(M, 'GET', `/v1/booking/contracts/${KID}/audit-log`);
+const acts = (sigAudit.data?.data ?? []).map((r: any) => r.action);
+check('audit kontrak mencatat generate, OTP, tanda tangan (IP & UA)', ['generate', 'sign.otp_requested', 'sign.otp_failed', 'sign'].every((a) => acts.includes(a)) && sigAudit.data.data.filter((r: any) => r.action === 'sign').every((r: any) => r.ip_address), acts);
+const lateOtp = await call(P, 'POST', `/v1/booking/contracts/${KID}/sign/request-otp`, {});
+check('kontrak ACTIVE terkunci (409)', lateOtp.status === 409, lateOtp.status);
 const inv = await until(
   () => call(P, 'GET', `/v1/finance/invoices?reference_id=${B}`),
   (r) => r.data?.data?.length >= 2,
@@ -467,9 +579,9 @@ const artistTok = (await login(SEED.emails.artist)).access_token;
 const fanCreate = await call(F, 'POST', '/v1/live/studio/streams', { org_id: SEED.artists[0].orgId, title: 'Tidak boleh', access: 'PUBLIC' });
 check('fan bukan anggota org tidak bisa membuat siaran (403)', fanCreate.status === 403, fanCreate.status);
 const created = await call(artistTok, 'POST', '/v1/live/studio/streams', { org_id: SEED.artists[0].orgId, title: 'E2E Soundcheck RTMP', access: 'PUBLIC' });
-check('artis membuat siaran → stream key sekali tampil + URL RTMP', created.status === 201 && /^gema_/.test(created.data?.stream_key) && created.data.stream.status === 'SCHEDULED', created.data);
+check('artis membuat siaran → stream key sekali tampil + URL RTMP', created.status === 201 && /^rave_/.test(created.data?.stream_key) && created.data.stream.status === 'SCHEDULED', created.data);
 const LS = created.data?.stream?.id as string;
-const badPub = pushRtmp('gema_kunci_palsu', 10);
+const badPub = pushRtmp('rave_kunci_palsu', 10);
 check('RTMP dengan kunci salah ditolak server', (await exited(badPub, 8000)) !== null, 'publisher tidak diputus');
 let pub = pushRtmp(created.data?.stream_key, 120);
 const live1 = await until(() => streamOf(LS), (r) => r.data?.status === 'LIVE', 20_000);
@@ -687,7 +799,7 @@ console.log('\n▶ Akses per peran (fan, artis, manajer, promotor, admin, Super 
 
   // Admin baru berperan Finance & Support (dibuat Super Admin lewat Tim Admin).
   const mk = async (role: string) => {
-    const email = `e2e-${role.toLowerCase()}-${Date.now()}@gema.test`;
+    const email = `e2e-${role.toLowerCase()}-${Date.now()}@rave.test`;
     const first = await login(email);
     await call(S, 'PATCH', `/v1/admin/iam/users/${first.user.id}`, { admin_role: role, reason: 'uji peran e2e' });
     return { id: first.user.id as string, tok: (await login(email)).access_token };

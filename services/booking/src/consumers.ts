@@ -1,5 +1,5 @@
-import { bookingInvoice } from '@gema/domain';
-import type { Consumers, ServiceContext } from '@gema/service-kit';
+import { bookingInvoice } from '@rave/domain';
+import type { Consumers, ServiceContext } from '@rave/service-kit';
 import { commissionPolicy } from './common.js';
 import { loadBooking, transition } from './repo.js';
 

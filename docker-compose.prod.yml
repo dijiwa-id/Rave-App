@@ -1,0 +1,164 @@
+# RAVE — stack PRODUCTION (satu host Docker). Panduan lengkap: docs/DEPLOYMENT.md
+#
+#   cp .env.production.example .env.production && edit        # isi semua secret (lihat preflight)
+#   npm run prod:preflight                                     # validasi env sebelum deploy
+#   npm run prod:build                                         # build image bertag versi (atau `pull` dari registry)
+#   npm run prod:up                                            # jalankan / rolling-update
+#   docker compose -f docker-compose.prod.yml --env-file .env.production --profile tls up -d   # + Caddy HTTPS otomatis
+#
+# Image: ${RAVE_REGISTRY}/rave-<service>:${RAVE_VERSION} — versi = package.json root (docs/VERSIONING.md).
+# Tidak ada port DB/service yang dibuka ke luar; hanya web (HTTP), Caddy (80/443, profil tls), dan RTMP live (1935).
+name: rave
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: '20m', max-file: '5' }
+
+x-build: &build-args
+  APP_VERSION: ${RAVE_VERSION:?set RAVE_VERSION di .env.production}
+  GIT_SHA: ${GIT_SHA:-unknown}
+  BUILD_DATE: ${BUILD_DATE:-}
+
+x-svc: &svc
+  restart: always
+  logging: *logging
+  security_opt: ['no-new-privileges:true']
+  stop_grace_period: 30s
+  env_file: ['${RAVE_ENV_FILE:-.env.production}']
+  depends_on:
+    postgres: { condition: service_healthy }
+  environment: &env
+    NODE_ENV: production
+    DATABASE_URL: ${DATABASE_URL:-postgres://rave:${POSTGRES_PASSWORD}@postgres:5432/rave}
+    BUS_DRIVER: ${BUS_DRIVER:-pg}
+    KAFKA_BROKERS: ${KAFKA_BROKERS:-redpanda:9092}
+    IAM_URL: http://iam:4001
+    CATALOG_URL: http://catalog:4002
+    LIBRARY_URL: http://library:4003
+    PLAYBACK_URL: http://playback:4004
+    BOOKING_URL: http://booking:4005
+    FINANCE_URL: http://finance:4006
+    TICKETING_URL: http://ticketing:4007
+    NOTIFICATION_URL: http://notification:4008
+    PLATFORM_URL: http://platform:4009
+    LIVE_URL: http://live:4010
+    ADS_URL: http://ads:4011
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    logging: *logging
+    environment:
+      POSTGRES_USER: rave
+      POSTGRES_DB: rave
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD di .env.production}
+    # Hanya dari host (mis. untuk psql/pg_dump manual); hapus baris ini bila tidak perlu.
+    ports: ['127.0.0.1:${PROD_PG_PORT:-5432}:5432']
+    volumes: [pgdata:/var/lib/postgresql/data]
+    shm_size: 256mb
+    # 12 service × DB_POOL_MAX (default 10) + koneksi LISTEN bus/pengaturan + pg_dump backup > default 100.
+    command: ['postgres', '-c', 'max_connections=${PG_MAX_CONNECTIONS:-250}']
+    healthcheck: { test: ['CMD-SHELL', 'pg_isready -U rave'], interval: 5s, retries: 30 }
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    profiles: [kafka]
+    restart: always
+    logging: *logging
+    command: >-
+      redpanda start --smp 1 --memory 1G --overprovisioned --node-id 0 --check=false
+      --kafka-addr internal://0.0.0.0:9092 --advertise-kafka-addr internal://redpanda:9092
+      --set redpanda.auto_create_topics_enabled=true
+    volumes: [redpanda:/var/lib/redpanda/data]
+    healthcheck: { test: ['CMD-SHELL', "rpk cluster health | grep -E 'Healthy:.+true'"], interval: 10s, retries: 20 }
+
+  platform:
+    <<: *svc
+    image: ${RAVE_REGISTRY:-rave}/rave-platform:${RAVE_VERSION}
+    build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: platform } }
+    volumes: [storage:/data]
+  iam:
+    <<: *svc
+    image: ${RAVE_REGISTRY:-rave}/rave-iam:${RAVE_VERSION}
+    build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: iam } }
+  catalog:
+    <<: *svc
+    image: ${RAVE_REGISTRY:-rave}/rave-catalog:${RAVE_VERSION}
+    build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: catalog } }
+    volumes: [storage:/data]
+  library:
+    <<: *svc
+    image: ${RAVE_REGISTRY:-rave}/rave-library:${RAVE_VERSION}
+    build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: library } }
+  playback:
+    <<: *svc
+    image: ${RAVE_REGISTRY:-rave}/rave-playback:${RAVE_VERSION}
+    build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: playback } }
+  booking:
+    <<: *svc
+    image: ${RAVE_REGISTRY:-rave}/rave-booking:${RAVE_VERSION}
+    build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: booking } }
+    volumes: [storage:/data]
+    shm_size: 256mb # Chromium (PDF kontrak)
+  finance:
+    <<: *svc
+    image: ${RAVE_REGISTRY:-rave}/rave-finance:${RAVE_VERSION}
+    build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: finance } }
+  ticketing:
+    <<: *svc
+    image: ${RAVE_REGISTRY:-rave}/rave-ticketing:${RAVE_VERSION}
+    build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: ticketing } }
+  notification:
+    <<: *svc
+    image: ${RAVE_REGISTRY:-rave}/rave-notification:${RAVE_VERSION}
+    build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: notification } }
+  ads:
+    <<: *svc
+    image: ${RAVE_REGISTRY:-rave}/rave-ads:${RAVE_VERSION}
+    build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: ads } }
+  live:
+    <<: *svc
+    image: ${RAVE_REGISTRY:-rave}/rave-live:${RAVE_VERSION}
+    build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: live } }
+    environment: { <<: *env, LIVE_INTERNAL_URL: 'http://live:4010' }
+    ports: ['${LIVE_RTMP_BIND:-1935}:1935']
+    volumes: [storage:/data]
+  gateway:
+    <<: *svc
+    image: ${RAVE_REGISTRY:-rave}/rave-gateway:${RAVE_VERSION}
+    build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: gateway } }
+    # Rate limit bersama antar-replika; percayai X-Forwarded-For hanya dari hop jaringan privat (nginx/Caddy).
+    environment: { <<: *env, RATE_LIMIT_STORE: pg, TRUST_PROXY: '${TRUST_PROXY:-loopback,uniquelocal}' }
+
+  web:
+    image: ${RAVE_REGISTRY:-rave}/rave-web:${RAVE_VERSION}
+    build: { context: ., dockerfile: infra/docker/Dockerfile.web, target: runtime, args: *build-args }
+    restart: always
+    logging: *logging
+    security_opt: ['no-new-privileges:true']
+    depends_on: [gateway]
+    environment: { RAVE_GATEWAY_UPSTREAM: 'gateway:8080', RAVE_MAX_UPLOAD: '${RAVE_MAX_UPLOAD:-2g}' }
+    # Tanpa profil tls: web melayani HTTP langsung (pasang TLS di LB/Cloudflare). Dengan profil tls: set WEB_BIND=127.0.0.1:8081.
+    ports: ['${WEB_BIND:-80}:8080']
+
+  # HTTPS otomatis (Let's Encrypt) — aktifkan dengan `--profile tls` dan RAVE_DOMAIN.
+  caddy:
+    image: caddy:2.8-alpine
+    profiles: [tls]
+    restart: always
+    logging: *logging
+    depends_on: [web]
+    environment: { RAVE_DOMAIN: '${RAVE_DOMAIN:-localhost}', ACME_EMAIL: '${ACME_EMAIL:-}' }
+    ports: ['80:80', '443:443', '443:443/udp']
+    volumes:
+      - ./infra/docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  storage:
+  redpanda:
+  caddy_data:
+  caddy_config:

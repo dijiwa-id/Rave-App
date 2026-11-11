@@ -1,4 +1,4 @@
-# GEMA API Contract v1
+# RAVE API Contract v1
 
 > Acuan bersama backend ↔ frontend. Sumber: BRD/TDD v2.0 §11.2. Semua lewat **API Gateway** `http://localhost:8080` (browser memakai proxy Vite `/v1`).
 > Perubahan kontrak = ubah dokumen ini dulu.
@@ -98,8 +98,9 @@ Artist Studio (role artist/manager/label; ABAC: `artist_id ∈ token.orgs[].arti
 | `PATCH /v1/studio/artists/:artistId` | `{ bio?, image_url?, cover_url?, city?, genres? }` | `Artist` |
 | `POST /v1/studio/releases` | `{ artist_id, title, type:"SINGLE"\|"EP"\|"ALBUM", release_date, genre, label?, cover_url?, explicit?, tracks: { title, duration_ms?, isrc?, explicit?, audio_url? }[] }` | `Release` (DRAFT) |
 | `PATCH /v1/studio/releases/:id` | subset | `Release` |
-| `POST /v1/studio/uploads` | `{ kind: "audio"\|"artwork", filename, content_type, size }` | `{ upload_id, upload_url, public_url }` (dev: PUT biner ke `upload_url`) |
-| `PUT /v1/studio/uploads/:id` | biner | `{ public_url }` |
+| `POST /v1/studio/uploads` | `{ kind: "audio"\|"artwork", purpose?: "release"\|"playlist", filename, content_type, size }` | `{ upload_id, upload_url, public_url }` (dev: PUT biner ke `upload_url`). `content_type` boleh kosong — MIME audio ditentukan dari ekstensi. `purpose: "playlist"` = sampul playlist pengguna (gambar saja, ≤ 8 MB, ≥ 300 px) |
+| `PUT /v1/studio/uploads/:id` | biner | `{ public_url, meta, warnings[], transcode_status }` — audio: `meta` = `AudioMeta` (format, codec, lossless, sample_rate, bit_depth, channels, bitrate_kbps, duration_ms) |
+| `GET /v1/studio/uploads/:id` | | Status pengolahan (pemilik): `{ audio_meta, transcode_status: "pending"\|"processing"\|"done"\|"failed"\|"skipped", transcode_error, renditions: { low?, normal?, high?, lossless?: { codec_label, bytes } } }` |
 | `POST /v1/studio/releases/:id/submit` | | `Release` → IN_REVIEW, atau `422 { errors }` (validasi: artwork, audio, split 100%) |
 | `GET /v1/studio/tracks/:id/splits` | | `{ master: Split[], publishing: Split[], fully_approved }` |
 | `PUT /v1/studio/tracks/:id/splits` | `{ master: {party_name, email?, pct}[], publishing: [...] }` | sama |
@@ -138,7 +139,7 @@ Split = { id, type: "MASTER"|"PUBLISHING", party_name, email, pct, approved_at }
 | `GET /v1/library/playlists/featured` | `tag?` | `{ data: PlaylistSummary[] }` (editorial, publik) |
 | `POST /v1/library/playlists` | `{ title, description?, visibility?: "PUBLIC"\|"PRIVATE"\|"COLLAB" }` | `Playlist` |
 | `GET /v1/library/playlists/:id` | | `Playlist` (publik boleh tanpa token) |
-| `PATCH /v1/library/playlists/:id` / `DELETE` | | `Playlist` |
+| `PATCH /v1/library/playlists/:id` / `DELETE` | `{ title?, description?, visibility?, cover_url?: string\|null }` | `Playlist` — `cover_url` = berkas unggahan (`/v1/catalog/media/<file>.jpg\|png`, dari `POST /v1/studio/uploads` `purpose: "playlist"`) atau URL https; `null` = kembali ke sampul otomatis (lagu pertama). `PlaylistSummary.has_custom_cover` menandai sampul kustom. |
 | `POST /v1/library/playlists/:id/items` | `{ track_id }` | `PlaylistItem` (batas 10.000) |
 | `DELETE /v1/library/playlists/:id/items/:itemId` | | `{ ok }` |
 | `POST /v1/library/playlists/:id/items/:itemId/move` | `{ after_item_id: string\|null }` | `{ ok }` (fractional index) |
@@ -153,7 +154,7 @@ Playlist = PlaylistSummary & { items: { item_id, added_at, track: Track }[] }
 
 | Method & Path | Auth | Body / Query | Respons |
 |---|---|---|---|
-| `POST /v1/playback/sessions` | opsional | `{ track_id? , episode_id?, quality: "auto"\|"low"\|"normal"\|"high"\|"lossless" }` | `PlaybackSession` — anonim → `preview_only: true` (30 dtk); episode premium tanpa premium → 402 |
+| `POST /v1/playback/sessions` | opsional | `{ track_id? , episode_id?, quality: "auto"\|"low"\|"normal"\|"high"\|"lossless" }` | `PlaybackSession` — anonim → `preview_only: true` (30 dtk); episode premium tanpa premium → 402. **`high` (AAC 320) & `lossless` (FLAC) khusus Premium**: non-Premium/anonim diturunkan ke `normal` (AAC 160) dengan `quality_capped: "premium"\|"preview"`; `codec_label` mengikuti berkas yang benar-benar diputar (mis. `FLAC 24/96`). Master lossless tanpa rendisi standar → 503 untuk non-Premium (tidak pernah membocorkan FLAC). |
 | `GET /v1/playback/stream/:sessionId` | – (URL bertanda tangan `?exp&sig`) | | 302 ke sumber media |
 | `POST /v1/events/play` | opsional | `{ events: { session_id, track_id?, episode_id?, type: "start"\|"progress"\|"complete"\|"skip", position_ms, played_ms, at }[] }` | `{ accepted: n, qualified: n }` (qualified ≥ 30 dtk → event `playback.stream.qualified`) |
 | `GET /v1/analytics/artists/:artistId/summary` | pemilik/admin | `days=28` | `ArtistAnalytics` |
@@ -235,7 +236,7 @@ Dispute = { id, booking_id, by_party, reason, status: "OPEN"|"RESOLVED", outcome
 - Share link: `url` = `/epk/<slug>?token=<token>`; FE memanggil `GET /v1/booking/artists/<slug>/epk?token=`.
 - Discovery dengan `date` hanya mengembalikan artis yang available. Tanpa data playback, Audience Match memakai heuristik kota asal artis.
 - `cancel` sebelum SIGNED → `DECLINED` (kontrak SENT di-VOID). Setelah SIGNED → `CANCELLED_BY_*`/`FORCE_MAJEURE` + event `booking.cancelled` berisi jumlah refund/forfeit.
-- `show-done`: normalnya hanya saat `SHOW_DAY` (job memajukan BOOKED_AND_SECURED → SHOW_DAY pada hari-H). **Dev fast clock** (`GEMA_FAST_CLOCK=1`, default aktif bila NODE_ENV≠production): show-done boleh kapan saja setelah BOOKED_AND_SECURED, auto-complete 60 dtk, jendela dispute finance 30 dtk.
+- `show-done`: normalnya hanya saat `SHOW_DAY` (job memajukan BOOKED_AND_SECURED → SHOW_DAY pada hari-H). **Dev fast clock** (`RAVE_FAST_CLOCK=1`, default aktif bila NODE_ENV≠production): show-done boleh kapan saja setelah BOOKED_AND_SECURED, auto-complete 60 dtk, jendela dispute finance 30 dtk.
 - Admin resolve dispute: `RELEASE_TO_ARTIST` → SETTLED + pencairan; `REFUND_PROMOTOR` → CANCELLED_BY_ARTIST + refund penuh (event `booking.dispute.resolved`).
 
 ## 6. Finance (REQ-B2B-04, REQ-PAY-01..05)
@@ -285,7 +286,7 @@ Internal: `POST /internal/invoices` `{ purpose, reference_id, amount, payer_user
 | `POST /v1/ticketing/orders` | ✓ **Idempotency-Key** | `{ event_id, items: { ticket_type_id, quantity }[] }` | `{ order: Order, invoice: Invoice }` — kuota ditahan 10 menit, atomik (tanpa oversell) |
 | `GET /v1/ticketing/orders/:id` | pemilik | | `Order` |
 | `GET /v1/ticketing/tickets/mine` | ✓ | | `{ data: Ticket[] }` |
-| `GET /v1/ticketing/tickets/:id/qr` | pemilik | | `{ payload: "GEMA1.<ticket_id>.<code>", expires_in }` (berputar 15 dtk) |
+| `GET /v1/ticketing/tickets/:id/qr` | pemilik | | `{ payload: "RAVE1.<ticket_id>.<code>", expires_in }` (berputar 15 dtk) |
 | `POST /v1/ticketing/checkin` | anggota org promotor | `{ event_id, payload, gate }` | `{ ok: bool, reason?: "INVALID"\|"DUPLICATE"\|"WRONG_EVENT"\|"EXPIRED_CODE", ticket? }` |
 | `GET /v1/ticketing/events/:id/checkin-stats` | promotor | | `{ sold, checked_in, by_gate: { gate, count }[] }` |
 | `POST /v1/ticketing/events/:id/cancel` | OWNER/ADMIN org promotor, admin | `{ reason }` (min. 10 karakter) | `EventDetail & { refunds: { requested, queued, sla_days } }` — event `CANCELLED`, reservasi berjalan dihentikan, semua order PAID direfund penuh termasuk biaya layanan (sisa diteruskan job `refund-cancelled-events`) |
@@ -327,12 +328,12 @@ Ticket = { id, event: EventSummary, type_name, status: "VALID"|"CHECKED_IN"|"REF
 
 | Email | Peran | Catatan |
 |---|---|---|
-| `fan@gema.id` | fan | onboarded, kota Bandung |
-| `artis@gema.id` | artist | OWNER org artis **Senja Kolektif** |
-| `manajer@gema.id` | manager | OWNER **Nada Manajemen**, mengelola Senja Kolektif |
-| `promotor@gema.id` | promotor | OWNER **Pensi Nusantara** (KYC terverifikasi) |
-| `admin@gema.id` | admin (admin_role OPS) | back office |
-| `superadmin@gema.id` | admin + superadmin (admin_role SUPER_ADMIN) | back office + panel Platform (§9) |
+| `fan@rave.id` | fan | onboarded, kota Bandung |
+| `artis@rave.id` | artist | OWNER org artis **Senja Kolektif** |
+| `manajer@rave.id` | manager | OWNER **Nada Manajemen**, mengelola Senja Kolektif |
+| `promotor@rave.id` | promotor | OWNER **Pensi Nusantara** (KYC terverifikasi) |
+| `admin@rave.id` | admin (admin_role OPS) | back office |
+| `superadmin@rave.id` | admin + superadmin (admin_role SUPER_ADMIN) | back office + panel Platform (§9) |
 
 Login: `POST /v1/auth/otp` → pakai `dev_code` dari respons → `POST /v1/auth/token`.
 
@@ -362,7 +363,7 @@ Registri pengaturan = `packages/domain/src/settings.ts` (`SETTINGS`, `coerceSett
 | Method & Path | Akses | Body / Query | Respons |
 |---|---|---|---|
 | `GET /v1/platform/config` | publik | | `{ version, settings: { <kunci public>: nilai } }` (banner, maintenance, modul, preview, upload maks) |
-| `GET /v1/admin/platform/settings` | R | | `{ version, values: Record<key, value>, meta: Record<key, { updated_by, updated_at }> }` (registri diambil klien dari `@gema/domain/settings`) |
+| `GET /v1/admin/platform/settings` | R | | `{ version, values: Record<key, value>, meta: Record<key, { updated_by, updated_at }> }` (registri diambil klien dari `@rave/domain/settings`) |
 | `PUT /v1/admin/platform/settings` | W | `{ changes: Record<key, value>, reason: string (min 5) }` | sama seperti GET; `400` bila validasi registri gagal (`errors[{path:key,message}]`) |
 | `POST /v1/admin/platform/settings/reset` | W | `{ keys: string[], reason }` | kembali ke default |
 | `GET /v1/admin/platform/settings/history` | R | `key?` | `{ data: { id, key, old_value, new_value, reason, by_user_id, by_name, created_at }[] }` |
@@ -419,7 +420,7 @@ Pengguna yang ditangguhkan: OTP & refresh ditolak `403`. `Me` kini memuat `admin
 
 Branding & tema (grup `branding`, semua publik): `branding.logo_url` (logo latar terang), `branding.logo_dark_url` (latar gelap; kosong = logo terang), `branding.icon_url` (ikon + favicon, persegi), `appearance.dashboard_theme` ∈ `light|dark|system` (default dasbor B2B), `appearance.allow_user_theme` (pengguna boleh override; pilihan disimpan per perangkat). Nilai gambar hanya boleh path `/v1/platform/branding/<file>.svg|png` yang sudah diunggah; file yang sedang dipakai tidak bisa dihapus dari bucket (`409`).
 
-Penegakan di gateway: `maintenance.enabled` → semua non-GET selain `/v1/auth`, `/v1/admin`, `/v1/platform`, `/v1/webhooks`, POST pemutaran (`/v1/playback/*`, `/v1/events/play`, `/v1/live/streams/:id/playback|heartbeat`) (dan token admin) dijawab `503 { type: "https://gema.id/problems/maintenance", detail: maintenance.message }`; `modules.booking=false` / `modules.ticketing=false` / `modules.waitlist=false` → non-GET ke prefix terkait `503 { type: ".../module-disabled" }`; rate limit membaca `security.rate_limit_*`.
+Penegakan di gateway: `maintenance.enabled` → semua non-GET selain `/v1/auth`, `/v1/admin`, `/v1/platform`, `/v1/webhooks`, POST pemutaran (`/v1/playback/*`, `/v1/events/play`, `/v1/live/streams/:id/playback|heartbeat`) (dan token admin) dijawab `503 { type: "https://rave.id/problems/maintenance", detail: maintenance.message }`; `modules.booking=false` / `modules.ticketing=false` / `modules.waitlist=false` → non-GET ke prefix terkait `503 { type: ".../module-disabled" }`; rate limit membaca `security.rate_limit_*`.
 
 ## 10. Live Streaming (konser & sesi live)
 
@@ -489,7 +490,7 @@ AdCreative = {
   image_url: string|null, audio_url: string|null, click_url: string|null, cta_label: string|null,
   theme_color: string|null,          // warna latar kartu display bila tanpa gambar
   duration_s, skippable_after_s: number|null,   // null = tidak bisa dilewati
-  label: "Iklan" | "Dari GEMA", is_house: boolean
+  label: "Iklan" | "Dari RAVE", is_house: boolean
 }
 AdBreakResponse = { break_id: string|null, ads: AdCreative[], outcome: AdBreakOutcome, reason: string }
 Campaign = {
@@ -519,3 +520,13 @@ Campaign = {
 | `POST /v1/admin/ads/simulate` | admin | `{ premium, anonymous?, consent?, placement, premium_content?, content_warning?, streams_today, streams_since_break, minutes_since_break: number\|null, ads_last_hour, city?, genres? }` | `{ outcome, label, slots, trace: { rule, pass, detail }[], eligible_campaigns: { id, name, advertiser, is_house, reason: string\|null }[] }` — memakai pengaturan saat ini |
 
 Seed: 3 promosi internal (Premium, event, live), 2 kampanye berbayar fiktif disetujui (kategori `food_beverage`, `telco`), 1 kampanye `finance` menunggu tinjauan.
+
+
+## Audio master & rendisi streaming (catalog + playback)
+
+- **Format master** Artist Studio: WAV, FLAC, AIFF, ALAC/AAC (M4A), MP3, OGG, Opus — divalidasi dengan ffmpeg (`transcoding.min_sample_rate_hz`, `transcoding.min_bit_depth` untuk master lossless). Master lossy diterima dengan peringatan (tanpa Lossless; AAC 320 hanya bila ≥ 256 kbps).
+- **Rendisi** (`transcoding.renditions`, worker `audio-transcode` di catalog, antrean `uploads.transcode_status` dengan `FOR UPDATE SKIP LOCKED`, 3× percobaan): `low` AAC 64, `normal` AAC 160, `high` AAC 320, `lossless` FLAC (≤ 24-bit/96 kHz, hanya dari master lossless). Berkas: `/v1/catalog/media/<id>.<quality>.m4a|flac`.
+- **Hak kualitas** (`packages/domain/src/audio.ts → resolvePlayback`): `high` & `lossless` khusus Premium; `streaming.lossless_enabled` mematikan Lossless (Premium turun ke AAC 320).
+- **Perlindungan**: berkas `*.high.m4a` & `*.lossless.flac` hanya dengan URL bertanda tangan dari playback (`?exp&sig`, HMAC `MEDIA_SIGNING_SECRET`, kedaluwarsa bersama sesi) — tanpa tanda tangan 403. `GET /v1/catalog/media/:file` mendukung `Range` (206) untuk seek.
+- **Track** (publik) menyertakan `audio: { lossless, hires, sample_rate, bit_depth, codec, transcode_status } | null` — tanpa URL master.
+- **File yatim** (panel Storage): referensi digabung dari catalog (artwork, master, rendisi) dan library (sampul playlist); salah satu tak terjangkau → pemindaian dibatalkan.

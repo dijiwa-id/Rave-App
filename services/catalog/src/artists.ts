@@ -1,4 +1,4 @@
-import { publish, slugify, type Client } from '@gema/service-kit';
+import { publish, slugify, type Client } from '@rave/service-kit';
 import { ARTIST_SUMMARY_COLS } from './queries.js';
 
 /** Publikasikan read model artis (booking/ticketing/library memakai event ini) & kembalikan data artis. */

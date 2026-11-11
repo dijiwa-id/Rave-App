@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { publish, settings, uuidv7, type Client, type Consumers, type Job, type ServiceContext } from '@gema/service-kit';
+import { publish, settings, uuidv7, type Client, type Consumers, type Job, type ServiceContext } from '@rave/service-kit';
 import { refundCancelledOrders, releasePendingOrder, releaseReservation, requestInvoice, requestRefund, type Q } from './shared.js';
 
 export function consumers({ log }: ServiceContext): Consumers {

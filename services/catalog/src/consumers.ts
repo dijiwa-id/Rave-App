@@ -1,4 +1,4 @@
-import type { Consumers, Job, ServiceContext } from '@gema/service-kit';
+import type { Consumers, Job, ServiceContext } from '@rave/service-kit';
 import { publishArtist, uniqueSlug } from './artists.js';
 
 export function consumers(_ctx: ServiceContext): Consumers {

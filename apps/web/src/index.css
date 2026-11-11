@@ -1,41 +1,83 @@
 @import 'tailwindcss';
 
+
 /*
- * GEMA design tokens (BRD §12.1: satu design system; mode gelap default di player, terang di dasbor B2B).
- * Palet fan app: sidebar hitam, kanvas #121212, aksen primer magenta GEMA (dari gradien logo ungu → magenta → oranye).
+ * RAVE design tokens. Merek: `rave-*` (palet) + netral app `rave-black/base/elevated/...` + primer `rave-primary*`.
+ * Palet (rave-website): ink #181818, paper #EDEDED, ungu #5B2A6E, plum #2A1233, mustard #F4C21F, teal #1F5C52, berry #8A2F3F.
+ * Semangat DIY: warna datar, tipografi poster kapital padat, label berspasi lebar, tekstur grain/pita/stiker.
  */
 @theme {
-  --font-sans: 'Figtree', ui-sans-serif, system-ui, sans-serif;
+  /* Paragraf: Bricolage Grotesque — grotesque indie bergaya majalah DIY, nyaman dibaca panjang. */
+  --font-sans: 'Bricolage Grotesque', 'Archivo', ui-sans-serif, system-ui, sans-serif;
+  /* Primer: Staatliches — huruf poster konstruktivis/Bauhaus 1920-an yang diwarisi flyer & sampul punk/post-punk. Satu bobot (400). */
+  --font-display: 'Staatliches', 'Anton', Impact, 'Arial Narrow', sans-serif;
+  /* Sekunder: Space Mono — baris info flyer rave (tanggal, venue, katalog, tombol). */
+  --font-label: 'Space Mono', ui-monospace, 'Courier New', monospace;
 
-  --color-gema-black: #000000;
-  --color-gema-base: #121212;
-  --color-gema-elevated: #181818;
-  --color-gema-highlight: #282828;
-  --color-gema-line: #2a2a2a;
-  --color-gema-muted: #b3b3b3;
-  --color-gema-subtle: #727272;
-  /* Primer GEMA: isian (tombol play, toggle, progress) dengan teks putih — kontras 4.88:1. */
-  --color-gema-primary: #da1c5c;
-  --color-gema-primary-hover: #e6336f;
-  --color-gema-primary-dark: #b8174e;
-  /* Teks & ikon aktif di atas kanvas gelap — kontras 6.4:1 pada #121212 (primer saja hanya 3.8:1). */
-  --color-gema-primary-text: #ff5c8e;
-  --color-gema-blue: #1e70e0;
-  --color-gema-purple: #7c3aed;
-  --color-gema-pink: #e8115b;
-  --color-gema-orange: #f59b23;
+  --color-rave-ink: #181818;
+  --color-rave-paper: #ededed;
+  --color-rave-purple: #5b2a6e;
+  --color-rave-purple-soft: #7a3e91;
+  --color-rave-plum: #2a1233;
+  --color-rave-mustard: #f4c21f;
+  --color-rave-teal: #1f5c52;
+  --color-rave-berry: #8a2f3f;
+  /* Aksen interaktif dasbor (hover/fokus) — ungu di tema terang, lavender di tema gelap (di-override di bawah). */
+  --color-rave-accent: #5b2a6e;
 
-  /* B2B (light; tema gelap meng-override di bawah) */
-  --color-b2b-bg: #f6f6f4;
+  --color-rave-black: #0e0c0f;
+  --color-rave-base: #181818;
+  --color-rave-elevated: #1f1d21;
+  --color-rave-highlight: #2b282e;
+  --color-rave-line: #2e2b31;
+  --color-rave-muted: #bdb8c2;
+  --color-rave-subtle: #807a86;
+  /* Primer RAVE: mustard. Isian primer selalu berteks ink (`text-rave-on-primary`) — kontras 10.9:1. */
+  --color-rave-primary: #f4c21f;
+  --color-rave-primary-hover: #ffd23f;
+  --color-rave-primary-dark: #d9a90f;
+  --color-rave-on-primary: #181818;
+  /* Teks & ikon aktif di atas kanvas gelap — mustard, kontras 11:1 pada #181818. */
+  --color-rave-primary-text: #f4c21f;
+  --color-rave-blue: #1f5c52;
+  --color-rave-pink: #8a2f3f;
+  --color-rave-orange: #f4c21f;
+
+  /* B2B (light: kertas hangat; tema gelap meng-override di bawah) */
+  --color-b2b-bg: #f4f2ee;
   --color-b2b-card: #ffffff;
-  --color-b2b-line: #e7e5e4;
-  --color-b2b-ink: #111111;
-  --color-b2b-muted: #6b6b6b;
-  /* Teks di atas permukaan "ink" (tombol utama, nav aktif) */
+  --color-b2b-line: #e3ded6;
+  --color-b2b-ink: #181818;
+  --color-b2b-muted: #6b6570;
+  /* Teks di atas permukaan "ink" (tombol utama, nav aktif) — permukaan ini ungu RAVE, jadi putih di kedua tema. */
   --color-b2b-on-ink: #ffffff;
 
-  --radius-card: 8px;
-  --shadow-card: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --radius-card: 0px;
+  --shadow-card: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+/*
+ * Pilihan font primer (Super Admin → Branding & Tema → `branding.primary_font`, dipasang di <html data-primary-font>).
+ * - Primary Font 1 = Staatliches (bawaan, = `--font-display` di @theme) — poster konstruktivis.
+ * - Primary Font 2 = Rubik Dirt (OFL, Google Fonts) — huruf tebal bertekstur kasar ala sablon/flyer gig DIY.
+ *   Karakter Latin lengkap, satu bobot (400). Hurufnya ±1,57× lebih lebar dari Staatliches → dinormalkan dengan
+ *   `font-size-adjust: cap-height .5` (lebar ±1,12×) agar judul `nowrap` (hero) tetap muat tanpa mengubah ukuran
+ *   di tiap komponen. Browser tanpa dukungan `font-size-adjust` tetap memakai Primary Font 1 (layout aman).
+ * Hanya `--font-display` yang diganti — paragraf (sans) & label (mono) tetap. Font Google tidak diunduh
+ * sebelum dipakai, jadi Rubik Dirt hanya dimuat bila Primary Font 2 aktif.
+ */
+:root {
+  --font-primary-1: 'Staatliches', 'Anton', Impact, 'Arial Narrow', sans-serif;
+  --font-primary-2: 'Rubik Dirt', 'Staatliches', 'Anton', Impact, 'Arial Narrow', sans-serif;
+  /* Bobot judul display (kedua font hanya punya 400) — token agar font berikutnya bisa memakai bobot lain. */
+  --font-display-weight: 400;
+  --font-display-adjust: none;
+}
+@supports (font-size-adjust: cap-height 0.5) {
+  :root[data-primary-font='primary2'] {
+    --font-display: var(--font-primary-2);
+    --font-display-adjust: cap-height 0.5;
+  }
 }
 
 html,
@@ -48,7 +90,7 @@ body,
   height: 100dvh;
 }
 body {
-  @apply bg-gema-black text-white antialiased font-sans;
+  @apply bg-rave-black text-white antialiased font-sans;
 }
 
 /*
@@ -58,12 +100,13 @@ body {
  */
 :root[data-b2b-theme='dark'] {
   color-scheme: dark;
-  --color-b2b-bg: #0e0e10;
-  --color-b2b-card: #18181b;
-  --color-b2b-line: #2e2e33;
-  --color-b2b-ink: #f4f4f5;
-  --color-b2b-muted: #a1a1aa;
-  --color-b2b-on-ink: #111111;
+  --color-b2b-bg: #121013;
+  --color-b2b-card: #1c191e;
+  --color-b2b-line: #2e2a31;
+  --color-b2b-ink: #ededed;
+  --color-b2b-muted: #a9a3ae;
+  --color-rave-accent: #c9a0dc;
+  --color-b2b-on-ink: #ffffff;
 
   /* Tint terang (bg-*-50/100/200) → lapisan gelap transparan; teks *-600..900 → versi terang. */
   --color-emerald-50: rgb(16 185 129 / 0.12);
@@ -128,30 +171,233 @@ body {
 }
 
 /* Scrollbar ala player */
-.gema-scroll::-webkit-scrollbar {
+.rave-scroll::-webkit-scrollbar {
   width: 12px;
 }
-.gema-scroll::-webkit-scrollbar-thumb {
+.rave-scroll::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.25);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 999px;
 }
-.gema-scroll::-webkit-scrollbar-track {
+.rave-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
 
 /* Kartu media (mockup Spotify 1/3/8) */
-.media-card {
-  @apply relative rounded-[var(--radius-card)] bg-gema-elevated p-4 transition-colors duration-300 hover:bg-gema-highlight;
+/*
+ * Kanvas app player — SATU sumber tekstur untuk semua halaman aplikasi (sama seperti Beranda):
+ * raster halftone 45° yang rapi & halus (assets/brand/app-dots.webp — strip 12px diulang horizontal, titik paper bersemu
+ * mustard di atas, mengecil mulus ke bawah) + cahaya ungu lembut kanan atas + gradasi plum→ink.
+ * Header halaman hanya menambah cahaya warna transparan (glow()), jadi titik ini terlihat sama di setiap halaman.
+ */
+.rave-app-canvas {
+  background-color: #181818;
+  background-image:
+    url('./assets/brand/app-dots.webp'),
+    radial-gradient(60rem 30rem at 92% -6%, rgb(122 62 145 / 0.14), transparent 70%),
+    linear-gradient(180deg, #21122a 0, #1b161e 260px, #181818 460px);
+  background-size: 12px 520px, 100% 100%, 100% 100%;
+  background-position: 0 0, 0 0, 0 0;
+  background-repeat: repeat-x, no-repeat, no-repeat;
+  background-attachment: local;
 }
-.media-card .play-fab {
-  @apply absolute right-6 bottom-[96px] grid size-12 translate-y-2 place-items-center rounded-full bg-gema-primary text-white opacity-0 shadow-[var(--shadow-card)] transition-all duration-300;
-}
-.media-card:hover .play-fab {
-  @apply translate-y-0 opacity-100;
+/* Raster titik rapi yang sama untuk permukaan kecil (banner, pita): titik paper tipis seragam. */
+.rave-dots {
+  background-image: radial-gradient(rgb(237 237 237 / 0.07) 1.2px, transparent 1.7px);
+  background-size: 9px 9px;
 }
 
+/*
+ * Kontrol pemutar bergaya skin pemutar desktop klasik (era akhir 90-an) dalam palet RAVE:
+ * baki gelap berbingkai bevel, tombol kotak kecil dengan bevel piksel 1px (terang kiri-atas, gelap kanan-bawah)
+ * yang terbalik saat ditekan, PLAY mustard, LED mustard untuk toggle (acak/ulang), dan layar LCD fosfor mustard.
+ */
+.deck-tray {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  background: linear-gradient(180deg, #2a2830, #1b1a1f);
+  box-shadow: inset 1px 1px 0 #4a4752, inset -1px -1px 0 #0b0a0d, 0 0 0 1px #0b0a0d;
+}
+.deck-key {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  height: 30px;
+  min-width: 38px;
+  padding: 0 9px;
+  border-radius: 0;
+  color: #e4e1ea;
+  background: linear-gradient(180deg, #57545e 0%, #45424c 55%, #3a3840 100%);
+  box-shadow:
+    inset 1px 1px 0 #8d8996,
+    inset -1px -1px 0 #1e1d22,
+    inset 2px 2px 0 rgb(255 255 255 / 0.06),
+    0 0 0 1px #0b0a0d;
+  transition: filter 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.deck-key svg {
+  filter: drop-shadow(1px 1px 0 rgb(0 0 0 / 0.7));
+}
+.deck-key:hover {
+  filter: brightness(1.12);
+}
+.deck-key:focus-visible {
+  outline: 2px solid #f4c21f;
+  outline-offset: 2px;
+}
+.deck-key:active,
+.deck-key[aria-pressed='true'] {
+  background: linear-gradient(180deg, #34323a, #3e3c45);
+  box-shadow: inset 1px 1px 0 #16151a, inset -1px -1px 0 #6d6977, 0 0 0 1px #0b0a0d;
+}
+.deck-key:active > *:not(.deck-led) {
+  transform: translate(1px, 1px);
+}
+.deck-key[aria-disabled='true'] {
+  cursor: not-allowed;
+  filter: grayscale(0.5) brightness(0.7);
+}
+.deck-key--play {
+  color: #181818;
+  background: linear-gradient(180deg, #ffd650 0%, #f4c21f 55%, #d9a90f 100%);
+  box-shadow: inset 1px 1px 0 #fff0b3, inset -1px -1px 0 #8a6505, 0 0 0 1px #0b0a0d;
+}
+.deck-key--play svg {
+  filter: drop-shadow(1px 1px 0 rgb(255 255 255 / 0.45));
+}
+.deck-key--play:active {
+  background: linear-gradient(180deg, #d9a90f, #f4c21f);
+  box-shadow: inset 1px 1px 0 #8a6505, inset -1px -1px 0 #ffe27a, 0 0 0 1px #0b0a0d;
+}
+.deck-key--sm {
+  height: 30px;
+  min-width: 32px;
+  padding: 0 7px;
+}
+.deck-key--lg {
+  height: 48px;
+  min-width: 60px;
+  padding: 0 14px;
+}
+.deck-led {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 6px;
+  height: 3px;
+  background: #3a3010;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.45);
+}
+.deck-key[aria-pressed='true'] .deck-led {
+  background: #ffd650;
+  box-shadow: 0 0 5px 1px rgb(244 194 31 / 0.75);
+}
+
+/* Layar LCD pemutar: kaca hitam cekung, digit fosfor mustard, garis pindai halus. */
+.deck-lcd {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  height: 38px;
+  color: #f4c21f;
+  background:
+    repeating-linear-gradient(180deg, rgb(255 255 255 / 0.025) 0 1px, transparent 1px 3px),
+    linear-gradient(180deg, #050506, #0d0c0f);
+  box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 #3a3842, 0 0 0 1px #0b0a0d;
+  font-family: var(--font-label);
+  text-shadow: 0 0 6px rgb(244 194 31 / 0.55);
+}
+.deck-lcd__time {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.deck-lcd__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.deck-lcd__dim {
+  color: rgb(244 194 31 / 0.3);
+  text-shadow: none;
+}
+.deck-spectrum {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 22px;
+}
+.deck-spectrum > span {
+  width: 3px;
+  height: 100%;
+  background: linear-gradient(0deg, #f4c21f 0 55%, #ffd650 55% 80%, #ff6a3d 80%);
+  transform-origin: bottom;
+  transform: scaleY(0.12);
+  box-shadow: 0 0 4px rgb(244 194 31 / 0.4);
+}
+.deck-spectrum[data-on='true'] > span {
+  animation: deck-eq 0.9s ease-in-out infinite alternate;
+}
+@keyframes deck-eq {
+  0% { transform: scaleY(0.15); }
+  35% { transform: scaleY(0.85); }
+  65% { transform: scaleY(0.4); }
+  100% { transform: scaleY(1); }
+}
+
+/* Seek/volume: alur cekung + thumb kotak berbevel. */
+.deck-groove {
+  background: #0a090c;
+  box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 #3a3842;
+}
+.deck-thumb {
+  background: linear-gradient(180deg, #d8d5de, #9d99a6);
+  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #4a4752, 0 0 0 1px #0b0a0d;
+}
+@media (prefers-reduced-motion: reduce) {
+  .deck-key { transition: none; }
+  .deck-spectrum[data-on='true'] > span { animation: none; transform: scaleY(0.5); }
+}
+
+/*
+ * Latar loader: overlay hitam transparan + raster titik rapi + vignette (gelap di tepi, terbuka di tengah).
+ * Dipakai PageLoader (dalam aplikasi) — loader boot di index.html memakai nilai yang sama.
+ */
+.rave-loader-bg {
+  background:
+    radial-gradient(circle at 50% 45%, rgb(11 10 12 / 0.35) 0, rgb(11 10 12 / 0.82) 62%, rgb(11 10 12 / 0.92) 100%),
+    radial-gradient(rgb(237 237 237 / 0.1) 1.2px, transparent 1.7px) 0 0 / 9px 9px,
+    rgb(11 10 12 / 0.55);
+}
+
+/* Kartu media app player = kartu punk landing (tajam, garis tebal, bayangan sablon, terangkat saat hover). */
+.media-card {
+  @apply relative rounded-none bg-rave-elevated p-4;
+  border: 2px solid rgb(237 237 237 / 0.12);
+  background-image: radial-gradient(rgb(237 237 237 / 0.04) 1px, transparent 1.2px);
+  background-size: 6px 6px;
+  box-shadow: 5px 5px 0 #0b0a0c;
+  transition: translate 0.35s cubic-bezier(0.2, 0.7, 0.1, 1), box-shadow 0.35s cubic-bezier(0.2, 0.7, 0.1, 1), border-color 0.3s;
+}
+.media-card:hover {
+  translate: -2px -2px;
+  border-color: rgb(244 194 31 / 0.6);
+  box-shadow: 8px 8px 0 #f4c21f;
+}
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -161,7 +407,7 @@ body {
 
 /* Fokus terlihat (WCAG 2.2 AA) */
 :focus-visible {
-  outline: 2px solid var(--color-gema-primary-text);
+  outline: 2px solid var(--color-rave-primary-text);
   outline-offset: 2px;
 }
 
@@ -172,4 +418,632 @@ body {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+@layer components {
+  /*
+   * "Glass" versi RAVE — bukan kaca neon lagi, melainkan permukaan datar plum/ungu bertekstur grain tipis
+   * dengan garis tepi paper halus (estetika poster/zine). `-strong` untuk kartu utama (ungu → plum).
+   */
+  /*
+   * Kartu RAVE = konsep punk/zine: permukaan fotokopi bertekstur grain + halftone, garis tepi tebal,
+   * bayangan offset keras ala sablon, sedikit miring (--tilt) lalu "ditempel lurus" saat hover.
+   * `rave-glass` & `rave-card` berbagi gaya; `-strong` = varian ungu label.
+   * Rotasi memakai properti `rotate` agar tidak bentrok dengan transform animasi motion.
+   */
+  .rave-glass,
+  .rave-glass-strong,
+  .rave-card {
+    position: relative;
+    isolation: isolate;
+    border-radius: 0 !important;
+    border: 2.5px solid rgb(237 237 237 / 0.2);
+    background-color: #1e1c1f;
+    background-image:
+      radial-gradient(rgb(237 237 237 / 0.05) 1px, transparent 1.2px),
+      linear-gradient(160deg, rgb(91 42 110 / 0.18), transparent 55%);
+    background-size: 6px 6px, auto;
+    box-shadow: 6px 6px 0 #0b0a0c;
+    rotate: var(--tilt, 0deg);
+    transition:
+      rotate 0.45s cubic-bezier(0.2, 0.7, 0.1, 1),
+      translate 0.45s cubic-bezier(0.2, 0.7, 0.1, 1),
+      box-shadow 0.45s cubic-bezier(0.2, 0.7, 0.1, 1),
+      border-color 0.3s;
+  }
+  .rave-glass-strong,
+  .rave-card-label {
+    border-color: #0b0a0c;
+    background-color: #5b2a6e;
+    background-image:
+      radial-gradient(rgb(0 0 0 / 0.22) 1.1px, transparent 1.3px),
+      linear-gradient(150deg, #6a3280, #2a1233 85%);
+    background-size: 5px 5px, auto;
+    box-shadow: 7px 7px 0 #f4c21f;
+  }
+  .rave-card-paper {
+    border-color: #181818;
+    background-color: #ededed;
+    background-image: radial-gradient(rgb(24 24 24 / 0.07) 1px, transparent 1.2px);
+    background-size: 6px 6px;
+    color: #181818;
+    box-shadow: 6px 6px 0 #181818;
+  }
+  :is(.rave-card, .rave-card-hover):hover,
+  a.rave-card:focus-visible {
+    rotate: 0deg;
+    translate: -3px -3px;
+    border-color: rgb(244 194 31 / 0.7);
+    box-shadow: 10px 10px 0 #f4c21f;
+  }
+  .rave-card-paper:hover {
+    border-color: #181818;
+    box-shadow: 10px 10px 0 #5b2a6e;
+  }
+  .rave-glass::before,
+  .rave-glass-strong::before,
+  .rave-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background-image: var(--rave-grain);
+    opacity: 0.3;
+    mix-blend-mode: overlay;
+    pointer-events: none;
+  }
+  /* Miring bergantian dalam grid kartu (zine tempel-tempel). */
+  .rave-tilt > :nth-child(4n + 1) { --tilt: -1.1deg; }
+  .rave-tilt > :nth-child(4n + 2) { --tilt: 0.9deg; }
+  .rave-tilt > :nth-child(4n + 3) { --tilt: -0.6deg; }
+  .rave-tilt > :nth-child(4n + 4) { --tilt: 1.3deg; }
+
+  /* Selotip di tepi atas (elemen tanpa overflow-hidden). Sisi bergerigi seperti disobek tangan. */
+  .rave-taped::after {
+    content: '';
+    position: absolute;
+    top: -13px;
+    left: var(--tape-x, 50%);
+    width: 92px;
+    height: 24px;
+    translate: -50% 0;
+    rotate: var(--tape-r, -4deg);
+    background: rgb(237 237 237 / 0.72);
+    clip-path: polygon(0 8%, 6% 0, 12% 10%, 20% 2%, 30% 8%, 42% 0, 55% 9%, 66% 1%, 78% 8%, 88% 0, 100% 9%, 97% 52%, 100% 92%, 90% 100%, 78% 92%, 64% 100%, 50% 91%, 36% 100%, 22% 92%, 10% 100%, 0 90%, 3% 50%);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+    pointer-events: none;
+    z-index: 2;
+  }
+  .rave-tilt > .rave-taped:nth-child(even)::after { --tape-x: 30%; --tape-r: 5deg; }
+  .rave-tilt > .rave-taped:nth-child(3n)::after { --tape-x: 72%; --tape-r: -7deg; }
+
+  /* Stiker die-cut: garis putih tebal + bayangan, miring. */
+  .rave-sticker {
+    background-image: radial-gradient(rgb(0 0 0 / 0.12) 1px, transparent 1.3px);
+    background-size: 4px 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    border: 3px solid #ededed;
+    border-radius: 0 !important;
+    box-shadow: 3px 3px 0 #0b0a0c;
+    rotate: var(--sticker-r, -3deg);
+  }
+  /* Cap stempel label rekaman: garis putus-putus, tinta pudar. */
+  .rave-stamp {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    border: 1.5px dashed currentColor;
+    border-radius: 0;
+    padding: 0.3em 0.6em;
+    rotate: var(--stamp-r, -2deg);
+    font-family: var(--font-label);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    opacity: 0.85;
+  }
+  /* Huruf ransom-note: tiap huruf potongan kertas berbeda warna & miring. */
+  .rave-ransom {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.06em;
+  }
+  .rave-ransom > span {
+    display: inline-block;
+    padding: 0.02em 0.1em 0;
+    line-height: 0.95;
+    box-shadow: 2px 2px 0 #0b0a0c;
+  }
+  .rave-ransom > span:nth-child(5n + 1) { background: #f4c21f; color: #181818; rotate: -4deg; }
+  .rave-ransom > span:nth-child(5n + 2) { background: #ededed; color: #181818; rotate: 3deg; font-family: Georgia, 'Times New Roman', serif; font-style: italic; }
+  .rave-ransom > span:nth-child(5n + 3) { background: #5b2a6e; color: #ededed; rotate: -2deg; }
+  .rave-ransom > span:nth-child(5n + 4) { background: #181818; color: #f4c21f; rotate: 5deg; outline: 2px solid #ededed; outline-offset: -4px; }
+  .rave-ransom > span:nth-child(5n + 5) { background: #8a2f3f; color: #ededed; rotate: -5deg; font-family: var(--font-label); }
+  /* Staples logam di sudut kartu (alternatif selotip). */
+  .rave-stapled::after {
+    content: '';
+    position: absolute;
+    top: 10px;
+    left: 14px;
+    width: 26px;
+    height: 5px;
+    rotate: -18deg;
+    border-radius: 1px;
+    background: linear-gradient(180deg, #d9d9de, #8f8f99 60%, #5c5c66);
+    box-shadow: 0 1px 0 rgb(0 0 0 / 0.5), 22px -4px 0 -1px transparent;
+    z-index: 3;
+    pointer-events: none;
+  }
+  /* Nomor katalog ala label indie (RV-001). */
+  .rave-catno {
+    font-family: var(--font-label);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    opacity: 0.5;
+  }
+  /* ---------- Utilitas DIY RAVE ---------- */
+  /* Judul poster: kapital padat. */
+  .rave-display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.005em;
+    line-height: 0.92;
+    font-synthesis: none;
+  }
+  /* Label/eyebrow ala stempel: kapital berspasi lebar. */
+  .rave-label {
+    font-family: var(--font-label);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .rave-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--color-rave-primary-text);
+  }
+  .rave-eyebrow::before {
+    content: '';
+    width: 30px;
+    height: 1.5px;
+    background: currentColor;
+  }
+  /* Tekstur kertas fotokopi. */
+  .rave-grain {
+    position: relative;
+    isolation: isolate;
+  }
+  .rave-grain::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: var(--rave-grain);
+    opacity: 0.22;
+    mix-blend-mode: overlay;
+    pointer-events: none;
+  }
+  /* Alur piringan hitam (dekorasi). */
+  .rave-groove {
+    border-radius: 9999px;
+    background: repeating-radial-gradient(circle, #1a1a1a 0 12px, #0f0f0f 12px 13px);
+    box-shadow: 0 0 0 1px #262626, 0 40px 120px rgb(0 0 0 / 0.6);
+  }
+  /*
+   * Overlay kertas kusut di belakang konten (z -20: di atas latar section, di bawah elemen ber-z negatif lain seperti vinyl).
+   * Butuh induk ber-`isolate` (rave-grain/rave-card sudah) agar z negatif tetap di dalam section.
+   */
+  .rave-crumple {
+    position: relative;
+    isolation: isolate;
+  }
+  /*
+   * Tekstur: cetakan halftone kasar (raster titik 45° dari kertas kusut, titik tak rata & sebagian hilang tinta)
+   * — assets/brand/paper-halftone.webp. Titik hitam dibaur multiply → tampak tercetak di atas warna latar.
+   */
+  .rave-crumple::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -20;
+    background-image: url('./assets/brand/paper-halftone.webp');
+    background-size: cover;
+    background-position: center;
+    mix-blend-mode: multiply;
+    opacity: 0.42;
+    pointer-events: none;
+  }
+  /*
+   * Hero: poster gig DIY yang pernah dilipat 3×2 lalu dibuka — lipatan tegas, kerut, halftone sudut, toner fotokopi,
+   * tepi gosong & bekas selotip (assets/brand/hero-poster-folded.webp). Abu-abu netral → blend overlay.
+   */
+  .rave-poster::before {
+    background-image: url('./assets/brand/hero-poster-folded.webp');
+    background-size: 100% 100%;
+    mix-blend-mode: overlay;
+    opacity: 0.95;
+  }
+  /* Pita marquee mustard miring. */
+  .rave-band {
+    overflow: hidden;
+    white-space: nowrap;
+    background: var(--color-rave-mustard);
+    color: var(--color-rave-ink);
+    isolation: isolate;
+  }
+  /*
+   * Overlay pita: (1) titik acak tipis — ubin SVG 220px berisi 46 titik posisi tetap (seed), tajam di semua DPR;
+   * (2) gradien tepi kiri-kanan: mustard → transparan, sehingga isi marquee muncul/menghilang halus di kedua ujung.
+   * Di atas isi (z-20), tanpa menangkap pointer; statis (tidak ikut berjalan) agar marquee tetap ringan.
+   */
+  .rave-band::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    pointer-events: none;
+    background-image:
+      linear-gradient(90deg, var(--color-rave-mustard) 0, rgb(244 194 31 / 0) clamp(48px, 9vw, 160px), rgb(244 194 31 / 0) calc(100% - clamp(48px, 9vw, 160px)), var(--color-rave-mustard) 100%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cg fill='%233a2a00'%3E%3Ccircle cx='140.7' cy='5.5' r='0.8' fill-opacity='0.23'/%3E%3Ccircle cx='30.7' cy='22.5' r='1.1' fill-opacity='0.2'/%3E%3Ccircle cx='92.8' cy='6.6' r='0.7' fill-opacity='0.23'/%3E%3Ccircle cx='132.4' cy='123.5' r='1.1' fill-opacity='0.27'/%3E%3Ccircle cx='98.8' cy='61.2' r='0.55' fill-opacity='0.35'/%3E%3Ccircle cx='35.1' cy='93.0' r='0.8' fill-opacity='0.21'/%3E%3Ccircle cx='210.6' cy='74.1' r='0.55' fill-opacity='0.26'/%3E%3Ccircle cx='79.0' cy='75.7' r='0.8' fill-opacity='0.36'/%3E%3Ccircle cx='160.5' cy='118.0' r='0.9' fill-opacity='0.2'/%3E%3Ccircle cx='64.5' cy='138.3' r='0.8' fill-opacity='0.31'/%3E%3Ccircle cx='155.0' cy='10.1' r='0.7' fill-opacity='0.35'/%3E%3Ccircle cx='216.7' cy='188.2' r='0.55' fill-opacity='0.26'/%3E%3Ccircle cx='99.8' cy='183.5' r='0.7' fill-opacity='0.26'/%3E%3Ccircle cx='46.1' cy='58.7' r='0.55' fill-opacity='0.31'/%3E%3Ccircle cx='37.7' cy='160.4' r='0.7' fill-opacity='0.28'/%3E%3Ccircle cx='59.4' cy='203.6' r='1.1' fill-opacity='0.23'/%3E%3Ccircle cx='71.3' cy='169.0' r='0.55' fill-opacity='0.23'/%3E%3Ccircle cx='7.1' cy='69.4' r='0.8' fill-opacity='0.19'/%3E%3Ccircle cx='200.9' cy='124.8' r='0.8' fill-opacity='0.23'/%3E%3Ccircle cx='109.8' cy='194.6' r='0.9' fill-opacity='0.21'/%3E%3Ccircle cx='30.7' cy='163.9' r='1.1' fill-opacity='0.24'/%3E%3Ccircle cx='128.6' cy='197.5' r='0.9' fill-opacity='0.26'/%3E%3Ccircle cx='219.4' cy='30.4' r='0.9' fill-opacity='0.2'/%3E%3Ccircle cx='10.4' cy='24.1' r='0.7' fill-opacity='0.35'/%3E%3Ccircle cx='92.9' cy='14.0' r='0.9' fill-opacity='0.31'/%3E%3Ccircle cx='103.0' cy='55.3' r='1.1' fill-opacity='0.37'/%3E%3Ccircle cx='2.5' cy='158.6' r='1.1' fill-opacity='0.35'/%3E%3Ccircle cx='169.1' cy='74.8' r='0.8' fill-opacity='0.28'/%3E%3Ccircle cx='99.8' cy='209.8' r='0.8' fill-opacity='0.39'/%3E%3Ccircle cx='167.6' cy='111.7' r='0.55' fill-opacity='0.37'/%3E%3Ccircle cx='65.7' cy='140.6' r='1.1' fill-opacity='0.22'/%3E%3Ccircle cx='82.3' cy='35.5' r='1.1' fill-opacity='0.38'/%3E%3Ccircle cx='131.8' cy='107.5' r='0.55' fill-opacity='0.38'/%3E%3Ccircle cx='193.3' cy='183.0' r='0.8' fill-opacity='0.23'/%3E%3Ccircle cx='53.0' cy='124.8' r='0.55' fill-opacity='0.2'/%3E%3Ccircle cx='106.9' cy='15.2' r='1.1' fill-opacity='0.35'/%3E%3Ccircle cx='28.2' cy='104.6' r='1.1' fill-opacity='0.22'/%3E%3Ccircle cx='116.1' cy='133.5' r='0.7' fill-opacity='0.38'/%3E%3Ccircle cx='166.2' cy='151.8' r='0.8' fill-opacity='0.27'/%3E%3Ccircle cx='147.8' cy='82.2' r='1.1' fill-opacity='0.28'/%3E%3Ccircle cx='54.5' cy='14.1' r='0.55' fill-opacity='0.31'/%3E%3Ccircle cx='50.6' cy='48.4' r='0.55' fill-opacity='0.34'/%3E%3Ccircle cx='13.0' cy='14.8' r='0.55' fill-opacity='0.37'/%3E%3Ccircle cx='15.6' cy='52.4' r='0.9' fill-opacity='0.23'/%3E%3Ccircle cx='29.1' cy='205.8' r='1.1' fill-opacity='0.31'/%3E%3Ccircle cx='53.5' cy='104.1' r='0.9' fill-opacity='0.22'/%3E%3C/g%3E%3C/svg%3E");
+    background-size: 100% 100%, 220px 220px;
+  }
+  .rave-band > div {
+    display: inline-flex;
+    gap: 48px;
+    animation: rave-marq 32s linear infinite;
+  }
+  .rave-band:hover > div {
+    animation-play-state: paused;
+  }
+  .rave-band > div > :nth-child(even) {
+    color: var(--color-rave-purple);
+  }
+}
+
+:root {
+  --rave-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Tipografi judul: h1/h2 memakai display poster RAVE di seluruh aplikasi. */
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-weight: var(--font-display-weight) !important;
+  font-size-adjust: var(--font-display-adjust);
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  font-synthesis: none;
+}
+/* Bobot display dari token (Staatliches 400, stensil 800): cegah bold palsu dari utilitas font-bold/black. */
+.font-display {
+  font-weight: var(--font-display-weight) !important;
+  font-size-adjust: var(--font-display-adjust);
+  font-synthesis: none;
+}
+/* Di dasbor B2B judul tetap kapital padat, tapi h2 (judul kartu) memakai sans tegas agar padat data tetap terbaca. */
+:root[data-b2b-theme] main h2 {
+  font-family: var(--font-sans);
+  font-weight: 800 !important;
+  text-transform: none;
+  letter-spacing: -0.01em;
+}
+
+/*
+ * Dasbor B2B gaya RAVE (terang & gelap). Aktif selama layout B2B memasang data-b2b-theme di <html>.
+ * - Kanvas: kertas hangat + grain tipis.
+ * - "Terpilih / aksi utama" (bg-b2b-ink + text-b2b-on-ink: tombol utama, chip, tab, nav aktif) → ungu RAVE datar.
+ */
+:root[data-b2b-theme] {
+  /* Palet grafik kategori RAVE — tervalidasi (dataviz validate_palette: band L, chroma, CVD ΔE ≥ 17, kontras ≥ 3:1). */
+  --chart-1: #7a3e91;
+  --chart-2: #b98a00;
+  --chart-3: #1a8fb0;
+  --chart-4: #c8503a;
+  --b2b-grad: linear-gradient(135deg, #5b2a6e, #6d3383);
+  --b2b-glow: 3px 3px 0 rgb(24 24 24 / 0.9);
+  /* Kartu dasbor gaya cetak: garis tinta + bayangan sablon tipis. */
+  --b2b-card-border: rgb(24 24 24 / 0.85);
+  --b2b-hard-shadow: 3px 3px 0 rgb(24 24 24 / 0.85);
+  /* Raster titik rapi di kanvas (tinta tipis, memudar dari atas). */
+  --b2b-dots: radial-gradient(rgb(24 24 24 / 0.07) 1.1px, transparent 1.6px);
+  --b2b-canvas: radial-gradient(40rem 26rem at 100% 0%, rgb(244 194 31 / 0.08), transparent 70%),
+    radial-gradient(42rem 28rem at 0% 100%, rgb(91 42 110 / 0.07), transparent 70%);
+  --b2b-surface-shadow: 0 1px 0 rgb(24 24 24 / 0.04), 0 10px 28px -20px rgb(42 18 51 / 0.25);
+}
+:root[data-b2b-theme='dark'] {
+  --chart-1: #9a5cc0;
+  --chart-2: #b98a00;
+  --chart-3: #2b95c4;
+  --chart-4: #d05a3e;
+  --b2b-card-border: #3a3540;
+  --b2b-hard-shadow: 3px 3px 0 #050506;
+  --b2b-dots: radial-gradient(rgb(237 237 237 / 0.06) 1.1px, transparent 1.6px);
+  --b2b-canvas: radial-gradient(40rem 26rem at 100% 0%, rgb(244 194 31 / 0.06), transparent 70%),
+    radial-gradient(42rem 28rem at 0% 100%, rgb(91 42 110 / 0.2), transparent 70%);
+  --b2b-surface-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 16px 40px -20px rgb(0 0 0 / 0.7);
+}
+:root[data-b2b-theme] .b2b-canvas {
+  background-image: var(--b2b-dots), var(--b2b-canvas);
+  background-size: 9px 9px, auto;
+  background-attachment: fixed;
+}
+/* Konten dasbor: titik memudar ke bawah agar tabel & data tetap bersih. */
+:root[data-b2b-theme] .b2b-canvas main {
+  background: linear-gradient(180deg, transparent 0, var(--color-b2b-bg) 420px);
+}
+:root[data-b2b-theme] .bg-b2b-ink {
+  background-image: var(--b2b-grad);
+  background-color: #5b2a6e;
+  box-shadow: var(--b2b-glow);
+}
+:root[data-b2b-theme] .bg-b2b-ink.border-b2b-ink {
+  border-color: transparent;
+}
+:root[data-b2b-theme] button.bg-b2b-ink:hover:not(:disabled),
+:root[data-b2b-theme] a.bg-b2b-ink:hover {
+  filter: brightness(1.12);
+}
+/* Permukaan: kartu, statistik, header, sidebar, menu, modal. */
+.b2b-surface {
+  background-color: var(--color-b2b-card);
+  box-shadow: var(--b2b-surface-shadow);
+}
+:root[data-b2b-theme] main :is(.b2b-surface, .bg-b2b-card.border:not(input, select, textarea, button, [role='menu'], [role='tab'])) {
+  border-width: 2px !important;
+  border-color: var(--b2b-card-border) !important;
+  border-radius: 0 !important;
+  box-shadow: var(--b2b-hard-shadow);
+}
+/*
+ * Stabilitas tata letak dasbor:
+ * - anak grid/flex boleh menyusut (teks truncate tidak lagi memaksa kolom melebar → tidak ada overflow di ponsel);
+ * - kartu tidak pernah melebihi lebar kontainer; gambar & media mengikuti lebar.
+ */
+:root[data-b2b-theme] main .grid > * {
+  min-width: 0;
+}
+:root[data-b2b-theme] main :is(.b2b-surface, .bg-b2b-card) {
+  max-width: 100%;
+}
+:root[data-b2b-theme] main :is(img, video, canvas, svg) {
+  max-width: 100%;
+}
+/*
+ * Tabel dasbor — satu standar untuk SEMUA tabel (komponen <Table> maupun <table> langsung):
+ * ukuran huruf & padding seragam, header pita berwarna, zebra tipis, hover ber-highlight mustard + bilah aksen kiri,
+ * kolom pertama tebal sebagai identitas baris. Utilitas ukuran di sel (text-xs/text-sm/py-*) diseragamkan.
+ */
+:root[data-b2b-theme] main table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+:root[data-b2b-theme] main table thead th {
+  padding: 11px 16px !important;
+  font-family: var(--font-label);
+  font-size: 10.5px !important;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-b2b-ink);
+  background: color-mix(in srgb, var(--color-rave-purple) 9%, var(--color-b2b-card));
+  border-bottom: 2px solid var(--b2b-card-border);
+}
+:root[data-b2b-theme] main table tbody td {
+  padding: 12px 16px !important;
+  font-size: 13.5px !important;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--color-b2b-line);
+}
+/* Teks sekunder di dalam sel (baris kedua, keterangan) tetap satu ukuran turunan yang konsisten. */
+:root[data-b2b-theme] main table tbody td :is(.text-xs, .text-\[11px\], .text-\[12px\]) {
+  font-size: 12px !important;
+}
+:root[data-b2b-theme] main table tbody td :is(.text-sm, .text-base) {
+  font-size: 13.5px !important;
+}
+:root[data-b2b-theme] main table tbody td:first-child {
+  font-weight: 700;
+}
+:root[data-b2b-theme] main table tbody tr:last-child td {
+  border-bottom: 0;
+}
+:root[data-b2b-theme] main table tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--color-b2b-ink) 2.5%, transparent);
+}
+:root[data-b2b-theme] main table tbody tr {
+  transition: background-color 0.15s;
+}
+:root[data-b2b-theme] main table tbody tr:hover td {
+  background: color-mix(in srgb, var(--color-rave-mustard) 14%, transparent);
+}
+:root[data-b2b-theme] main table tbody tr:hover td:first-child {
+  box-shadow: inset 3px 0 0 var(--color-rave-mustard);
+}
+:root[data-b2b-theme='dark'] main table tbody tr:hover td {
+  background: color-mix(in srgb, var(--color-rave-mustard) 10%, transparent);
+}
+/*
+ * Kontrol form dasbor — satu bahasa visual RAVE untuk semua halaman (Studio, Promotor Hub, Back Office):
+ * garis tinta 2px, sudut tegas, fokus = garis tinta + bayangan sablon mustard, nonaktif = redup & tanpa bayangan.
+ */
+:root[data-b2b-theme] main :is(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file']), select, textarea) {
+  min-height: 42px;
+  font-size: 14px;
+}
+:root[data-b2b-theme] main :is(input, select, textarea):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none !important;
+}
+/* Dropdown: panah kustom (chevron tinta), ruang kanan cukup, tanpa gaya bawaan OS. */
+:root[data-b2b-theme] main select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.5rem !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23181818' stroke-width='3' stroke-linecap='square'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.9rem center;
+  background-size: 12px;
+  cursor: pointer;
+}
+:root[data-b2b-theme='dark'] main select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23ededed' stroke-width='3' stroke-linecap='square'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+:root[data-b2b-theme='dark'] main :is(input, select, textarea) {
+  color-scheme: dark;
+}
+/* Checkbox: kotak tinta 18px; tercentang = mustard + centang tinta. Radio: lingkaran dengan titik tinta. */
+:root[data-b2b-theme] main :is(input[type='checkbox'], input[type='radio']) {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  width: 18px !important;
+  height: 18px !important;
+  margin: 0;
+  border: 2px solid var(--b2b-card-border);
+  background: var(--color-b2b-card);
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background-color 0.12s, box-shadow 0.12s, transform 0.08s;
+}
+:root[data-b2b-theme] main input[type='radio'] {
+  border-radius: 9999px;
+}
+:root[data-b2b-theme] main input[type='checkbox']::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  transform: scale(0);
+  transition: transform 0.12s;
+  background: #181818;
+  clip-path: polygon(14% 52%, 0 66%, 38% 100%, 100% 22%, 86% 8%, 38% 72%);
+}
+:root[data-b2b-theme] main input[type='radio']::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  transform: scale(0);
+  transition: transform 0.12s;
+  background: #181818;
+}
+:root[data-b2b-theme] main :is(input[type='checkbox'], input[type='radio']):checked {
+  background: var(--color-rave-mustard);
+  border-color: #181818;
+  box-shadow: 2px 2px 0 #181818;
+}
+:root[data-b2b-theme] main :is(input[type='checkbox'], input[type='radio']):checked::before {
+  transform: scale(1);
+}
+:root[data-b2b-theme] main :is(input[type='checkbox'], input[type='radio']):hover:not(:disabled) {
+  border-color: var(--color-rave-accent);
+}
+:root[data-b2b-theme] main :is(input[type='checkbox'], input[type='radio']):active:not(:disabled) {
+  transform: scale(0.92);
+}
+/* Slider & file input */
+:root[data-b2b-theme] main input[type='range'] {
+  accent-color: var(--color-rave-mustard);
+  cursor: pointer;
+}
+:root[data-b2b-theme] main input[type='file']::file-selector-button {
+  margin-right: 0.75rem;
+  border: 2px solid var(--b2b-card-border);
+  background: var(--color-b2b-card);
+  color: var(--color-b2b-ink);
+  padding: 0.45rem 0.9rem;
+  font: 700 11px/1 var(--font-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 var(--b2b-card-border);
+}
+/* Fokus keyboard yang konsisten di seluruh dasbor (tombol, tautan, tab, menu, kontrol). */
+:root[data-b2b-theme] :is(button, a, [role='tab'], [role='menuitem'], [role='switch'], summary, input[type='checkbox'], input[type='radio']):focus-visible {
+  outline: 2px solid var(--color-rave-mustard);
+  outline-offset: 2px;
+}
+:root[data-b2b-theme] main button:disabled {
+  cursor: not-allowed;
+}
+
+/* Kartu yang bisa diklik: angkat tipis + bayangan sablon menebal (umpan balik jelas, tetap tenang). */
+:root[data-b2b-theme] main a.b2b-surface:hover,
+:root[data-b2b-theme] main a.bg-b2b-card.border:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--b2b-card-border);
+}
+.b2b-chrome {
+  background-color: color-mix(in srgb, var(--color-b2b-card) 86%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+:root[data-b2b-theme] [role='menu'].bg-b2b-card,
+:root[data-b2b-theme] .sticky.bg-b2b-card {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+/* Garis atas pada kartu statistik: strip mustard/ungu ala pita sablon. */
+.b2b-accent-top {
+  position: relative;
+  overflow: hidden;
+}
+.b2b-accent-top::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, #f4c21f 0 40%, #5b2a6e 40% 100%);
+}
+@keyframes rave-marq {
+  to { transform: translateX(-50%); }
+}
+@keyframes rave-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes rave-fade {
+  from { opacity: 0; }
+}
+@keyframes rave-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [class*='animate-[rave-'], .rave-band > div { animation: none !important; }
+  .rave-card, .rave-glass, .rave-glass-strong { transition: none; }
+}
+
+/*
+ * Rel sidebar dasbor RAVE: selalu gelap (ink) di kedua tema — memetakan ulang token B2B secara lokal
+ * sehingga semua utilitas di dalamnya (teks, garis, hover, pemilih konteks) ikut gelap. Nav aktif = mustard.
+ */
+.rave-rail {
+  --color-b2b-bg: #141215;
+  --color-b2b-card: #1f1c21;
+  --color-b2b-line: #2c2830;
+  --color-b2b-ink: #ededed;
+  --color-b2b-muted: #a29ca8;
+  --color-b2b-on-ink: #181818;
+  --color-rave-accent: #f4c21f;
+  color-scheme: dark;
+}
+:root[data-b2b-theme] .rave-rail .bg-b2b-ink {
+  background-image: none;
+  background-color: #f4c21f;
+  box-shadow: 0 2px 0 rgb(0 0 0 / 0.35);
 }

@@ -1,11 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { PlatformConfig } from '@/lib/types';
-import defaultIcon from '@/assets/brand/gema-icon.svg';
-import defaultLogo from '@/assets/brand/gema-logo.svg';
-import defaultLogoDark from '@/assets/brand/gema-logo-dark.svg';
+import defaultIcon from '@/assets/brand/rave-icon.svg';
+import defaultLogo from '@/assets/brand/rave-logo-dark.webp';
+import defaultLogoDark from '@/assets/brand/rave-logo.webp';
 
-/** Logo resmi GEMA yang dibundel aplikasi (dipakai bila Super Admin tidak mengunggah logo lain). */
+/**
+ * Logo resmi RAVE yang dibundel aplikasi (dipakai bila Super Admin tidak mengunggah logo lain).
+ * `logo` = untuk latar terang (huruf ink + piringan ungu); `logoDark` = untuk latar gelap (huruf paper + piringan hitam).
+ */
 export const DEFAULT_BRAND = { logo: defaultLogo, logoDark: defaultLogoDark, icon: defaultIcon } as const;
 
 /**
@@ -30,15 +33,15 @@ export function setting<T>(cfg: PlatformConfig | null, key: string, fallback: T)
 }
 
 /**
- * Branding efektif: unggahan Super Admin (`branding.*`) bila ada, selain itu logo resmi GEMA bawaan aplikasi
- * (src/assets/brand — lingkaran gradien "G" + wordmark).
+ * Branding efektif: unggahan Super Admin (`branding.*`) bila ada, selain itu logo resmi RAVE bawaan aplikasi
+ * (src/assets/brand — wordmark RAVE dengan piringan hitam + ikon stiker).
  */
 export function useBranding() {
   const cfg = usePlatformConfig();
   const logo = setting<string>(cfg, 'branding.logo_url', '') || null;
   const logoDark = setting<string>(cfg, 'branding.logo_dark_url', '') || null;
   return {
-    name: setting<string>(cfg, 'general.platform_name', 'GEMA'),
+    name: setting<string>(cfg, 'general.platform_name', 'RAVE'),
     /** Logo untuk latar terang. */
     logo: logo ?? DEFAULT_BRAND.logo,
     /** Logo untuk latar gelap (fallback: unggahan logo terang, lalu bawaan gelap). */
@@ -46,5 +49,7 @@ export function useBranding() {
     icon: setting<string>(cfg, 'branding.icon_url', '') || DEFAULT_BRAND.icon,
     /** true bila memakai logo bawaan (tidak ada unggahan). */
     isDefault: !logo && !logoDark,
+    /** Font primer terpilih (`branding.primary_font`): 'primary1' = Staatliches, 'primary2' = Rubik Dirt. */
+    primaryFont: setting<string>(cfg, 'branding.primary_font', 'primary1'),
   };
 }

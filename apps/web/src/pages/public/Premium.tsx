@@ -1,132 +1,253 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, BadgeCheck, Check, ChevronDown, Lock, Minus, Sparkles } from 'lucide-react';
+import { motion, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform, type MotionValue } from 'motion/react';
+import { ArrowRight, BadgeCheck, Check, ChevronDown, Download, Lock, Minus, Podcast, Sparkles, Ticket, VolumeX } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Show } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
 import { cx } from '@/components/ui';
+import { RaveMark } from '@/components/ui/RaveLogo';
 import { useModule } from '@/components/ModuleGate';
 import { usePricing } from '@/lib/pricing';
-import { BRAND_GRADIENT, Heading, Section } from './marketing';
+import { useDict } from '@/lib/i18n';
+import { BTN_GHOST, BTN_GHOST_SM, BTN_PRIMARY, BTN_PRIMARY_SM, CARD_TITLE, Heading, Section } from './marketing';
+import { useScrollFx, WaveFrame } from './LandingScroll';
+import { Vinyl } from './Vinyl';
 import { PublicFooter, PublicNav } from './PublicChrome';
 
 /**
- * Halaman GEMA Premium. Prinsip produk (BRD): musik selalu gratis — Premium hanya untuk podcast & audio fiksi
+ * Halaman RAVE Premium. Prinsip produk (BRD): musik selalu gratis — Premium hanya untuk podcast & audio fiksi
  * premium, bebas iklan, unduhan tanpa batas, dan akses tiket lebih awal. Billing langganan dibuka pada fase
  * berikutnya (REQ-PAY-03), jadi CTA mengarah ke waitlist, bukan checkout palsu.
+ *
+ * Interaksi scroll mengikuti landing (LandingScroll.tsx): RAVE glass, kartu 3D yang tegak saat di-scroll, kartu
+ * paket yang menyebar, rak konten horizontal, dan CTA bergelombang titik. Layar kecil / "kurangi gerakan" → statis.
  */
 
 const NOTIFY = '/#waitlist';
+const EASE = [0.22, 1, 0.36, 1] as const;
 
 type Cell = boolean | string;
-const COMPARE: { feature: string; free: Cell; premium: Cell }[] = [
-  { feature: 'Musik on-demand tanpa batas', free: true, premium: true },
-  { feature: 'Kualitas lossless & Hi-Res', free: true, premium: true },
-  { feature: 'Lirik sinkron & playlist', free: true, premium: true },
-  { feature: 'Live streaming konser', free: true, premium: true },
-  { feature: 'Podcast & audio fiksi premium', free: 'Episode pilihan', premium: true },
-  { feature: 'Bebas iklan', free: false, premium: true },
-  { feature: 'Unduhan offline', free: false, premium: 'Tanpa batas' },
-  { feature: 'Akses tiket presale', free: 'Fan setia', premium: 'Semua pelanggan' },
+type PublicDict = ReturnType<typeof useDict<'public'>>;
+type CellKey = keyof PublicDict['premium']['cells'];
+/** Nilai sel per baris (urutan = `premium.compare` di kamus); string = kunci `premium.cells`. */
+const COMPARE_CELLS: { free: boolean | CellKey; premium: boolean | CellKey }[] = [
+  { free: true, premium: true },
+  { free: true, premium: true },
+  { free: true, premium: true },
+  { free: true, premium: true },
+  { free: 'selectedEpisodes', premium: true },
+  { free: false, premium: true },
+  { free: false, premium: 'unlimited' },
+  { free: 'loyalFans', premium: 'allSubscribers' },
 ];
 
 type Pricing = ReturnType<typeof usePricing>;
 
 // Harga, masa coba, verifikasi pelajar, dan jumlah perangkat dari Super Admin (`subscription.*`).
-const plans = (t: Pricing) => [
-  { name: 'Individu', price: t.individual, who: '1 akun', items: ['Semua manfaat Premium', `Unduhan di ${t.devices} perangkat`, 'Early access tiket presale'], popular: true },
-  { name: 'Pelajar', price: t.student, who: '1 akun terverifikasi kampus', items: ['Semua manfaat Individu', 'Verifikasi pelajar & mahasiswa', `Diperbarui setiap ${t.studentMonths} bulan`], popular: false },
-  { name: 'Duo', price: t.duo, who: '2 akun dalam satu rumah', items: ['Semua manfaat Individu', 'Dua akun Premium terpisah', 'Playlist Duo Mix'], popular: false },
+const plans = (t: Pricing, d: PublicDict['premium']['plans']) => [
+  { name: d.individual.name, price: t.individual, who: d.individual.who, items: [d.individual.allBenefits, d.individual.downloads(t.devices), d.individual.earlyAccess], popular: true },
+  { name: d.student.name, price: t.student, who: d.student.who, items: [d.student.allBenefits, d.student.verification, d.student.renewed(t.studentMonths)], popular: false },
+  { name: d.duo.name, price: t.duo, who: d.duo.who, items: [...d.duo.items], popular: false },
 ];
 
-const PAYMENTS = ['QRIS', 'GoPay', 'OVO', 'DANA', 'Virtual Account', 'Kartu kredit'];
+const PAYMENTS = ['QRIS', 'GoPay', 'OVO', 'DANA', 'Virtual Account'];
 
-const faqs = (t: Pricing) => [
-  ['Apakah saya harus berlangganan untuk mendengar musik?', 'Tidak. Semua musik di GEMA gratis selamanya, termasuk kualitas lossless, lirik sinkron, dan live streaming. Premium hanya menambah podcast & audio fiksi eksklusif, bebas iklan, unduhan, dan akses tiket lebih awal.'],
-  ['Kapan Premium bisa dibeli?', 'Langganan dibuka bertahap setelah closed beta. Daftar di waitlist dan kami kabari lebih dulu' + (t.trial ? ` — pelanggan pertama mendapat masa coba gratis ${t.trial}.` : '.')],
-  ['Apakah artis mendapat bagian dari Premium?', 'Ya. Pendapatan langganan dibagi dengan model user-centric: biaya langgananmu hanya mengalir ke kreator yang benar-benar kamu dengarkan.'],
-  ['Bisakah saya berhenti kapan saja?', 'Bisa. Tidak ada kontrak; langganan berhenti di akhir periode berjalan dan akunmu kembali ke Gratis tanpa kehilangan playlist.'],
-  ['Bagaimana verifikasi paket Pelajar?', `Cukup email kampus aktif atau kartu tanda mahasiswa. Verifikasi diperbarui setiap ${t.studentMonths} bulan.`],
+const faqs = (t: Pricing, f: PublicDict['premium']['faq']): [string, string][] => [
+  [f.q1, f.a1],
+  [f.q2, f.a2(t.trial)],
+  [f.q3, f.a3],
+  [f.q4, f.a4],
+  [f.q5, f.a5(t.studentMonths)],
 ];
 
-function Mark({ v, highlight }: { v: Cell; highlight?: boolean }) {
-  if (v === true) return <Check className={cx('mx-auto size-5', highlight ? 'text-[#f0a3c8]' : 'text-white/80')} aria-label="Termasuk" />;
-  if (v === false) return <Minus className="mx-auto size-5 text-white/25" aria-label="Tidak termasuk" />;
-  return <span className={cx('text-sm font-semibold', highlight ? 'text-white' : 'text-white/60')}>{v}</span>;
+const BENEFIT_ICONS = [Podcast, VolumeX, Download, Ticket];
+
+// =============================================================================================
+// Hero — Aurora seperti home, konten memudar saat di-scroll, kartu keanggotaan 3D yang tegak
+// =============================================================================================
+
+/** Kartu keanggotaan RAVE glass: rebah 3D lalu tegak saat di-scroll, miring mengikuti kursor, kilau holografik. */
+function MemberCard() {
+  const reduce = useReducedMotion();
+  const t = usePricing();
+  const d = useDict('public').premium;
+  const BENEFITS = BENEFIT_ICONS.map((icon, i) => ({ icon, t: d.benefits[i] }));
+  const ref = useRef<HTMLDivElement>(null);
+  const { scrollYProgress: p } = useScroll({ target: ref, offset: ['start end', 'center center'] });
+  const lay = useTransform(p, [0, 1], [reduce ? 0 : 38, 0]);
+  const mx = useMotionValue(0);
+  const my = useMotionValue(0);
+  const tiltX = useSpring(useTransform(my, [-0.5, 0.5], [8, -8]), { stiffness: 140, damping: 18 });
+  const tiltY = useSpring(useTransform(mx, [-0.5, 0.5], [-10, 10]), { stiffness: 140, damping: 18 });
+  const rotateX = useTransform([lay, tiltX] as MotionValue<number>[], ([a, b]: number[]) => a + b);
+  const sheen = useTransform(mx, [-0.5, 0.5], ['20%', '80%']);
+  const sheenBg = useTransform(sheen, (x) => `radial-gradient(60% 80% at ${x} 0%, rgba(255,255,255,0.22), transparent 60%)`);
+
+  return (
+    <div
+      ref={ref}
+      className="relative mx-auto mt-16 w-full max-w-[34rem] [perspective:1400px]"
+      onPointerMove={(e) => {
+        if (reduce || e.pointerType !== 'mouse') return;
+        const r = ref.current!.getBoundingClientRect();
+        mx.set((e.clientX - r.left) / r.width - 0.5);
+        my.set((e.clientY - r.top) / r.height - 0.5);
+      }}
+      onPointerLeave={() => (mx.set(0), my.set(0))}
+    >
+      <div className="absolute -inset-12 -z-10 rounded-none bg-[radial-gradient(closest-side,rgba(138,47,63,0.35),rgba(91,42,110,0.18),transparent)] blur-2xl" aria-hidden />
+      <motion.div style={{ rotateX, rotateY: tiltY, transformOrigin: '50% 100%' }} className="rave-glass-strong aspect-[1.586] overflow-hidden rounded-none p-6 text-left md:p-8">
+        <motion.div style={{ background: sheenBg }} className="pointer-events-none absolute inset-0" aria-hidden />
+        <div className="relative flex h-full flex-col">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-2.5 font-display text-lg uppercase tracking-wide">
+              <RaveMark className="size-9" /> RAVE <span className="font-semibold text-white/70">Premium</span>
+            </span>
+            <Sparkles className="size-5 text-white/80" />
+          </div>
+          <div className="mt-auto">
+            <p className="text-xs font-bold tracking-[0.2em] text-white/60 uppercase">{d.plans.individual.name}</p>
+            <p className="mt-1 flex items-baseline gap-1">
+              <span className="text-sm font-bold text-white/70">Rp</span>
+              <span className="font-display text-5xl leading-none md:text-6xl">{t.individual}</span>
+              <span className="text-sm text-white/60">{d.perMonth}</span>
+            </p>
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {BENEFITS.map((b) => (
+                <span key={b.t} className="inline-flex items-center gap-1.5 rounded-none border border-white/20 bg-black/25 px-2.5 py-1 text-[11px] font-bold backdrop-blur">
+                  <b.icon className="size-3.5" /> {b.t}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
 }
 
 function Hero() {
   const premium = useAuth((s) => s.user?.premium);
   const t = usePricing();
+  const d = useDict('public').premium;
+  const reduce = useReducedMotion();
+  const ref = useRef<HTMLElement>(null);
+  const { scrollYProgress: p } = useScroll({ target: ref, offset: ['start start', 'end start'] });
+  const y = useTransform(p, [0, 1], [0, reduce ? 0 : 140]);
+  const opacity = useTransform(p, [0, 0.55], [1, reduce ? 1 : 0]);
+  const fade = (delay: number) => ({
+    initial: { opacity: 0, y: reduce ? 0 : 18 },
+    animate: { opacity: 1, y: 0 },
+    transition: { duration: 0.7, delay, ease: EASE },
+  });
   return (
-    <section className="relative isolate overflow-hidden px-4 pt-20 pb-16 text-center md:pt-28">
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(60%_55%_at_50%_0%,rgba(168,85,247,0.28),rgba(236,72,153,0.12)_45%,transparent_75%)]" aria-hidden />
-      <div className="mx-auto max-w-4xl">
-        <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-sm text-white/80">
-          <Sparkles className="size-4 text-[#f0a3c8]" /> GEMA Premium
-        </span>
-        <h1 className="mt-6 text-5xl leading-[1.05] font-black tracking-tight text-balance md:text-6xl lg:text-7xl">
-          Musik tetap gratis.
+    <section ref={ref} className="relative isolate overflow-hidden px-4 pt-[9.5rem] pb-24 text-center md:pt-[11.5rem]">
+      <div className="rave-grain rave-crumple !absolute inset-0 -z-10 bg-[radial-gradient(110%_80%_at_50%_0%,#4a1f5c_0,#2a1233_45%,#181818_100%)]" aria-hidden />
+      {/* Vinyl realistis (komponen bersama landing): buram penuh di atas latar bertekstur, berputar pelan. */}
+      <Vinyl
+        className="absolute top-[46%] left-1/2 -z-10 w-[min(1000px,120vw)] -translate-x-1/2"
+        discClassName="animate-[rave-spin_9s_linear_infinite] motion-reduce:animate-none"
+      />
+      <motion.div style={{ y, opacity }} className="mx-auto max-w-4xl">
+        <motion.span {...fade(0)} className="rave-label rave-eyebrow !text-[12px]">
+          <Sparkles className="size-4" /> RAVE Premium
+        </motion.span>
+        <motion.h1 {...fade(0.08)} className="mt-7 text-6xl leading-[0.9] text-balance md:text-8xl lg:text-[7.5rem]">
+          {d.heroTitle1}
           <br />
-          <span className={cx('bg-clip-text text-transparent', BRAND_GRADIENT)}>Premium untuk sisanya.</span>
-        </h1>
-        <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/70">
-          Podcast & audio fiksi eksklusif, tanpa iklan, unduhan tanpa batas, dan akses tiket lebih awal — mulai Rp {t.student} per bulan.
-        </p>
-        {premium ? (
-          <div className="mt-9 inline-flex items-center gap-2 rounded-full bg-white/10 px-6 py-3.5 font-bold">
-            <BadgeCheck className="size-5 text-gema-primary-text" /> Kamu sudah pelanggan Premium
-          </div>
-        ) : (
-          <div className="mt-9 flex flex-wrap justify-center gap-3">
-            <a href={NOTIFY} className="group inline-flex items-center gap-2 rounded-full bg-white px-7 py-3.5 font-bold text-black shadow-[0_0_40px_-8px_rgba(236,72,153,0.7)] transition hover:scale-[1.03]">
-              Ingatkan saya saat dibuka
-              <ArrowRight className="size-4 transition group-hover:translate-x-0.5" />
-            </a>
-            <a href="#paket" className="inline-flex items-center rounded-full border border-white/25 px-7 py-3.5 font-bold transition hover:border-white/60 hover:bg-white/5">
-              Lihat paket
-            </a>
-          </div>
-        )}
-        <p className="mt-5 text-sm text-white/45">Dibuka bertahap setelah closed beta{t.trial && ` · Gratis ${t.trial} untuk pelanggan pertama`} · Batalkan kapan saja</p>
-      </div>
+          <span className="text-rave-primary-text">{d.heroTitle2}</span>
+        </motion.h1>
+        <motion.p {...fade(0.16)} className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/70">
+          {d.heroLead(t.student)}
+        </motion.p>
+        <motion.div {...fade(0.24)}>
+          {premium ? (
+            <div className="rave-glass mt-9 inline-flex items-center gap-2 rounded-none px-6 py-3.5 font-bold">
+              <BadgeCheck className="size-5 text-rave-primary-text" /> {d.alreadyPremium}
+            </div>
+          ) : (
+            <div className="mt-9 flex flex-wrap justify-center gap-3">
+              <a href={NOTIFY} className={BTN_PRIMARY}>
+                {d.remindWhenOpen}
+                <ArrowRight className="size-4 transition group-hover:translate-x-1" />
+              </a>
+              <a href="#paket" className={BTN_GHOST}>
+                {d.seePlans}
+              </a>
+            </div>
+          )}
+          <p className="mt-5 text-sm text-white/45">{d.heroNote(t.trial)}</p>
+        </motion.div>
+      </motion.div>
+      <MemberCard />
     </section>
   );
 }
 
+// =============================================================================================
+// Gratis vs Premium — baris muncul berurutan, kolom Premium menyala
+// =============================================================================================
+
+function Mark({ v, highlight }: { v: Cell; highlight?: boolean }) {
+  const d = useDict('public').premium;
+  if (v === true) return <Check className={cx('mx-auto size-5', highlight ? 'text-rave-primary-text' : 'text-white/80')} aria-label={d.included} />;
+  if (v === false) return <Minus className="mx-auto size-5 text-white/25" aria-label={d.notIncluded} />;
+  return <span className={cx('text-sm font-semibold', highlight ? 'text-white' : 'text-white/60')}>{v}</span>;
+}
+
 function Compare() {
+  const reduce = useReducedMotion();
+  const d = useDict('public').premium;
+  const cell = (v: boolean | CellKey): Cell => (typeof v === 'boolean' ? v : d.cells[v]);
+  const COMPARE = COMPARE_CELLS.map((c, i) => ({ feature: d.compare[i], free: cell(c.free), premium: cell(c.premium) }));
   return (
     <Section className="!pt-8">
-      <Heading center kicker="Gratis vs Premium" title="Semua yang penting tetap gratis." body="Premium melengkapi, bukan mengunci. Musik dan kualitas terbaiknya selalu terbuka untuk semua." />
-      <div className="mx-auto mt-12 max-w-4xl overflow-hidden rounded-3xl border border-white/10">
-        <table className="w-full text-left">
+      <Heading center kicker={d.compareKicker} title={d.compareTitle} body={d.compareBody} />
+      <div className="rave-glass mx-auto mt-12 max-w-4xl overflow-hidden rounded-none">
+        <table className="relative w-full text-left">
           <thead>
-            <tr className="border-b border-white/10 bg-white/[0.03]">
+            <tr className="border-b border-white/10">
               <th scope="col" className="p-4 text-sm font-bold text-white/60 md:px-6">
-                Fitur
+                {d.feature}
               </th>
               <th scope="col" className="w-28 p-4 text-center text-sm font-bold md:w-40">
-                Gratis
+                {d.free}
               </th>
-              <th scope="col" className="w-28 bg-white/[0.04] p-4 text-center text-sm font-bold md:w-40">
-                <span className={cx('bg-clip-text text-transparent', BRAND_GRADIENT)}>Premium</span>
+              <th scope="col" className="w-28 bg-gradient-to-b from-[#8A2F3F]/25 to-[#8A2F3F]/10 p-4 text-center text-sm font-bold md:w-40">
+                <span className="text-rave-primary-text">Premium</span>
               </th>
             </tr>
           </thead>
           <tbody>
-            {COMPARE.map((r) => (
-              <tr key={r.feature} className="border-b border-white/[0.06] last:border-0">
+            {COMPARE.map((r, i) => (
+              <motion.tr
+                key={r.feature}
+                className="border-b border-white/[0.06] last:border-0"
+                initial={reduce ? false : { opacity: 0, x: -16 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true, amount: 0.6 }}
+                transition={{ duration: 0.5, delay: i * 0.06, ease: EASE }}
+              >
                 <th scope="row" className="p-4 text-sm font-semibold text-white/85 md:px-6 md:text-base">
                   {r.feature}
                 </th>
                 <td className="p-4 text-center">
                   <Mark v={r.free} />
                 </td>
-                <td className="bg-white/[0.04] p-4 text-center">
-                  <Mark v={r.premium} highlight />
+                <td className="bg-[#8A2F3F]/10 p-4 text-center">
+                  <motion.span
+                    className="inline-block"
+                    initial={reduce ? false : { scale: 0.4, opacity: 0 }}
+                    whileInView={{ scale: 1, opacity: 1 }}
+                    viewport={{ once: true, amount: 0.6 }}
+                    transition={{ type: 'spring', stiffness: 380, damping: 18, delay: 0.15 + i * 0.06 }}
+                  >
+                    <Mark v={r.premium} highlight />
+                  </motion.span>
                 </td>
-              </tr>
+              </motion.tr>
             ))}
           </tbody>
         </table>
@@ -135,106 +256,206 @@ function Compare() {
   );
 }
 
+// =============================================================================================
+// Paket — tiga kartu bertumpuk di tengah lalu menyebar saat section masuk layar
+// =============================================================================================
+
+function PlanCard({ p, trial }: { p: ReturnType<typeof plans>[number]; trial: string | null | undefined }) {
+  const d = useDict('public').premium;
+  return (
+    <div className={cx('rave-card-hover rave-taped relative flex h-full flex-col rounded-none p-7', p.popular ? 'rave-glass-strong' : 'rave-glass')}>
+      <div className="flex items-center justify-between">
+        <h3 className={cx('text-4xl', CARD_TITLE)}>{p.name}</h3>
+        {p.popular && <span className="rave-sticker rave-label bg-rave-primary px-2.5 py-1 !text-[10px] text-rave-on-primary [--sticker-r:6deg]">{d.mostPopular}</span>}
+      </div>
+      <p className="mt-1 text-sm text-white/60">{p.who}</p>
+      <p className="mt-6 flex items-baseline gap-1">
+        <span className="text-sm font-bold text-white/60">Rp</span>
+        <span className="font-display text-5xl leading-none">{p.price}</span>
+        <span className="text-sm text-white/50">{d.perMonth}</span>
+      </p>
+      {trial && <p className={cx('mt-1 text-xs font-semibold', p.popular ? 'text-white/85' : 'text-rave-primary-text')}>{d.trialAtLaunch(trial)}</p>}
+      <ul className="mt-6 flex-1 space-y-3 border-t border-white/15 pt-6">
+        {p.items.map((i) => (
+          <li key={i} className="flex gap-2.5 text-sm text-white/85">
+            <Check className="size-4 shrink-0 text-rave-primary-text" /> {i}
+          </li>
+        ))}
+      </ul>
+      <a
+        href={NOTIFY}
+        className={cx('mt-8 w-full', p.popular ? BTN_PRIMARY_SM : BTN_GHOST_SM)}
+      >
+        {d.remindMe}
+      </a>
+    </div>
+  );
+}
+
+function SpreadCard({ p, i, prog, children }: { p: MotionValue<number>; i: number; prog: [number, number]; children: React.ReactNode }) {
+  // Posisi awal: semua kartu bertumpuk di kolom tengah (offset ±1 kolom), sedikit miring & mengecil.
+  const off = i === 0 ? 1 : i === 2 ? -1 : 0;
+  const x = useTransform(p, prog, [`${off * 105}%`, '0%']);
+  const rotate = useTransform(p, prog, [off * -7, 0]);
+  const scale = useTransform(p, prog, [off ? 0.9 : 1, 1]);
+  const y = useTransform(p, prog, [off ? 30 : 0, 0]);
+  return (
+    <motion.div style={{ x, rotate, scale, y, zIndex: off ? 1 : 2 }} className="relative">
+      {children}
+    </motion.div>
+  );
+}
+
 function Plans() {
   const t = usePricing();
+  const d = useDict('public').premium;
+  const fx = useScrollFx();
+  const ref = useRef<HTMLDivElement>(null);
+  const { scrollYProgress: p } = useScroll({ target: ref, offset: ['start end', 'center center'] });
+  // Urutan tampil: Pelajar · Individu (tengah, populer) · Duo
+  const ordered = (() => {
+    const all = plans(t, d.plans);
+    const pop = all.find((x) => x.popular)!;
+    const rest = all.filter((x) => !x.popular);
+    return [rest[0], pop, rest[1]];
+  })();
   return (
     <Section id="paket">
-      <Heading center kicker="Paket" title="Pilih yang pas untukmu." body="Harga per bulan, sudah termasuk pajak. Tanpa kontrak — berhenti kapan saja." />
-      <div className="mt-12 grid items-stretch gap-5 md:grid-cols-3">
-        {plans(t).map((p) => {
-          const card = (
-            <div className={cx('flex h-full flex-col rounded-3xl border p-7', p.popular ? 'border-transparent bg-[#0f0f10]' : 'border-white/10 bg-white/[0.03]')}>
-              <div className="flex items-center justify-between">
-                <h3 className="text-2xl font-black">{p.name}</h3>
-                {p.popular && <span className={cx('rounded-full px-2.5 py-1 text-xs font-bold', BRAND_GRADIENT)}>Paling populer</span>}
-              </div>
-              <p className="mt-1 text-sm text-white/55">{p.who}</p>
-              <p className="mt-6 flex items-baseline gap-1">
-                <span className="text-sm font-bold text-white/60">Rp</span>
-                <span className="text-4xl font-black tracking-tight">{p.price}</span>
-                <span className="text-sm text-white/50">/bulan</span>
-              </p>
-              {t.trial && <p className="mt-1 text-xs font-semibold text-[#f0a3c8]">Gratis {t.trial} saat peluncuran</p>}
-              <ul className="mt-6 flex-1 space-y-3 border-t border-white/10 pt-6">
-                {p.items.map((i) => (
-                  <li key={i} className="flex gap-2.5 text-sm text-white/85">
-                    <Check className="size-4 shrink-0 text-white/60" /> {i}
-                  </li>
-                ))}
-              </ul>
-              <a
-                href={NOTIFY}
-                className={cx('mt-8 rounded-full py-3 text-center text-sm font-bold transition', p.popular ? 'bg-white text-black hover:opacity-90' : 'border border-white/25 hover:border-white/60 hover:bg-white/5')}
-              >
-                Ingatkan saya
-              </a>
-            </div>
-          );
-          return p.popular ? (
-            <div key={p.name} className={cx('rounded-3xl p-px shadow-[0_0_60px_-20px_rgba(236,72,153,0.6)]', BRAND_GRADIENT)}>
-              {card}
-            </div>
+      <Heading center kicker={d.plansKicker} title={d.plansTitle} body={d.plansBody} />
+      <div ref={ref} className="mt-12 grid items-stretch gap-5 md:grid-cols-3">
+        {ordered.map((plan, i) =>
+          fx ? (
+            <SpreadCard key={plan.name} p={p} i={i} prog={[0.35, 0.95]}>
+              <PlanCard p={plan} trial={t.trial} />
+            </SpreadCard>
           ) : (
-            <div key={p.name}>{card}</div>
-          );
-        })}
+            <div key={plan.name} className={cx(plan.popular && 'order-first md:order-none')}>
+              <PlanCard p={plan} trial={t.trial} />
+            </div>
+          ),
+        )}
       </div>
-      <p className="mt-8 text-center text-sm text-white/45">
-        Pembayaran: {PAYMENTS.join(' · ')}
-      </p>
+      <p className="mt-8 text-center text-sm text-white/45">{d.payments([...PAYMENTS, d.creditCard].join(' · '))}</p>
     </Section>
   );
 }
 
-/** Konten eksklusif — diambil dari katalog nyata (acara dengan episode premium). */
-function Exclusive() {
-  const podcasts = useModule('podcasts');
-  // `limit` tidak didukung server (catalog/routes.ts) → dipotong di klien.
-  const q = useQuery({ queryKey: ['shows', 'premium-page'], queryFn: () => api<{ data: Show[] }>('/v1/catalog/shows'), enabled: podcasts });
-  const shows = (q.data?.data ?? []).slice(0, 6);
-  if (!podcasts) return null;
-  if (!q.isLoading && !shows.length) return null;
+// =============================================================================================
+// Eksklusif — rak horizontal yang bergeser mengikuti scroll vertikal (sticky)
+// =============================================================================================
+
+function ShowCard({ s }: { s: Show }) {
+  const d = useDict('public').premium;
   return (
-    <Section>
-      <Heading
-        kicker="Eksklusif di Premium"
-        title="Cerita yang tidak ada di tempat lain."
-        body="Episode lengkap podcast dan audio fiksi dari GEMA Originals serta kreator independen."
-        action={
-          <Link to="/app/podcasts" className="inline-flex items-center gap-2 rounded-full border border-white/25 px-6 py-3 font-bold transition hover:border-white/60 hover:bg-white/5">
-            Jelajahi <ArrowRight className="size-4" />
-          </Link>
-        }
-      />
-      <div className="mt-12 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-        {q.isLoading && Array.from({ length: 6 }).map((_, i) => <div key={i} className="aspect-[3/4] animate-pulse rounded-2xl bg-white/5" />)}
-        {shows.map((s) => (
-          <Link key={s.id} to={`/app/show/${s.id}`} className="group block">
-            <div className="relative aspect-square overflow-hidden rounded-2xl bg-white/5">
-              <img src={s.cover_url} alt={s.title} loading="lazy" className="size-full object-cover transition duration-500 group-hover:scale-105" />
-              <span className="absolute top-2 left-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-bold backdrop-blur">
-                <Lock className="size-3" /> Premium
-              </span>
-            </div>
-            <p className="mt-3 truncate font-bold">{s.title}</p>
-            <p className="truncate text-sm text-white/50">
-              {s.kind === 'FICTION' ? 'Audio fiksi' : 'Podcast'} · {s.publisher}
-            </p>
-          </Link>
-        ))}
+    <Link to={`/app/show/${s.id}`} className="group block w-60 shrink-0 md:w-72">
+      <div className="rave-glass relative aspect-square overflow-hidden rounded-none p-0">
+        <img src={s.cover_url} alt={s.title} loading="lazy" className="size-full object-cover transition duration-700 group-hover:scale-105" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" aria-hidden />
+        <span className="absolute top-3 left-3 inline-flex items-center gap-1 rounded-none bg-black/60 px-2.5 py-1 text-[11px] font-bold backdrop-blur">
+          <Lock className="size-3" /> Premium
+        </span>
+        <span className="absolute right-3 bottom-3 grid size-10 place-items-center rounded-full bg-rave-primary text-rave-on-primary opacity-0 transition group-hover:opacity-100">
+          <ArrowRight className="size-4" />
+        </span>
       </div>
-    </Section>
+      <p className="mt-3 truncate text-lg font-bold">{s.title}</p>
+      <p className="truncate text-sm text-white/50">
+        {s.kind === 'FICTION' ? d.fiction : d.podcast} · {s.publisher}
+      </p>
+    </Link>
   );
 }
+
+function ExclusiveHeading() {
+  const d = useDict('public').premium;
+  return (
+    <Heading
+      kicker={d.exclusiveKicker}
+      title={d.exclusiveTitle}
+      body={d.exclusiveBody}
+      action={
+        <Link to="/app/podcasts" className="inline-flex items-center gap-2 rounded-none border border-white/25 px-6 py-3 font-bold transition hover:border-white/60 hover:bg-white/5">
+          {d.explore} <ArrowRight className="size-4" />
+        </Link>
+      }
+    />
+  );
+}
+
+function Exclusive() {
+  const podcasts = useModule('podcasts');
+  const fx = useScrollFx();
+  // `limit` tidak didukung server (catalog/routes.ts) → dipotong di klien.
+  const q = useQuery({ queryKey: ['shows', 'premium-page'], queryFn: () => api<{ data: Show[] }>('/v1/catalog/shows'), enabled: podcasts });
+  const shows = (q.data?.data ?? []).slice(0, 8);
+  const ref = useRef<HTMLElement>(null);
+  const track = useRef<HTMLDivElement>(null);
+  const [dist, setDist] = useState(0); // jarak geser horizontal (px) = lebar rak − lebar layar
+  const { scrollYProgress: p } = useScroll({ target: ref, offset: ['start start', 'end end'] });
+  const x = useTransform(p, [0.05, 0.95], [0, -dist]);
+  const horizontal = fx && dist > 0;
+
+  useLayoutEffect(() => {
+    if (!fx || !track.current) return;
+    const measure = () => setDist(Math.max(0, track.current!.scrollWidth - window.innerWidth + 64));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(track.current);
+    window.addEventListener('resize', measure);
+    return () => (ro.disconnect(), window.removeEventListener('resize', measure));
+  }, [fx, shows.length]);
+
+  if (!podcasts) return null;
+  if (!q.isLoading && !shows.length) return null;
+
+  if (!fx)
+    return (
+      <Section>
+        <ExclusiveHeading />
+        <div className="-mx-4 mt-10 flex snap-x gap-4 overflow-x-auto px-4 pb-4 [scrollbar-width:none]">
+          {q.isLoading && Array.from({ length: 4 }).map((_, i) => <div key={i} className="aspect-square w-60 shrink-0 animate-pulse rounded-none bg-white/5" />)}
+          {shows.map((s) => (
+            <div key={s.id} className="snap-start">
+              <ShowCard s={s} />
+            </div>
+          ))}
+        </div>
+      </Section>
+    );
+
+  return (
+    <section ref={ref} className="relative" style={{ height: horizontal ? `calc(100vh + ${dist}px)` : undefined }}>
+      <div className={cx('flex flex-col justify-center overflow-hidden', horizontal ? 'sticky top-0 h-screen' : 'py-24')}>
+        <div className="mx-auto w-full max-w-[82.5rem] px-4"><ExclusiveHeading /></div>
+        <motion.div ref={track} style={{ x }} className="mt-12 flex w-max gap-5 pr-8 pl-[max(1rem,calc((100vw-72rem)/2+1rem))]">
+          {q.isLoading && Array.from({ length: 5 }).map((_, i) => <div key={i} className="aspect-square w-72 shrink-0 animate-pulse rounded-none bg-white/5" />)}
+          {shows.map((s) => (
+            <ShowCard key={s.id} s={s} />
+          ))}
+        </motion.div>
+        {horizontal && (
+          <div className="mx-auto mt-10 h-1 w-48 overflow-hidden rounded-full bg-white/10" aria-hidden>
+            <motion.div style={{ scaleX: p, transformOrigin: '0% 50%' }} className="h-full bg-rave-primary" />
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// =============================================================================================
+// FAQ & penutup
+// =============================================================================================
 
 function Faq() {
   const [open, setOpen] = useState<number | null>(0);
-  const FAQS = faqs(usePricing());
+  const d = useDict('public').premium;
+  const FAQS = faqs(usePricing(), d.faq);
   return (
     <Section>
       <div className="grid gap-10 lg:grid-cols-[1fr_1.6fr] lg:gap-16">
         <div>
-          <Heading kicker="FAQ" title="Seputar Premium" />
+          <Heading kicker="FAQ" title={d.faqTitle} />
         </div>
         <div className="divide-y divide-white/10 border-y border-white/10">
           {FAQS.map(([q, a], i) => (
@@ -243,7 +464,9 @@ function Faq() {
                 {q}
                 <ChevronDown className={cx('size-5 shrink-0 text-white/50 transition', open === i && 'rotate-180')} />
               </button>
-              {open === i && <p className="pb-5 leading-relaxed text-white/60">{a}</p>}
+              <motion.div initial={false} animate={{ height: open === i ? 'auto' : 0, opacity: open === i ? 1 : 0 }} transition={{ duration: 0.3, ease: EASE }} className="overflow-hidden">
+                <p className="pb-5 leading-relaxed text-white/60">{a}</p>
+              </motion.div>
             </div>
           ))}
         </div>
@@ -252,9 +475,31 @@ function Faq() {
   );
 }
 
+function ClosingCta() {
+  const d = useDict('public').premium;
+  return (
+    <section className="px-4 pb-24">
+      <WaveFrame>
+        <div className="px-6 py-16 text-center md:py-20">
+          <h2 className="text-5xl leading-[0.95] md:text-7xl">{d.closingTitle}</h2>
+          <p className="mx-auto mt-4 max-w-xl text-white/75">{d.closingBody}</p>
+          <div className="mt-8 flex flex-wrap justify-center gap-3">
+            <Link to="/app" className={BTN_PRIMARY}>
+              {d.startListening}
+            </Link>
+            <a href={NOTIFY} className={cx(BTN_GHOST, 'bg-rave-ink/60 backdrop-blur')}>
+              {d.remindMe}
+            </a>
+          </div>
+        </div>
+      </WaveFrame>
+    </section>
+  );
+}
+
 export default function Premium() {
   return (
-    <div className="min-h-full bg-black text-white">
+    <div className="min-h-full overflow-x-clip bg-rave-ink text-rave-paper">
       <PublicNav />
       <main>
         <Hero />
@@ -262,21 +507,7 @@ export default function Premium() {
         <Plans />
         <Exclusive />
         <Faq />
-        <section className="px-4 pb-24">
-          <div className="relative isolate mx-auto max-w-6xl overflow-hidden rounded-[2rem] border border-white/10 px-6 py-14 text-center">
-            <div className="absolute inset-0 -z-10 bg-gradient-to-br from-[#3b0f5c] via-[#6d1546] to-[#7a3a10]" aria-hidden />
-            <h2 className="text-3xl font-black tracking-tight md:text-4xl">Mulai dengan yang gratis.</h2>
-            <p className="mx-auto mt-3 max-w-xl text-white/75">Dengarkan seluruh katalog sekarang — tanpa kartu kredit. Kami kabari saat Premium dibuka.</p>
-            <div className="mt-8 flex flex-wrap justify-center gap-3">
-              <Link to="/app" className="rounded-full bg-white px-7 py-3.5 font-bold text-black transition hover:scale-[1.03]">
-                Mulai mendengarkan
-              </Link>
-              <a href={NOTIFY} className="rounded-full border border-white/30 px-7 py-3.5 font-bold transition hover:bg-white/10">
-                Ingatkan saya
-              </a>
-            </div>
-          </div>
-        </section>
+        <ClosingCta />
       </main>
       <PublicFooter />
     </div>

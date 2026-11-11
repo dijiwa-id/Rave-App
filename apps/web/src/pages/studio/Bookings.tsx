@@ -6,12 +6,14 @@ import type { BookingSummary } from '@/lib/types';
 import { PageHeader } from '@/components/ui';
 import { BookingDetail, BookingList } from '@/components/b2b/BookingDetail';
 import { BookingStatusBadge, Empty, QueryState, Table, useCurrentArtist } from '@/components/b2b/common';
+import { useDict } from '@/lib/i18n';
 
 export function StudioBookings() {
   const artist = useCurrentArtist()!;
+  const t = useDict('b2b').studio.bookings;
   return (
     <div>
-      <PageHeader title="Inbox Booking" subtitle="Inquiry, negosiasi, dan kontrak dari promotor. Rata-rata waktu balas Anda tampil ke promotor (SLA)." />
+      <PageHeader title={t.title} subtitle={t.subtitle} />
       <BookingList side="artist" artistId={artist.artist_id!} basePath="/studio/bookings" />
     </div>
   );
@@ -19,10 +21,11 @@ export function StudioBookings() {
 
 export function StudioBookingPage() {
   const { id } = useParams();
+  const t = useDict('b2b').studio.bookings;
   return (
     <div>
       <Link to="/studio/bookings" className="mb-4 inline-flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
-        <ArrowLeft className="size-4" /> Inbox
+        <ArrowLeft className="size-4" /> {t.back}
       </Link>
       <BookingDetail id={id!} />
     </div>
@@ -38,9 +41,10 @@ export function ContractsList({ side, artistId, orgId, basePath }: { side: 'arti
     enabled: !!(artistId || orgId),
   });
   const rows = q.data?.data.filter((b) => WITH_CONTRACT.includes(b.status)) ?? [];
+  const t = useDict('b2b').studio.contracts;
   return (
-    <QueryState q={q} empty={q.data && !rows.length ? <Empty title="Belum ada kontrak" body="Kontrak elektronik terbit otomatis saat negosiasi disepakati." /> : undefined}>
-      <Table head={['Acara', side === 'artist' ? 'Promotor' : 'Artis', 'Tanggal', 'Nilai', 'Status', '']}>
+    <QueryState q={q} empty={q.data && !rows.length ? <Empty title={t.emptyTitle} body={t.emptyBody} /> : undefined}>
+      <Table head={[t.head.event, side === 'artist' ? t.head.promotor : t.head.artist, t.head.date, t.head.value, t.head.status, '']}>
         {rows.map((b) => (
           <tr key={b.id}>
             <td className="px-4 py-3 font-bold">{b.event_name}</td>
@@ -52,7 +56,7 @@ export function ContractsList({ side, artistId, orgId, basePath }: { side: 'arti
             </td>
             <td className="px-4 py-3 text-right">
               <Link to={`${basePath}/${b.id}`} className="text-sm font-bold underline">
-                Buka
+                {t.open}
               </Link>
             </td>
           </tr>
@@ -64,9 +68,10 @@ export function ContractsList({ side, artistId, orgId, basePath }: { side: 'arti
 
 export function StudioContracts() {
   const artist = useCurrentArtist()!;
+  const t = useDict('b2b').studio.contracts;
   return (
     <div>
-      <PageHeader title="Kontrak" subtitle="Kontrak tidak dapat diubah setelah ditandatangani; perubahan melalui adendum. Hash dokumen final disimpan." />
+      <PageHeader title={t.title} subtitle={t.subtitle} />
       <ContractsList side="artist" artistId={artist.artist_id!} basePath="/studio/bookings" />
     </div>
   );

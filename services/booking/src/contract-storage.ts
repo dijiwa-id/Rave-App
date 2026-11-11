@@ -2,7 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config } from '@gema/service-kit';
+import { config } from '@rave/service-kit';
 
 /** Storage privat dokumen kontrak (<root>/storage/contracts). Tidak pernah disajikan statis; akses hanya via signed URL. Produksi: bucket privat. */
 export const CONTRACT_DIR = process.env.CONTRACT_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'storage', 'contracts');

@@ -7,8 +7,10 @@ import { usePlayer } from '@/stores/player';
 import { currentAd, useAds } from '@/stores/ads';
 import { useAuth } from '@/stores/auth';
 import { cx, Spinner, toast } from '@/components/ui';
+import { dict, useDict } from '@/lib/i18n';
 
-export const AD_LOCK = 'Iklan sedang diputar';
+/** Tooltip kontrol terkunci selama iklan (fungsi agar mengikuti bahasa aktif). */
+export const adLock = () => dict('common').player.adLock;
 // aria-disabled (bukan disabled) agar tooltip tetap muncul; aksi sudah no-op di store selama jeda iklan.
 export const LOCKED_CLS = 'cursor-not-allowed opacity-40';
 
@@ -46,7 +48,7 @@ export function usePlayerView() {
   const locked = adBusy || !!ad;
   const playing = ad ? !adBreak!.paused : p.playing;
   const loading = !ad && p.buffering && !p.error;
-  return { p, ad, adBreak, locked, playing, loading, lockTitle: (label: string) => (locked ? AD_LOCK : label) };
+  return { p, ad, adBreak, locked, playing, loading, lockTitle: (label: string) => (locked ? adLock() : label) };
 }
 
 /**
@@ -83,12 +85,12 @@ export function Range({
     if (v != null) onChange(v);
   };
   return (
-    <div className={cx('group relative flex items-center', big ? 'h-8' : 'h-8 md:h-3', className)}>
-      <div className={cx('w-full rounded-full bg-white/30', big ? 'h-1.5' : 'h-1')}>
-        <div className={cx('rounded-full bg-white group-hover:bg-gema-primary', drag != null && 'bg-gema-primary', big ? 'h-1.5' : 'h-1')} style={{ width: `${pct}%` }} />
+    <div className={cx('group relative flex items-center', big ? 'h-8' : 'h-8 md:h-3.5', className)}>
+      <div className={cx('deck-groove w-full p-px', big ? 'h-2' : 'h-1.5')}>
+        <div className={cx('h-full bg-rave-primary/80 group-hover:bg-rave-primary', drag != null && 'bg-rave-primary')} style={{ width: `${pct}%` }} />
       </div>
       <div
-        className={cx('pointer-events-none absolute -translate-x-1/2 rounded-full bg-white shadow transition-opacity', big ? 'size-4' : 'size-3', drag != null ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100')}
+        className={cx('deck-thumb pointer-events-none absolute -translate-x-1/2', big ? 'h-4 w-6' : 'h-3 w-4')}
         style={{ left: `${pct}%` }}
       />
       <input
@@ -126,19 +128,33 @@ export function IconBtn({ className, children, ...p }: ComponentProps<'button'>)
   );
 }
 
-/** Tombol putar/jeda utama; menampilkan spinner saat memuat/buffering agar tidak terasa "tidak merespons". */
+/** Tombol putar/jeda utama (PLAY plastik mustard ala Walkman); spinner saat memuat/buffering. */
 export function PlayButton({ big }: { big?: boolean }) {
   const { p, ad, playing, loading } = usePlayerView();
-  const label = ad ? (playing ? 'Jeda iklan' : 'Lanjutkan iklan') : loading ? 'Memuat' : playing ? 'Jeda' : 'Putar';
+  const d = useDict('common');
+  const label = ad ? (playing ? d.player.pauseAd : d.player.resumeAd) : loading ? d.player.loading : playing ? d.player.pause : d.player.play;
+  return (
+    <button type="button" onClick={p.toggle} aria-label={label} aria-busy={loading} className={cx('deck-key deck-key--play', big ? 'deck-key--lg' : 'min-w-[52px]')}>
+      {loading ? <Spinner className={big ? 'size-7' : 'size-5'} /> : playing ? <Pause className={cx('fill-current', big ? 'size-7' : 'size-4')} /> : <Play className={cx('ml-0.5 fill-current', big ? 'size-7' : 'size-4')} />}
+    </button>
+  );
+}
+
+/**
+ * Tombol "piano key" tape deck: aluminium sikat dengan simbol terukir. `toggle` → tampil LED (menyala saat aktif,
+ * ditandai aria-pressed). `locked` = kontrol dikunci saat iklan (tetap fokusable, tidak bereaksi).
+ */
+export function DeckKey({ toggle, active, locked, size = 'md', className, children, ...p }: ComponentProps<'button'> & { toggle?: boolean; active?: boolean; locked?: boolean; size?: 'sm' | 'md' | 'lg' }) {
   return (
     <button
       type="button"
-      onClick={p.toggle}
-      aria-label={label}
-      aria-busy={loading}
-      className={cx('grid shrink-0 place-items-center rounded-full bg-white text-black transition hover:scale-105 active:scale-95 motion-reduce:hover:scale-100', big ? 'size-16' : 'size-11 md:size-9')}
+      {...p}
+      aria-pressed={toggle ? !!active : undefined}
+      aria-disabled={locked || undefined}
+      className={cx('deck-key', size === 'sm' && 'deck-key--sm', size === 'lg' && 'deck-key--lg', className)}
     >
-      {loading ? <Spinner className={big ? 'size-7' : 'size-5'} /> : playing ? <Pause className={cx('fill-current', big ? 'size-7' : 'size-5 md:size-4')} /> : <Play className={cx('ml-0.5 fill-current', big ? 'size-7' : 'size-5 md:size-4')} />}
+      {children}
+      {toggle && <span className="deck-led" aria-hidden />}
     </button>
   );
 }
@@ -148,10 +164,11 @@ export function Progress({ locked, big }: { locked: boolean; big?: boolean }) {
   const positionMs = usePlayer((s) => s.positionMs);
   const durationMs = usePlayer((s) => s.durationMs);
   const seek = usePlayer((s) => s.seek);
+  const d = useDict('common');
   return (
-    <div className="flex w-full items-center gap-2 text-[11px] text-gema-muted tabular-nums" title={locked ? AD_LOCK : undefined}>
+    <div className="flex w-full items-center gap-2 text-[11px] text-rave-muted tabular-nums" title={locked ? d.player.adLock : undefined}>
       <span className="w-10 text-right">{fmt.duration(positionMs)}</span>
-      <Range label="Posisi" value={positionMs} max={durationMs} onChange={seek} big={big} valueText={(v) => `${fmt.duration(v)} dari ${fmt.duration(durationMs)}`} className={cx('flex-1', locked && 'pointer-events-none opacity-50')} />
+      <Range label={d.player.position} value={positionMs} max={durationMs} onChange={seek} big={big} valueText={(v) => d.player.positionOf(fmt.duration(v), fmt.duration(durationMs))} className={cx('flex-1', locked && 'pointer-events-none opacity-50')} />
       <span className="w-10">{fmt.duration(durationMs)}</span>
     </div>
   );
@@ -159,10 +176,11 @@ export function Progress({ locked, big }: { locked: boolean; big?: boolean }) {
 
 /** Progres iklan (tanpa seek) — pengganti <Progress/> selama jeda iklan. */
 export function AdProgress({ elapsedMs, durationS, gradient }: { elapsedMs: number; durationS: number; gradient: string }) {
+  const d = useDict('common');
   return (
-    <div className="flex w-full items-center gap-2 text-[11px] text-gema-muted tabular-nums" title={AD_LOCK}>
+    <div className="flex w-full items-center gap-2 text-[11px] text-rave-muted tabular-nums" title={d.player.adLock}>
       <span className="w-10 text-right">{fmt.duration(elapsedMs)}</span>
-      <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/30" role="progressbar" aria-label="Progres iklan" aria-valuemin={0} aria-valuemax={durationS} aria-valuenow={Math.round(elapsedMs / 1000)}>
+      <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/30" role="progressbar" aria-label={d.ads.progress} aria-valuemin={0} aria-valuemax={durationS} aria-valuenow={Math.round(elapsedMs / 1000)}>
         <div className={cx('h-1 rounded-full', gradient)} style={{ width: `${Math.min(100, (elapsedMs / (durationS * 1000)) * 100)}%` }} />
       </div>
       <span className="w-10">{fmt.duration(durationS * 1000)}</span>
@@ -173,13 +191,14 @@ export function AdProgress({ elapsedMs, durationS, gradient }: { elapsedMs: numb
 /** Pesan galat pemutaran + tombol "Coba lagi" bila stream gagal. */
 export function PlayerError({ className }: { className?: string }) {
   const { p } = usePlayerView();
+  const d = useDict('common');
   if (!p.error) return null;
   return (
     <p role="status" className={cx('flex items-center gap-2 text-[11px] text-amber-400', className)}>
       <span className="min-w-0 truncate">{p.error}</span>
-      {p.error === 'Stream tidak tersedia' && (
-        <button type="button" onClick={p.retry} className="shrink-0 rounded-full border border-amber-400/60 px-2 py-0.5 font-bold hover:bg-amber-400/10">
-          Coba lagi
+      {p.error === d.player.errors.streamUnavailable && (
+        <button type="button" onClick={p.retry} className="shrink-0 rounded-none border border-amber-400/60 px-2 py-0.5 font-bold hover:bg-amber-400/10">
+          {d.player.retry}
         </button>
       )}
     </p>
@@ -199,14 +218,15 @@ export function LikeButton({ trackId, className, batched }: { trackId: string; c
     enabled: !!token && !batched,
   });
   const liked = !!data?.ids.includes(trackId);
+  const d = useDict('common');
   async function toggle() {
-    if (!token) return toast.info('Masuk untuk menyimpan lagu');
+    if (!token) return toast.info(d.player.signInToSave);
     qc.setQueryData(['likes-contains', trackId], { ids: liked ? [] : [trackId] });
     try {
       await api(`/v1/library/likes/${trackId}`, { method: liked ? 'DELETE' : 'PUT' });
       qc.invalidateQueries({ queryKey: ['likes'] });
       qc.invalidateQueries({ queryKey: ['library-summary'] });
-      if (!liked) toast.success('Ditambahkan ke Lagu yang Disukai');
+      if (!liked) toast.success(d.player.addedToLiked);
     } catch (e) {
       qc.setQueryData(['likes-contains', trackId], { ids: liked ? [trackId] : [] });
       toast.error(e);
@@ -214,8 +234,40 @@ export function LikeButton({ trackId, className, batched }: { trackId: string; c
   }
   return (
     // padding+margin negatif: area sentuh 44px (36px di desktop) tanpa menggeser tata letak.
-    <button onClick={toggle} aria-label={liked ? 'Hapus dari disukai' : 'Simpan ke disukai'} aria-pressed={liked} className={cx('-m-3 grid place-items-center rounded-full p-3 transition md:-m-2 md:p-2 hover:scale-110 active:scale-90', liked ? 'text-gema-primary-text' : 'text-gema-muted hover:text-white', className)}>
+    <button onClick={toggle} aria-label={liked ? d.player.removeLiked : d.player.saveLiked} aria-pressed={liked} className={cx('-m-3 grid place-items-center rounded-none p-3 transition md:-m-2 md:p-2 hover:scale-110 active:scale-90', liked ? 'text-rave-primary-text' : 'text-rave-muted hover:text-white', className)}>
       <Heart className={cx('size-5', liked && 'fill-current')} />
     </button>
+  );
+}
+
+/** Spektrum dekoratif LCD: bergerak hanya saat memutar (dimatikan bila prefers-reduced-motion). */
+const BARS = [0.62, 0.9, 0.48, 0.78, 0.35, 0.95, 0.55, 0.7, 0.42, 0.85, 0.5, 0.66];
+export function Spectrum({ on }: { on: boolean }) {
+  return (
+    <span className="deck-spectrum" data-on={on} aria-hidden>
+      {BARS.map((d, i) => (
+        <span key={i} style={{ animationDuration: `${0.45 + d * 0.6}s`, animationDelay: `${-i * 0.13}s` }} />
+      ))}
+    </span>
+  );
+}
+
+/** Layar LCD pemutar: waktu berjalan (atau sisa iklan), kualitas audio, status, dan spektrum. */
+export function PlayerLcd({ className }: { className?: string }) {
+  const { ad, adBreak, playing, loading, p } = usePlayerView();
+  const positionMs = usePlayer((s) => s.positionMs);
+  const quality = usePlayer((s) => s.session?.codec_label);
+  const d = useDict('common');
+  const ms = ad ? adBreak!.elapsedMs : positionMs;
+  const status = ad ? d.player.lcdAd : loading ? 'BUFFER' : playing ? 'PLAY' : p.current ? 'PAUSE' : 'STOP';
+  return (
+    <div className={cx('deck-lcd', className)} role="timer" aria-label={d.player.playTime(fmt.duration(ms))}>
+      <span className="deck-lcd__meta w-11">
+        <span>{status}</span>
+        <span className={quality ? undefined : 'deck-lcd__dim'}>{quality ?? '----'}</span>
+      </span>
+      <span className={cx('deck-lcd__time', !p.current && !ad && 'deck-lcd__dim')}>{fmt.duration(ms)}</span>
+      <Spectrum on={playing && !loading} />
+    </div>
   );
 }

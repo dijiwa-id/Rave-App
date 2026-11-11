@@ -1,0 +1,85 @@
+# syntax=docker/dockerfile:1.7
+# Image microservice RAVE (monorepo, runtime tsx — tanpa langkah kompilasi).
+#
+#   Produksi : docker build -f infra/docker/Dockerfile.service --target runtime --build-arg SERVICE=booking -t rave/booking .
+#   Dev      : docker build -f infra/docker/Dockerfile.service --target dev -t rave/dev .   (dipakai compose.dev.yaml)
+#
+# Lapisan sebelum `ARG SERVICE` identik untuk semua service → BuildKit membangunnya sekali dan dipakai bersama.
+ARG NODE_VERSION=22
+ARG TSX_VERSION=4.23.15
+
+# ---- 1. Manifest saja (cache npm ci hanya pecah bila dependensi berubah) ----
+FROM node:${NODE_VERSION}-alpine AS manifests
+WORKDIR /src
+COPY package.json package-lock.json ./
+COPY packages ./packages
+COPY services ./services
+COPY apps/web/package.json ./apps/web/package.json
+RUN find packages services -type f ! -name package.json -delete
+
+# ---- 2a. Dependensi lengkap (dev) ----
+FROM node:${NODE_VERSION}-alpine AS deps-dev
+WORKDIR /repo
+COPY --from=manifests /src ./
+RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts --no-audit --no-fund
+
+# ---- 2b. Dependensi produksi backend saja (tanpa web & devDependencies) ----
+FROM node:${NODE_VERSION}-alpine AS deps-prod
+WORKDIR /repo
+COPY --from=manifests /src ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+      $(for d in packages/* services/*; do printf -- '--workspace=%s ' "$d"; done)
+
+# ---- 3. Dev: satu image untuk semua service; source di-bind mount, tsx watch ----
+FROM node:${NODE_VERSION}-alpine AS dev
+RUN apk add --no-cache tini ffmpeg chromium nss freetype harfbuzz font-liberation font-dejavu postgresql16-client
+ENV NODE_ENV=development CHROMIUM_PATH=/usr/bin/chromium FFMPEG_PATH=/usr/bin/ffmpeg PG_DUMP=/usr/bin/pg_dump \
+    CHOKIDAR_USEPOLLING=true
+WORKDIR /repo
+# Milik `node`: Vite menulis cache dep-optimizer & tsx menulis cache transpile saat dev (root → EACCES).
+COPY --from=deps-dev --chown=node:node /repo ./
+RUN mkdir -p /data/uploads /data/backups /data/live /data/contracts /data/branding /home/node/.cache \
+ && chown -R node:node /data /home/node /repo
+USER node
+ENTRYPOINT ["/sbin/tini", "--"]
+
+# ---- 4. Runtime produksi ----
+FROM node:${NODE_VERSION}-alpine AS runtime-base
+ARG TSX_VERSION
+RUN apk add --no-cache tini && npm install -g tsx@${TSX_VERSION} && npm cache clean --force
+WORKDIR /repo
+COPY --from=deps-prod /repo ./
+COPY package.json tsconfig.base.json tsconfig.json ./
+COPY packages ./packages
+COPY services ./services
+COPY infra/docker/healthcheck.mjs /usr/local/lib/rave/healthcheck.mjs
+
+FROM runtime-base AS runtime
+ARG SERVICE
+RUN test -n "$SERVICE" && test -f "services/$SERVICE/src/index.ts" || (echo "build-arg SERVICE tidak valid: '$SERVICE'" >&2; exit 1)
+# Kebutuhan sistem per service: platform → pg_dump (backup, versi ≥ server), live → ffmpeg (HLS), catalog → ffmpeg (probe & transcoding audio), booking → Chromium (PDF kontrak).
+RUN case "$SERVICE" in \
+      platform) apk add --no-cache postgresql16-client ;; \
+      live|catalog) apk add --no-cache ffmpeg ;; \
+      booking) apk add --no-cache chromium nss freetype harfbuzz font-liberation font-dejavu ;; \
+    esac
+RUN mkdir -p /data/uploads /data/backups /data/live /data/contracts /data/branding && chown -R node:node /data
+ARG APP_VERSION=0.0.0
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=
+LABEL org.opencontainers.image.title="rave-${SERVICE}" \
+      org.opencontainers.image.description="RAVE microservice: ${SERVICE}" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.source="https://github.com/rave/rave"
+ENV NODE_ENV=production SERVICE=${SERVICE} APP_VERSION=${APP_VERSION} GIT_SHA=${GIT_SHA} BUILD_DATE=${BUILD_DATE} \
+    UPLOAD_DIR=/data/uploads BACKUP_DIR=/data/backups LIVE_DIR=/data/live CONTRACT_DIR=/data/contracts BRANDING_DIR=/data/branding \
+    CHROMIUM_PATH=/usr/bin/chromium FFMPEG_PATH=/usr/bin/ffmpeg PG_DUMP=/usr/bin/pg_dump
+USER node
+WORKDIR /repo/services/${SERVICE}
+HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=3 CMD ["node", "/usr/local/lib/rave/healthcheck.mjs"]
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["tsx", "src/index.ts"]

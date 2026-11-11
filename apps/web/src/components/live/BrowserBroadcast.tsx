@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Camera, CameraOff, CircleStop, Radio, UploadCloud } from 'lucide-react';
 import { api, ApiError, fmt } from '@/lib/api';
 import { Badge, Button, Card, cx, Select, toast } from '@/components/ui';
+import { dict, localeTag, useDict } from '@/lib/i18n';
 
 /**
  * Siaran dari browser (docs/API.md §10): kamera+mic → MediaRecorder (WebM, potongan 1 dtk) →
@@ -22,14 +23,17 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function mediaErrorMessage(e: unknown) {
   const name = (e as DOMException)?.name;
-  if (name === 'NotAllowedError' || name === 'SecurityError') return 'Izin kamera/mikrofon ditolak. Izinkan akses lewat ikon gembok di bilah alamat, lalu coba lagi.';
-  if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'Kamera atau mikrofon tidak ditemukan. Sambungkan perangkat lalu coba lagi.';
-  if (name === 'NotReadableError') return 'Kamera/mikrofon sedang dipakai aplikasi lain. Tutup aplikasi tersebut lalu coba lagi.';
-  return (e as Error)?.message ?? 'Tidak bisa mengakses kamera/mikrofon.';
+  const t = dict('live').broadcast;
+  if (name === 'NotAllowedError' || name === 'SecurityError') return t.permissionDenied;
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') return t.deviceNotFound;
+  if (name === 'NotReadableError') return t.deviceBusy;
+  return (e as Error)?.message ?? t.deviceError;
 }
 
 export function BrowserBroadcast({ streamId, ended, onChange }: { streamId: string; ended?: boolean; onChange?: () => void }) {
   const qc = useQueryClient();
+  const d = useDict('live');
+  const t = d.broadcast; // `d` dibayangi oleh perangkat di daftar kamera/mikrofon
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRef = useRef<MediaStream | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
@@ -116,11 +120,11 @@ export function BrowserBroadcast({ streamId, ended, onChange }: { streamId: stri
           } catch (e) {
             // 4xx selain 408/429 = sesi tidak berlaku (stream diakhiri, sesi lain aktif) → hentikan.
             if (e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429) {
-              fatal(`Unggahan ditolak server: ${e.message}`);
+              fatal(dict('live').broadcast.uploadRejected(e.message));
               return;
             }
             if (Date.now() - firstTry > RETRY_BUDGET_MS) {
-              fatal('Koneksi ke server terputus lebih dari 30 detik. Siaran dari browser dihentikan — periksa internet lalu mulai lagi.');
+              fatal(dict('live').broadcast.connectionLost);
               return;
             }
             setRetrying(true);
@@ -186,18 +190,18 @@ export function BrowserBroadcast({ streamId, ended, onChange }: { streamId: stri
         setBacklog(queue.current.length);
         void pump();
       };
-      rec.onerror = () => fatal('Perekam media berhenti karena galat. Mulai ulang siaran.');
+      rec.onerror = () => fatal(dict('live').broadcast.recorderError);
       recRef.current = rec;
       rec.start(r.chunk_ms || 1000);
       setStartedAt(Date.now());
       setState('live');
-      toast.success('Siaran dari browser dimulai');
+      toast.success(dict('live').broadcast.started);
       refresh();
     } catch (e) {
       setState('idle');
-      if (e instanceof ApiError && e.status === 429) setError('Kapasitas siaran bersamaan platform sedang penuh. Coba beberapa menit lagi.');
-      else if (e instanceof ApiError && e.status === 409) setError(e.message || 'Sudah ada sumber siaran aktif untuk stream ini (mis. OBS).');
-      else setError((e as Error)?.message ?? 'Gagal memulai siaran');
+      if (e instanceof ApiError && e.status === 429) setError(dict('live').broadcast.capacityFull);
+      else if (e instanceof ApiError && e.status === 409) setError(e.message || dict('live').broadcast.sourceActive);
+      else setError((e as Error)?.message ?? dict('live').broadcast.startFailed);
     }
   }
 
@@ -218,7 +222,7 @@ export function BrowserBroadcast({ streamId, ended, onChange }: { streamId: stri
     session.current = null;
     setState('idle');
     setStartedAt(null);
-    toast.info('Siaran dari browser dihentikan. Stream berstatus terputus — akhiri siaran bila sudah selesai.');
+    toast.info(dict('live').broadcast.stopped);
     refresh();
   }
 
@@ -242,7 +246,7 @@ export function BrowserBroadcast({ streamId, ended, onChange }: { streamId: stri
   const blocker = useBlocker(broadcasting);
   useEffect(() => {
     if (blocker.state !== 'blocked') return;
-    if (window.confirm('Siaran dari browser sedang berjalan. Tinggalkan halaman dan hentikan siaran?')) blocker.proceed();
+    if (window.confirm(dict('live').broadcast.leaveConfirm)) blocker.proceed();
     else blocker.reset();
   }, [blocker]);
 
@@ -271,37 +275,37 @@ export function BrowserBroadcast({ streamId, ended, onChange }: { streamId: stri
     <Card
       title={
         <span className="flex items-center gap-2">
-          <Camera className="size-4" /> Siaran dari browser
+          <Camera className="size-4" /> {d.broadcast.title}
         </span>
       }
-      action={state === 'live' ? <Badge tone="red">● Menyiarkan {startedAt && fmt.duration(Date.now() - startedAt)}</Badge> : undefined}
+      action={state === 'live' ? <Badge tone="red">● {d.broadcast.broadcasting} {startedAt && fmt.duration(Date.now() - startedAt)}</Badge> : undefined}
     >
       {!supported ? (
-        <p className="text-sm text-b2b-muted">Browser ini tidak mendukung perekaman WebM (MediaRecorder). Gunakan Chrome, Edge, atau Firefox terbaru di desktop/Android — atau siarkan lewat OBS (RTMP).</p>
+        <p className="text-sm text-b2b-muted">{d.broadcast.unsupported}</p>
       ) : (
         <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_260px]">
-          <div className="relative aspect-video overflow-hidden rounded-lg bg-black">
+          <div className="relative aspect-video overflow-hidden rounded-none bg-black">
             <video ref={videoRef} muted playsInline autoPlay className={cx('size-full object-cover', !previewing && 'hidden')} style={{ transform: 'scaleX(-1)' }} />
             {!previewing && (
               <div className="absolute inset-0 grid place-items-center text-center text-sm text-white/70">
                 <div className="flex flex-col items-center gap-3 p-4">
                   <CameraOff className="size-8" />
-                  <p>Kamera belum aktif</p>
+                  <p>{d.broadcast.cameraOff}</p>
                   <Button size="sm" variant="white" onClick={() => openPreview()}>
-                    Aktifkan kamera & mikrofon
+                    {d.broadcast.enableCamera}
                   </Button>
                 </div>
               </div>
             )}
             {state === 'live' && (
-              <span className="absolute top-2 left-2 inline-flex items-center gap-1.5 rounded bg-red-600 px-2 py-0.5 text-[11px] font-black text-white uppercase">
-                <span className="size-2 animate-pulse rounded-full bg-white" /> On air
+              <span className="absolute top-2 left-2 inline-flex items-center gap-1.5 rounded-none bg-red-600 px-2 py-0.5 text-[11px] font-black text-white uppercase">
+                <span className="size-2 animate-pulse rounded-full bg-white" /> {d.broadcast.onAir}
               </span>
             )}
           </div>
           <div className="space-y-3 text-sm">
             <label className="block">
-              <span className="mb-1 block text-xs font-bold text-b2b-muted">Kamera</span>
+              <span className="mb-1 block text-xs font-bold text-b2b-muted">{d.broadcast.camera}</span>
               <Select
                 value={videoId}
                 disabled={broadcasting || !devices.video.length}
@@ -313,13 +317,13 @@ export function BrowserBroadcast({ streamId, ended, onChange }: { streamId: stri
                 {!devices.video.length && <option value="">—</option>}
                 {devices.video.map((d, i) => (
                   <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Kamera ${i + 1}`}
+                    {d.label || t.cameraN(i + 1)}
                   </option>
                 ))}
               </Select>
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs font-bold text-b2b-muted">Mikrofon</span>
+              <span className="mb-1 block text-xs font-bold text-b2b-muted">{d.broadcast.microphone}</span>
               <Select
                 value={audioId}
                 disabled={broadcasting || !devices.audio.length}
@@ -331,13 +335,13 @@ export function BrowserBroadcast({ streamId, ended, onChange }: { streamId: stri
                 {!devices.audio.length && <option value="">—</option>}
                 {devices.audio.map((d, i) => (
                   <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Mikrofon ${i + 1}`}
+                    {d.label || t.microphoneN(i + 1)}
                   </option>
                 ))}
               </Select>
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs font-bold text-b2b-muted">Resolusi</span>
+              <span className="mb-1 block text-xs font-bold text-b2b-muted">{d.broadcast.resolution}</span>
               <Select
                 value={res}
                 disabled={broadcasting}
@@ -347,50 +351,50 @@ export function BrowserBroadcast({ streamId, ended, onChange }: { streamId: stri
                   if (previewing) void openPreview(videoId, audioId, r);
                 }}
               >
-                <option value="480p">480p — hemat kuota (±1,3 Mbps)</option>
-                <option value="720p">720p — HD (±2,6 Mbps)</option>
+                <option value="480p">{d.broadcast.res480}</option>
+                <option value="720p">{d.broadcast.res720}</option>
               </Select>
             </label>
             {state === 'idle' ? (
               <div className="flex flex-wrap gap-2 pt-1">
                 <Button variant="danger" icon={<Radio className="size-4" />} onClick={start}>
-                  Mulai siaran
+                  {d.broadcast.start}
                 </Button>
                 {previewing && (
                   <Button variant="outline-ink" onClick={closePreview}>
-                    Matikan kamera
+                    {d.broadcast.turnOffCamera}
                   </Button>
                 )}
               </div>
             ) : (
               <Button variant="ink" icon={<CircleStop className="size-4" />} loading={state !== 'live'} onClick={stop}>
-                {state === 'stopping' ? 'Mengirim sisa data…' : state === 'starting' ? 'Memulai…' : 'Hentikan siaran browser'}
+                {state === 'stopping' ? d.broadcast.flushing : state === 'starting' ? d.broadcast.starting : d.broadcast.stop}
               </Button>
             )}
             {state !== 'idle' && (
               <p className="text-xs text-b2b-muted">
-                Terkirim {fmt.num(sent.chunks)} potongan · {(sent.bytes / 1_048_576).toLocaleString('id-ID', { maximumFractionDigits: 1 })} MB
+                {d.broadcast.sent(fmt.num(sent.chunks), (sent.bytes / 1_048_576).toLocaleString(localeTag(), { maximumFractionDigits: 1 }))}
               </p>
             )}
           </div>
         </div>
       )}
       {(backlog > BACKLOG_WARN || retrying) && state !== 'idle' && (
-        <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700">
+        <div className="mt-4 flex items-start gap-2 rounded-none border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700">
           <UploadCloud className="mt-0.5 size-4 shrink-0" />
           <p>
-            {retrying ? 'Koneksi tersendat — mencoba mengirim ulang. ' : ''}
-            Antrean unggah: <b>{backlog} potongan</b> (±{backlog} dtk tertunda). Bandwidth unggah tidak cukup — pilih 480p, tutup aplikasi lain yang memakai internet, atau gunakan koneksi kabel/Wi-Fi yang lebih stabil.
+            {retrying ? d.broadcast.retrying : ''}
+            {d.broadcast.backlogLabel}<b>{d.broadcast.backlogChunks(backlog)}</b>{d.broadcast.backlogHint(backlog)}
           </p>
         </div>
       )}
       {error && (
-        <div className="mt-4 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-600">
+        <div className="mt-4 flex items-start gap-2 rounded-none border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-600">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <p>{error}</p>
         </div>
       )}
-      <p className="mt-4 text-xs text-b2b-muted">Jaga tab ini tetap terbuka selama siaran. Untuk kualitas terbaik dan koneksi lebih stabil gunakan OBS (RTMP).</p>
+      <p className="mt-4 text-xs text-b2b-muted">{d.broadcast.keepOpen}</p>
     </Card>
   );
 }

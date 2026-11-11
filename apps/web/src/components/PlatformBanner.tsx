@@ -3,14 +3,15 @@ import { AlertTriangle, Info, Wrench, X } from 'lucide-react';
 import { cx } from '@/components/ui';
 import { setting, usePlatformConfig } from '@/lib/platform';
 import { safeGet, safeSet } from '@/lib/storage';
+import { useDict } from '@/lib/i18n';
 
 const LEVEL = {
-  info: 'bg-[#2e77d0] text-white',
+  info: 'bg-[#1F5C52] text-white',
   warning: 'bg-amber-400 text-black',
   critical: 'bg-[#dc2626] text-white',
 } as const;
 
-const DISMISS_KEY = 'gema-dismissed-announcement';
+const DISMISS_KEY = 'rave-dismissed-announcement';
 const readDismissed = () => safeGet(DISMISS_KEY, 'session');
 
 /**
@@ -19,6 +20,7 @@ const readDismissed = () => safeGet(DISMISS_KEY, 'session');
  */
 export function PlatformBanner() {
   const cfg = usePlatformConfig();
+  const d = useDict('common');
   const [dismissed, setDismissed] = useState(readDismissed);
   const announcement = setting(cfg, 'general.announcement', '').trim();
   const level = setting<keyof typeof LEVEL>(cfg, 'general.announcement_level', 'info');
@@ -32,7 +34,7 @@ export function PlatformBanner() {
         <div role="status" className="flex items-center gap-2.5 bg-amber-400 px-4 py-2 text-sm font-semibold text-black">
           <Wrench className="size-4 shrink-0" />
           <span className="min-w-0">
-            <strong className="mr-1">Mode pemeliharaan.</strong>
+            <strong className="mr-1">{d.banner.maintenance}</strong>
             {message}
           </span>
         </div>
@@ -42,7 +44,7 @@ export function PlatformBanner() {
           {level === 'info' ? <Info className="size-4 shrink-0" /> : <AlertTriangle className="size-4 shrink-0" />}
           <span className="min-w-0 flex-1 whitespace-pre-line">{announcement}</span>
           <button
-            aria-label="Tutup pengumuman"
+            aria-label={d.banner.closeAnnouncement}
             className="shrink-0 opacity-70 hover:opacity-100"
             onClick={() => {
               safeSet(DISMISS_KEY, announcement, 'session');

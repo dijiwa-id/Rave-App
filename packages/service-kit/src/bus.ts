@@ -1,4 +1,4 @@
-import type { DomainEvents, EventEnvelope, Topic } from '@gema/domain';
+import type { DomainEvents, EventEnvelope, Topic } from '@rave/domain';
 import pg from 'pg';
 import { config } from './config.js';
 import type { Client, Db } from './db.js';
@@ -56,7 +56,7 @@ function pgDriver(db: Db, log: (o: object, m: string) => void): Driver {
     listenClient = c;
     try {
       await c.connect();
-      await c.query('LISTEN gema_bus');
+      await c.query('LISTEN rave_bus');
       reconnectMs = 1000;
       listeners.forEach((l) => l()); // kejar event yang terlewat selama terputus
     } catch (e: any) {
@@ -77,7 +77,7 @@ function pgDriver(db: Db, log: (o: object, m: string) => void): Driver {
           [e.id, e.topic, e.key, JSON.stringify(e.payload), e.occurredAt, e.producer],
         );
       }
-      if (envs.length) await c.query(`SELECT pg_notify('gema_bus', '')`);
+      if (envs.length) await c.query(`SELECT pg_notify('rave_bus', '')`);
     },
     async subscribe(group, topics, onEvent) {
       await ensureListen();
@@ -211,7 +211,7 @@ function kafkaDriver(db: Db, service: string, log: (o: object, m: string) => voi
   async function k() {
     if (!kafka) {
       const { Kafka, logLevel } = await import('kafkajs');
-      kafka = new Kafka({ clientId: `gema-${service}`, brokers: config.kafkaBrokers, logLevel: logLevel.WARN });
+      kafka = new Kafka({ clientId: `rave-${service}`, brokers: config.kafkaBrokers, logLevel: logLevel.WARN });
     }
     return kafka;
   }

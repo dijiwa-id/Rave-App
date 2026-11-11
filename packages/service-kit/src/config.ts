@@ -28,7 +28,7 @@ function env(name: string, fallback?: string): string {
 export const config = {
   nodeEnv: env('NODE_ENV', 'development'),
   isDev: env('NODE_ENV', 'development') !== 'production',
-  databaseUrl: env('DATABASE_URL', 'postgres://gema:gema@127.0.0.1:55432/gema'),
+  databaseUrl: env('DATABASE_URL', 'postgres://rave:rave@127.0.0.1:55432/rave'),
   jwtSecret: env('JWT_SECRET', 'dev-only-change-me-please-32-bytes-min'),
   busDriver: env('BUS_DRIVER', 'pg') as 'pg' | 'kafka',
   kafkaBrokers: env('KAFKA_BROKERS', '127.0.0.1:19092').split(','),
@@ -61,7 +61,13 @@ const DEV_DEFAULTS: [name: string, value: string][] = [
 if (!config.isDev) {
   const bad = DEV_DEFAULTS.filter(([n, v]) => (process.env[n] ?? v) === v).map(([n]) => n);
   if (!process.env.KYC_KEY) bad.push('KYC_KEY');
-  if (process.env.GEMA_FAST_CLOCK === '1') bad.push('GEMA_FAST_CLOCK (tidak boleh 1 di produksi)');
+  if (process.env.RAVE_FAST_CLOCK === '1') bad.push('RAVE_FAST_CLOCK (tidak boleh 1 di produksi)');
+  // Kredensial DB bawaan dev (rave:rave) dan secret pendek tidak boleh dipakai di produksi.
+  if (/\/\/rave:rave@/.test(config.databaseUrl)) bad.push('DATABASE_URL (masih memakai password dev rave:rave)');
+  for (const n of ['JWT_SECRET', 'INTERNAL_SERVICE_SECRET', 'MEDIA_SIGNING_SECRET', 'KYC_KEY']) {
+    const v = process.env[n];
+    if (v && v.length < 32) bad.push(`${n} (minimal 32 karakter)`);
+  }
   if (bad.length) throw new Error(`NODE_ENV=production: set nilai produksi untuk ${bad.join(', ')}`);
 }
 

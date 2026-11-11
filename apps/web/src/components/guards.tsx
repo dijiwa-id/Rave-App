@@ -1,7 +1,8 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import type { AdminPermission } from '@gema/domain/settings';
+import type { AdminPermission } from '@rave/domain/settings';
 import { Empty } from '@/components/b2b/common';
 import { can, hasRole, isSuperAdmin, useAuth } from '@/stores/auth';
+import { useDict } from '@/lib/i18n';
 
 /** Wajib login; simpan tujuan untuk redirect setelah login. */
 export function RequireAuth() {
@@ -25,11 +26,12 @@ export function RequireRole({ roles, fallback = '/app' }: { roles: string[]; fal
 export function RequireAdminAccess({ perms = [], superOnly }: { perms?: AdminPermission[]; superOnly?: boolean }) {
   const user = useAuth((s) => s.user);
   const ok = superOnly ? isSuperAdmin(user) : can(user, ...perms);
+  const d = useDict('common');
   if (!ok)
     return (
       <Empty
-        title="Anda tidak memiliki akses ke halaman ini"
-        body={superOnly ? 'Area Platform khusus Super Admin.' : 'Peran admin Anda belum diberi izin untuk area ini. Hubungi Super Admin bila Anda membutuhkannya.'}
+        title={d.guards.noAccessTitle}
+        body={superOnly ? d.guards.superOnly : d.guards.noPermission}
       />
     );
   return <Outlet />;

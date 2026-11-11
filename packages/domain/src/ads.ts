@@ -42,7 +42,7 @@ export type AdPlacement = 'between_tracks' | 'podcast_preroll';
 export const AD_FIXED_RULES = [
   'Pelanggan Premium tidak pernah menerima iklan.',
   'Iklan hanya diputar di antara lagu/episode — tidak pernah memotong lagu yang sedang diputar.',
-  'Setiap iklan berlabel jelas "Iklan" (EPI); promosi internal berlabel "Dari GEMA".',
+  'Setiap iklan berlabel jelas "Iklan" (EPI); promosi internal berlabel "Dari RAVE".',
   'Penargetan kota/demografi hanya untuk pengguna yang memberi persetujuan iklan (UU PDP); tanpa persetujuan hanya kontekstual (genre).',
   'Kategori terlarang (judi, dewasa, narkotika, senjata, SARA, pinjol tanpa izin) selalu ditolak.',
   'Kategori terbatas wajib mencantumkan nomor izin; setiap kampanye wajib ditinjau admin sebelum tayang.',
@@ -163,7 +163,7 @@ export function evaluateAdBreak(policy: AdPolicy, s: ListenerAdState): AdBreakDe
 export function categoryViolation(category: string, blocked: readonly string[], licenseRef?: string | null): string | null {
   const def = (AD_CATEGORIES as Record<string, { label: string; tier: AdCategoryTier; license?: string }>)[category];
   if (!def) return `Kategori tidak dikenal: ${category}`;
-  if (def.tier === 'prohibited') return `Kategori "${def.label}" dilarang di GEMA`;
+  if (def.tier === 'prohibited') return `Kategori "${def.label}" dilarang di RAVE`;
   if (blocked.includes(category)) return `Kategori "${def.label}" sedang diblokir oleh kebijakan iklan platform`;
   if (def.tier === 'restricted' && !licenseRef?.trim()) return `Kategori "${def.label}" wajib mencantumkan ${def.license}`;
   return null;

@@ -40,7 +40,7 @@ export function createDb(schema: string, opts: DbOptions = {}): Db {
     query_timeout: opts.queryTimeoutMs,
     // Query liar & transaksi menggantung dihentikan server (melepas kunci). Maintenance (VACUUM) memakai SET lokal.
     options: `-c search_path=${schema},public -c statement_timeout=${opts.statementTimeoutMs ?? process.env.DB_STATEMENT_TIMEOUT_MS ?? 30_000} -c idle_in_transaction_session_timeout=60000`,
-    application_name: opts.appName ?? `gema-${schema}`,
+    application_name: opts.appName ?? `rave-${schema}`,
   });
   pool.on('error', (e) => console.error(`[db:${schema}] idle client error`, e.message));
 
@@ -106,7 +106,7 @@ export function sessionLock(name: string, opts: { onLost?: () => void; log?: (o:
     async tryAcquire(): Promise<boolean> {
       if (held) return true;
       if (!client) {
-        const c = new pg.Client({ connectionString: config.databaseUrl, application_name: `gema-lock-${name}`.slice(0, 63) });
+        const c = new pg.Client({ connectionString: config.databaseUrl, application_name: `rave-lock-${name}`.slice(0, 63) });
         c.on('error', (e) => drop(c, e));
         c.on('end', () => drop(c));
         client = c;

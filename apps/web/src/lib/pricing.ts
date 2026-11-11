@@ -1,9 +1,10 @@
-import { SETTINGS_BY_KEY } from '@gema/domain/settings';
+import { SETTINGS_BY_KEY } from '@rave/domain/settings';
 import { setting, usePlatformConfig } from '@/lib/platform';
+import { currentLocale, dict, localeTag } from '@/lib/i18n';
 
 const num = (cfg: ReturnType<typeof usePlatformConfig>, key: string) => setting<number>(cfg, key, SETTINGS_BY_KEY[key].default as number);
-const idr = (n: number) => n.toLocaleString('id-ID');
-const pct = (n: number) => `${String(n).replace('.', ',')}%`;
+const idr = (n: number) => n.toLocaleString(localeTag());
+const pct = (n: number) => `${currentLocale() === 'en' ? String(n) : String(n).replace('.', ',')}%`;
 
 /**
  * Harga & komisi publik dari Super Admin (`subscription.*`, `commission.*`) dengan default registri pengaturan —
@@ -12,6 +13,7 @@ const pct = (n: number) => `${String(n).replace('.', ',')}%`;
 export function usePricing() {
   const cfg = usePlatformConfig();
   const trialDays = num(cfg, 'subscription.trial_days');
+  const t = dict('common').pricing;
   return {
     open: setting<boolean>(cfg, 'subscription.enabled', false),
     individual: idr(num(cfg, 'subscription.price_individual_idr')),
@@ -19,7 +21,7 @@ export function usePricing() {
     duo: idr(num(cfg, 'subscription.price_duo_idr')),
     trialDays,
     /** "1 bulan" untuk kelipatan 30 hari, selain itu "n hari"; kosong bila tanpa masa coba. */
-    trial: !trialDays ? '' : trialDays % 30 === 0 ? `${trialDays / 30} bulan` : `${trialDays} hari`,
+    trial: !trialDays ? '' : trialDays % 30 === 0 ? t.months(trialDays / 30) : t.days(trialDays),
     studentMonths: num(cfg, 'subscription.student_verify_months'),
     devices: num(cfg, 'subscription.download_devices'),
     artistCommission: pct(num(cfg, 'commission.artist_commission_pct')),

@@ -5,7 +5,7 @@
  * DB bermasalah → FAIL OPEN (permintaan diizinkan, log warn dibatasi) dan pemutus singkat agar gateway tidak
  * menunggu DB yang mati di setiap permintaan.
  */
-import { createDb, type Db } from '@gema/service-kit';
+import { createDb, type Db } from '@rave/service-kit';
 
 type Log = { warn: (o: object, m: string) => void; info: (o: object, m: string) => void };
 type IncrCb = (err: Error | null, res?: { current: number; ttl: number }) => void;
@@ -25,7 +25,7 @@ export interface PgRateLimit {
 
 export async function createPgRateLimit(log: Log): Promise<PgRateLimit> {
   // Pool kecil khusus: jalur panas tiap permintaan, timeout pendek (lebih baik fail open daripada lambat).
-  const db: Db = createDb('gateway', { max: Number(process.env.RATE_LIMIT_PG_POOL_MAX ?? 5), connectTimeoutMs: 1000, statementTimeoutMs: 500, queryTimeoutMs: 1000, appName: 'gema-gateway-ratelimit' });
+  const db: Db = createDb('gateway', { max: Number(process.env.RATE_LIMIT_PG_POOL_MAX ?? 5), connectTimeoutMs: 1000, statementTimeoutMs: 500, queryTimeoutMs: 1000, appName: 'rave-gateway-ratelimit' });
   let ready = false;
   let downUntil = 0;
   let suppressed = 0;
@@ -34,7 +34,7 @@ export async function createPgRateLimit(log: Log): Promise<PgRateLimit> {
   async function ensureTable() {
     // Advisory lock: beberapa replika start bersamaan tidak balapan CREATE TABLE.
     await db.tx(async (c) => {
-      await c.query(`SELECT pg_advisory_xact_lock(hashtext('gema.gateway.rate_limits'))`);
+      await c.query(`SELECT pg_advisory_xact_lock(hashtext('rave.gateway.rate_limits'))`);
       await c.query(`CREATE SCHEMA IF NOT EXISTS gateway`);
       await c.query(
         `CREATE UNLOGGED TABLE IF NOT EXISTS gateway.rate_limits (

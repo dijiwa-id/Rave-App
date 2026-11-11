@@ -1,5 +1,5 @@
 import type { FastifyRequest } from 'fastify';
-import { ADMIN_PERMISSIONS, adminPermissions, type AdminPermission } from '@gema/domain/settings';
+import { ADMIN_PERMISSIONS, adminPermissions, type AdminPermission } from '@rave/domain/settings';
 import type { AuthUser } from './auth.js';
 import { forbidden, unauthorized } from './errors.js';
 import { settings } from './settings.js';

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { BRANDING_PUBLIC_PREFIX, SETTINGS, SETTINGS_BY_KEY, coerceSetting, settingDefaults } from '@gema/domain/settings';
+import { BRANDING_PUBLIC_PREFIX, SETTINGS, SETTINGS_BY_KEY, coerceSetting, settingDefaults } from '@rave/domain/settings';
 import {
   audit,
   badRequest,
@@ -15,7 +15,7 @@ import {
   type Client,
   type Db,
   type ServiceContext,
-} from '@gema/service-kit';
+} from '@rave/service-kit';
 import { BUCKETS } from './storage.js';
 
 /** Snapshot nilai efektif = default registri ditimpa baris tabel `settings`. */
@@ -61,7 +61,14 @@ async function applyChanges(db: Db, req: FastifyRequest, changes: Record<string,
   for (const [k, v] of Object.entries(clean))
     if (SETTINGS_BY_KEY[k].type === 'image' && v && !existsSync(join(BUCKETS.branding.path, String(v).slice(BRANDING_PUBLIC_PREFIX.length))))
       errors.push({ path: k, message: `${SETTINGS_BY_KEY[k].label}: file belum diunggah` });
-  if (errors.length) throw badRequest('Sebagian pengaturan tidak valid', { type: 'https://gema.id/problems/validation', errors });
+  // Logo partner (CMS): setiap file wajib sudah ada di bucket branding.
+  for (const [k, v] of Object.entries(clean))
+    if (SETTINGS_BY_KEY[k].type === 'partners')
+      (v as { name: string; logo: string }[]).forEach((pt, i) => {
+        if (pt.logo && !existsSync(join(BUCKETS.branding.path, pt.logo.slice(BRANDING_PUBLIC_PREFIX.length))))
+          errors.push({ path: `${k}.${i}.logo`, message: `${pt.name}: file logo belum diunggah` });
+      });
+  if (errors.length) throw badRequest('Sebagian pengaturan tidak valid', { type: 'https://rave.id/problems/validation', errors });
 
   await db.tx(async (tx) => {
     await tx.query(`SELECT version FROM settings_state WHERE id = 1 FOR UPDATE`);
@@ -102,7 +109,7 @@ async function applyChanges(db: Db, req: FastifyRequest, changes: Record<string,
 
 export async function settingsRoutes(app: FastifyInstance, { db }: ServiceContext) {
   // Platform tidak memanggil HTTP ke dirinya sendiri: refreshSettings (start, NOTIFY, berkala) memuat langsung dari DB.
-  // Replika platform lain ikut segar lewat NOTIFY `gema_settings`, termasuk versi untuk /v1/platform/config.
+  // Replika platform lain ikut segar lewat NOTIFY `rave_settings`, termasuk versi untuk /v1/platform/config.
   setSettingsLoader(async () => {
     const s = await loadSettings(db);
     currentVersion = Math.max(currentVersion, s.version);

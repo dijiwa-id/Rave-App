@@ -1,4 +1,4 @@
-import { SETTINGS_BY_KEY, settingDefaults } from '@gema/domain/settings';
+import { SETTINGS_BY_KEY, settingDefaults } from '@rave/domain/settings';
 import pg from 'pg';
 import { serviceHeaders } from './auth.js';
 import { config, serviceUrl } from './config.js';
@@ -6,7 +6,7 @@ import { config, serviceUrl } from './config.js';
 /**
  * Klien pengaturan platform (dikelola Super Admin di service `platform`).
  * - Nilai awal = default registri, lalu ditimpa snapshot dari `GET /internal/settings`.
- * - Diperbarui real-time di SETIAP replika lewat Postgres LISTEN/NOTIFY kanal `gema_settings`
+ * - Diperbarui real-time di SETIAP replika lewat Postgres LISTEN/NOTIFY kanal `rave_settings`
  *   (`startSettingsListener`), plus event `platform.settings.updated` (consumer group → satu replika per service)
  *   dan refresh berkala sebagai jaring pengaman.
  * Service yang tidak bisa menjangkau `platform` tetap jalan dengan default (degradasi aman).
@@ -18,7 +18,7 @@ let version: number | null = null;
 let loader: (() => Promise<{ version: number; values: Record<string, unknown> }>) | null = null;
 
 /** Kanal NOTIFY Postgres; payload = versi pengaturan. Dikirim platform di dalam transaksi applyChanges. */
-export const SETTINGS_CHANNEL = 'gema_settings';
+export const SETTINGS_CHANNEL = 'rave_settings';
 
 export const settings = {
   get<T = unknown>(key: string): T {
@@ -80,7 +80,7 @@ export function startSettingsPolling(from: string, everyMs = 10_000) {
 }
 
 /**
- * Fan-out pengaturan ke SEMUA replika: koneksi pg khusus yang LISTEN `gema_settings`; setiap notifikasi →
+ * Fan-out pengaturan ke SEMUA replika: koneksi pg khusus yang LISTEN `rave_settings`; setiap notifikasi →
  * refreshSettings (di-debounce & diserialkan agar respons lama tidak menimpa yang baru). Putus → sambung ulang
  * dengan backoff, lalu refresh sekali untuk mengejar perubahan yang terlewat. Timer di-unref.
  */
@@ -122,7 +122,7 @@ export function startSettingsListener(from: string, opts: { debounceMs?: number;
 
   async function connect() {
     if (closed) return;
-    const c = new pg.Client({ connectionString: config.databaseUrl, application_name: `gema-${from}-settings`.slice(0, 63) });
+    const c = new pg.Client({ connectionString: config.databaseUrl, application_name: `rave-${from}-settings`.slice(0, 63) });
     let gone = false;
     const lost = (err?: Error) => {
       if (gone) return;

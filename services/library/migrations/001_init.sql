@@ -25,7 +25,7 @@ CREATE TABLE saved_releases (
 
 CREATE TABLE playlists (
   id           uuid PRIMARY KEY,
-  owner_id     text NOT NULL,                 -- user uuid, atau 'gema' untuk editorial
+  owner_id     text NOT NULL,                 -- user uuid, atau 'rave' untuk editorial
   owner_name   text NOT NULL,
   title        text NOT NULL,
   description  text,

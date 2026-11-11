@@ -1,8 +1,10 @@
-# GEMA — Platform Ekosistem Musik Indie & Off-Air
+# RAVE — Rolliemonkie Audio Visual Experiment
+
+Platform ekosistem musik DIY & indie Indonesia (streaming, event & tiket, booking off-air).
 
 > Dengar gratis. Datang ke panggungnya. Dukung langsung.
 
-Implementasi platform sesuai **GEMA_BRD_TDD_v2.0**: streaming musik gratis, podcast & audio fiksi, event & tiket, Artist Studio, Promotor Hub (EPK dinamis, kalender anti-bentrok, negosiasi, e-contract, escrow), Back Office, dan panel Super Admin (pengaturan platform tanpa deploy, storage server, backup, event bus, tim admin).
+Implementasi platform sesuai **BRD/TDD v2.0**: streaming musik gratis, podcast & audio fiksi, event & tiket, Artist Studio, Promotor Hub (EPK dinamis, kalender anti-bentrok, negosiasi, e-contract, escrow), Back Office, dan panel Super Admin (pengaturan platform tanpa deploy, storage server, backup, event bus, tim admin).
 UI mengikuti mockup di `../UI UX`; komponen animasi dari [React Bits](https://reactbits.dev).
 
 ## Stack
@@ -10,16 +12,17 @@ UI mengikuti mockup di `../UI UX`; komponen animasi dari [React Bits](https://re
 | Lapisan | Teknologi |
 |---|---|
 | Frontend | React 19, Vite, Tailwind CSS v4, React Router, TanStack Query, Zustand, React Bits (AnimatedList, Aurora, CodeSlots, CountUp, HoldButton, LogoLoop, PeekRating, SlideCommit, SpotlightCard, StarBorder, StatusMark, Stepper, TearTicket) |
-| Backend | Node.js + TypeScript, Fastify, Zod, `@gema/service-kit` |
+| Backend | Node.js + TypeScript, Fastify, Zod, `@rave/service-kit` |
 | Microservices | gateway, iam, catalog, library, playback, booking, finance, ticketing, notification, platform, live, ads |
 | Data | PostgreSQL (schema per service), event bus (outbox → Postgres log / Kafka-Redpanda) |
-| Infra | Docker Compose, Dockerfile generik per service, GitHub Actions CI |
+| Infra | Docker Compose (dev & prod), nginx, Caddy (TLS), GitHub Actions CI + rilis image GHCR |
 
-Detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · Kontrak API: [`docs/API.md`](docs/API.md) · Keputusan: [`docs/adr/`](docs/adr).
+Detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · Kontrak API: [`docs/API.md`](docs/API.md) · Keputusan: [`docs/adr/`](docs/adr)
+· Deploy: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) · Go-live: [`docs/GO-LIVE.md`](docs/GO-LIVE.md) · Versi & rilis: [`docs/VERSIONING.md`](docs/VERSIONING.md) · [`CHANGELOG.md`](CHANGELOG.md)
 
 ## Struktur
-
-```
+./
+```.
 apps/web/            React app: landing, fan app (/app), Artist Studio (/studio), Promotor Hub (/promotor), Back Office (/admin)
 services/gateway     API Gateway :8080 (routing, JWT di tepi, rate limit)
 services/iam         :4001 akun, OTP, sesi, org & peran, KYC, consent, waitlist
@@ -43,28 +46,44 @@ Prasyarat: Node.js ≥ 20.19, PostgreSQL 16+ terpasang (binary `initdb`/`pg_ctl`
 
 ```bash
 npm install
-npm run db:start      # cluster Postgres milik user di 127.0.0.1:55432 (data di ~/.gema/pgdata)
+npm run db:start      # cluster Postgres milik user di 127.0.0.1:55432 (data di ~/.rave/pgdata)
 npm run seed          # migrasi + data demo untuk semua service
 npm run dev           # 11 service + gateway (:8080) + web (:5173); RTMP ingest di :1935
 ```
 
-Atau dengan satu perintah (`scripts/gema.sh`, pintasan `./gema`):
+Atau dengan satu perintah (`scripts/rave.sh`, pintasan `./rave`):
 
 ```bash
-./gema start            # Postgres → migrasi (seed otomatis bila DB kosong) → semua service + web di background
-./gema status           # cek Postgres, 11 service, gateway, web
-./gema logs             # ikuti log (~/.gema/logs/gema.log)
-./gema stop             # hentikan service + web (`stop --all` ikut mematikan Postgres)
-./gema restart          # stop lalu start
-./gema dev              # seperti start, tetapi di foreground (Ctrl+C untuk berhenti)
-./gema restart-web      # restart Vite saja — di /mnt/* Vite tidak hot-reload
-./gema restart-svc iam  # restart satu service setelah mengedit kodenya
-./gema seed             # seed ulang data demo (idempoten)
+./rave start            # Postgres → migrasi (seed otomatis bila DB kosong) → semua service + web di background
+./rave status           # cek Postgres, 11 service, gateway, web
+./rave logs             # ikuti log (~/.rave/logs/rave.log)
+./rave stop             # hentikan service + web (`stop --all` ikut mematikan Postgres)
+./rave restart          # stop lalu start
+./rave dev              # seperti start, tetapi di foreground (Ctrl+C untuk berhenti)
+./rave restart-web      # restart Vite saja — di /mnt/* Vite tidak hot-reload
+./rave restart-svc iam  # restart satu service setelah mengedit kodenya
+./rave seed             # seed ulang data demo (idempoten)
 ```
 
 `npm start`, `npm stop`, `npm run status` dan `npm run logs` memanggil perintah yang sama.
 
-Buka http://localhost:5173. Dengan Docker: `docker compose up -d postgres redpanda` lalu set `BUS_DRIVER=kafka`, atau `docker compose up --build` untuk semuanya.
+Buka http://localhost:5173.
+
+## Menjalankan dengan Docker
+
+```bash
+npm run docker:dev        # development: hot reload, seed demo otomatis → http://localhost:5173
+npm run prod:preflight    # production: validasi .env.production (salin dari .env.production.example)
+npm run prod:build && npm run prod:up
+```
+
+Detail, HTTPS, backup, rollback: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
+## Versi & rilis
+
+Satu versi SemVer untuk seluruh platform (`package.json` root). `npm run release:dry` untuk pratinjau,
+`npm run release -- auto` lalu `git push --follow-tags` untuk merilis (image GHCR + GitHub Release otomatis).
+Versi berjalan: `GET /v1/version`. Lihat [`docs/VERSIONING.md`](docs/VERSIONING.md).
 
 ### Akun demo
 
@@ -72,12 +91,13 @@ Login memakai OTP email; di mode development kode OTP ditampilkan di layar login
 
 | Email | Peran | Untuk mencoba |
 |---|---|---|
-| `fan@gema.id` | Fan (Bandung) | streaming, playlist, lirik, beli tiket, QR tiket |
-| `artis@gema.id` | Artis — Senja Kolektif | Artist Studio: rilis, split, analitik, EPK |
-| `manajer@gema.id` | Manajemen — Nada Manajemen | inbox booking, offer, kontrak, kalender, wallet |
-| `promotor@gema.id` | Promotor — Pensi Nusantara (KYC ✓) | cari artis, inquiry, bayar escrow, event & check-in |
-| `admin@gema.id` | Admin (Operasional) | QC rilis, KYC, dispute, rekonsiliasi ledger, audit; panel Platform hanya-baca |
-| `superadmin@gema.id` | **Super Admin** | semua Back Office + `/admin/platform`: dasbor platform, pengaturan, storage server, backup, event bus, tim admin |
+| `fan@rave.id` | Fan (Bandung) | streaming, playlist, lirik, beli tiket, QR tiket |
+| `premium@rave.id` | Fan **Premium** (Yogyakarta) | AAC 320 & Lossless (FLAC), tanpa iklan |
+| `artis@rave.id` | Artis — Senja Kolektif | Artist Studio: rilis, split, analitik, EPK |
+| `manajer@rave.id` | Manajemen — Nada Manajemen | inbox booking, offer, kontrak, kalender, wallet |
+| `promotor@rave.id` | Promotor — Pensi Nusantara (KYC ✓) | cari artis, inquiry, bayar escrow, event & check-in |
+| `admin@rave.id` | Admin (Operasional) | QC rilis, KYC, dispute, rekonsiliasi ledger, audit; panel Platform hanya-baca |
+| `superadmin@rave.id` | **Super Admin** | semua Back Office + `/admin/platform`: dasbor platform, pengaturan, storage server, backup, event bus, tim admin |
 
 ### Panel Super Admin (`/admin/platform`)
 - **Dasbor Platform** — KPI lintas service, kesehatan & metrik tiap service, peringatan (disk, dead letter, backup, maintenance), ringkasan storage & event bus.
@@ -105,7 +125,7 @@ Aturan tetap (kepatuhan): Premium bebas iklan; iklan hanya di antara lagu; label
 2. **Manajer** → Inbox Booking → kirim offer. **Promotor** → terima → kontrak otomatis terbit.
 3. Kedua pihak tanda tangan (tahan tombol) → invoice DP & pelunasan terbit.
 4. **Promotor** → Pembayaran → geser untuk bayar (PG sandbox) → status BOOKED, kontak dibuka → bayar pelunasan.
-5. Kedua pihak "Show Done" → dana escrow dicairkan ke wallet artis (dipotong komisi & PPh) → SETTLED. `GEMA_FAST_CLOCK` (aktif di dev) mempercepat jendela waktu.
+5. Kedua pihak "Show Done" → dana escrow dicairkan ke wallet artis (dipotong komisi & PPh) → SETTLED. `RAVE_FAST_CLOCK` (aktif di dev) mempercepat jendela waktu.
 
 ## Pengujian
 
@@ -113,8 +133,8 @@ Aturan tetap (kepatuhan): Premium bebas iklan; iklan hanya di antara lagu; label
 npm run typecheck     # backend
 npm test              # unit test domain & booking (vitest)
 npm run e2e           # 127 skenario end-to-end terhadap stack yang sedang jalan (menulis data uji ke DB dev!)
-npm run e2e:isolated  # sama, tetapi di stack terpisah: DB gema_test baru, port +1000, storage sementara — aman saat aplikasi dipakai lewat gateway (butuh `npm run dev:services`)
-npm run build -w @gema/web
+npm run e2e:isolated  # sama, tetapi di stack terpisah: DB rave_test baru, port +1000, storage sementara — aman saat aplikasi dipakai lewat gateway (butuh `npm run dev:services`)
+npm run build -w @rave/web
 ```
 
 Catatan: OTP dibatasi 5 permintaan / 15 menit per alamat. Bila `npm run e2e` dijalankan berulang dan login ditolak, tunggu atau hapus `iam.otp_codes` di DB dev.

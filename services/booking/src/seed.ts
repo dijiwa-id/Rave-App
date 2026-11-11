@@ -1,5 +1,5 @@
-import { SEED, SEED_ARTIST_IMAGE, seedId } from '@gema/domain';
-import { encryptField, maskField, publish, uuidv7, type Client, type ServiceContext } from '@gema/service-kit';
+import { SEED, SEED_ARTIST_IMAGE, seedId } from '@rave/domain';
+import { encryptField, maskField, publish, uuidv7, type Client, type ServiceContext } from '@rave/service-kit';
 import { renderContract, TEMPLATE_VERSION } from './contract.js';
 import type { BookingRow } from './common.js';
 
@@ -83,13 +83,13 @@ export async function seed({ db, log }: ServiceContext) {
         JSON.stringify({
           bio_short: `${a.name} — ${a.genres.join(' / ')} dari ${a.city}.`,
           bio_long: `${a.name} adalah unit ${a.genres[0]} asal ${a.city} yang tumbuh dari panggung kampus dan kolektif lokal. Dikenal lewat penampilan live yang hangat dan lirik berbahasa Indonesia yang dekat dengan keseharian, mereka rutin mengisi pensi, festival kampus, dan showcase di berbagai kota.`,
-          press_photos: [1, 2, 3].map((n) => `https://picsum.photos/seed/gema-press-${a.slug}-${n}/1200/800`),
+          press_photos: [1, 2, 3].map((n) => `https://picsum.photos/seed/rave-press-${a.slug}-${n}/1200/800`),
           videos: [],
           press_quotes: [
             { quote: 'Salah satu penampil paling konsisten di sirkuit panggung kampus tahun ini.', source: 'Catatan Panggung' },
             { quote: 'Energi live yang membuat penonton bernyanyi dari lagu pertama.', source: 'Zine Kolektif Lokal' },
           ],
-          achievements: ['Showcase GEMA Indie Kotamu 2026', `Tur ${a.city} & sekitarnya 2025`],
+          achievements: ['Showcase RAVE Indie Kotamu 2026', `Tur ${a.city} & sekitarnya 2025`],
           rider: RIDER(performers),
           members: Array.from({ length: performers }, (_, k) => ({ name: `Personel ${k + 1}`, role: ['Vokal', 'Gitar', 'Bass', 'Drum', 'Keyboard'][k] ?? 'Additional' })),
           public_metrics: ['monthly_listeners', 'top_cities', 'shows_12m', 'avg_rating'],
@@ -135,7 +135,7 @@ export async function seed({ db, log }: ServiceContext) {
     );
 
     // ---- Booking demo ----
-    const promotorContact = JSON.stringify({ name: 'Raka (Pensi Nusantara)', email: 'promotor@gema.id', phone: '+62 811-2222-3333' });
+    const promotorContact = JSON.stringify({ name: 'Raka (Pensi Nusantara)', email: 'promotor@rave.id', phone: '+62 811-2222-3333' });
     async function ins(n: number, artistIdx: number, f: Partial<BookingRow> & Record<string, unknown>) {
       const a = SEED.artists[artistIdx];
       const id = seedId(600, n);

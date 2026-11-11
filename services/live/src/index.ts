@@ -1,4 +1,4 @@
-import { createService, config, type ServiceContext } from '@gema/service-kit';
+import { createService, config, type ServiceContext } from '@rave/service-kit';
 import type { FastifyInstance } from 'fastify';
 import { LiveManager, ME } from './manager.js';
 import { pruneLiveStorage } from './media.js';

@@ -1,4 +1,38 @@
-# Log Development — GEMA
+# Log Development — RAVE
+
+## 2026-11-11
+
+Ringkasan: lingkungan WSL baru dibangun ulang (tanpa sudo), audit stabilitas FE/BE, fitur audio multi-format +
+HQ/Lossless khusus Premium, sampul playlist, penyempurnaan landing & branding.
+
+- Toolchain user-local: Node 22 (`~/.local/node`), PostgreSQL 18 & library Chromium dari paket Kali (`~/.local/pgsql`,
+  `~/.local/chromelibs`), shim `docker` → `docker.exe`. Semua di `~/.rave/env.sh` (source sebelum `./rave`/`npm`).
+- Temuan lingkungan: port loopback 5004 tidak bisa dihubungi di WSL ini (mirrored networking) → `e2e:isolated` dengan
+  `E2E_PORT_OFFSET=3000` (offset 2000 menghasilkan port 10080 yang diblokir fetch).
+- Stabilitas: gateway 503/504 untuk upstream mati, `max_connections` Postgres, perbaikan `rave.sh` (fuser/pipefail),
+  Range media, file yatim, z-index dropdown dasbor.
+- Fitur: master WAV/FLAC/AIFF/ALAC/MP3/AAC/OGG/Opus + transcoding ffmpeg; AAC 320 & FLAC khusus Premium (URL rendisi
+  bertanda tangan); sampul playlist; font primer 2 (Rubik Dirt); logo partner di Editor Landing.
+- Verifikasi: typecheck bersih, unit 63/63, e2e terisolasi 190/190, crawler UI 48 halaman tanpa galat, stack produksi
+  Docker sehat + smoke test.
+- Belum: upgrade mayor `zod` 4 & `puppeteer-core` 25 (sisa temuan `npm audit`), normalisasi loudness saat transcoding
+  (`transcoding.loudness_target_lufs` masih "Disiapkan"), DRM untuk rendisi Premium (saat ini URL bertanda tangan).
+
+## 2026-11-10
+
+Ringkasan: rebranding penuh GEMA → RAVE, Docker dev & prod, versioning, dan audit kesiapan go-live (docs/GO-LIVE.md).
+
+- Rename case-preserving di 215 file (+ `./gema` → `./rave`, `scripts/rave.sh`, `RaveLogo.tsx`); dikecualikan kata
+  Indonesia "gemar"/"penggemar" dan judul lagu demo "Gema Lembah". Token `rave-purple` ganda dihapus.
+- `scripts/dev-db.sh`: migrasi otomatis `~/.gema/pgdata` → `~/.rave/pgdata`, DB/role `gema` → `rave` (data dipertahankan,
+  diuji: 6 user tetap ada). Perintah admin psql kini lewat socket Unix.
+- Docker: `infra/docker/` (Dockerfile.service target dev/runtime, Dockerfile.web nginx, Caddyfile, healthcheck),
+  `docker-compose.yml` (dev) dan `docker-compose.prod.yml` (prod), `scripts/prod.sh`, `scripts/prod-preflight.sh`.
+- Versioning: `BUILD_INFO` di service-kit, `/v1/version`, `version_drift` di `/v1/status`, versi di dasbor admin,
+  `scripts/release.ts`, `CHANGELOG.md`, `.github/workflows/release.yml`.
+- Catatan lingkungan: test PDF Chromium (2) timeout di host WSL ini — puppeteer-core menggantung saat launch
+  headless-shell Playwright, padahal binary berjalan normal. Loopback TCP WSL (`networkingMode=mirrored`) sempat
+  timeout setelah Docker Desktop menyala.
 
 ## 2026-10-15
 
@@ -10,7 +44,7 @@ Ringkasan: audit basecode, audit responsivitas pemutar musik, lalu perbaikan pem
 - `npm run typecheck`: 1 error di gateway.
 - `vitest`: 27 test lolos.
 - `vite build`: sukses (±2,5 menit; lambat karena I/O NTFS lewat WSL).
-- 13 service + Postgres sehat (`./gema status`).
+- 13 service + Postgres sehat (`./rave status`).
 - Pencarian sampah: tidak ada `console.log` sisa, TODO/FIXME, atau file yatim. `storage/` sudah di-gitignore. Komponen `reactbits` yang tak terpakai sudah terhapus di working tree.
 - Stabilitas yang sudah ada: handler `unhandledRejection`/`uncaughtException`, graceful shutdown SIGTERM, `bodyLimit` per rute, retry query tidak mengulang 4xx, migrasi `perf_indexes` di hampir semua service, timer 1 detik terisolasi ke komponen kecil.
 - Bundle terbesar: hls.js 359 kB (lazy, hanya saat live), react 308 kB, motion 150 kB, Landing 93 kB.
@@ -73,8 +107,8 @@ Temuan (dari pembacaan kode):
 ### 4. Verifikasi
 
 - `tsc` web dan root: bersih.
-- Screenshot Chromium pada 390, 820, dan 1280 px lewat stack uji terisolasi (DB `gema_test`, Vite uji :6173): tidak ada page error; pemutaran berjalan; ukuran tombol terukur sesuai target.
-- Stack uji dan Vite uji dimatikan; file sementara `vite.test.config.ts` dihapus. Vite dev :5173 di-restart (`./gema restart-web`). Data dev tidak disentuh.
+- Screenshot Chromium pada 390, 820, dan 1280 px lewat stack uji terisolasi (DB `rave_test`, Vite uji :6173): tidak ada page error; pemutaran berjalan; ukuran tombol terukur sesuai target.
+- Stack uji dan Vite uji dimatikan; file sementara `vite.test.config.ts` dihapus. Vite dev :5173 di-restart (`./rave restart-web`). Data dev tidak disentuh.
 
 **Belum diuji**
 - Buffering di jaringan lambat, pemulihan stream kedaluwarsa, Media Session di OS/layar kunci, dan perangkat iOS/Android sungguhan.

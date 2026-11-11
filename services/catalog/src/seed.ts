@@ -1,5 +1,5 @@
-import { SEED, SEED_ARTIST_COVER, SEED_ARTIST_IMAGE, SEED_RELEASES, seedId } from '@gema/domain';
-import type { ServiceContext } from '@gema/service-kit';
+import { SEED, SEED_ARTIST_COVER, SEED_ARTIST_IMAGE, SEED_RELEASES, seedId } from '@rave/domain';
+import type { ServiceContext } from '@rave/service-kit';
 import { publishArtist } from './artists.js';
 import { BIOS, CATEGORIES, GENRES, LYRICS, MONTHLY_LISTENERS, SHOWS, VERIFIED } from './seed-data.js';
 
@@ -13,7 +13,7 @@ export async function seed({ db, log }: ServiceContext) {
       await tx.query(
         `INSERT INTO categories (id, name, color, image_url, href, genres, position) VALUES ($1,$2,$3,$4,$5,$6,$7)
          ON CONFLICT (id) DO UPDATE SET name=$2, color=$3, image_url=$4, href=$5, genres=$6, position=$7`,
-        [c.id, c.name, c.color, `https://picsum.photos/seed/gema-cat-${c.id}/300/300`, c.href, c.genres, i],
+        [c.id, c.name, c.color, `https://picsum.photos/seed/rave-cat-${c.id}/300/300`, c.href, c.genres, i],
       );
     }
 
@@ -79,7 +79,7 @@ export async function seed({ db, log }: ServiceContext) {
         `INSERT INTO shows (id, kind, title, publisher, description, cover_url, category, age_rating, content_warning, created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now() - ($10 || ' days')::interval)
          ON CONFLICT (id) DO UPDATE SET kind=$2, title=$3, publisher=$4, description=$5, cover_url=$6, category=$7, age_rating=$8, content_warning=$9`,
-        [showId, s.kind, s.title, s.publisher, s.description, `https://picsum.photos/seed/gema-show-${si + 1}/640/640`, s.category, s.age_rating ?? null, s.content_warning ?? null, 60 - si],
+        [showId, s.kind, s.title, s.publisher, s.description, `https://picsum.photos/seed/rave-show-${si + 1}/640/640`, s.category, s.age_rating ?? null, s.content_warning ?? null, 60 - si],
       );
       for (const [ei, e] of s.episodes.entries()) {
         await tx.query(

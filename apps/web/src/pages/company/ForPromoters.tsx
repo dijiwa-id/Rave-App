@@ -1,87 +1,77 @@
 import { BadgeCheck, FileSignature, Gauge, MessagesSquare, QrCode, Radio, Search, ShieldCheck } from 'lucide-react';
 import { Cards, Checklist, CompanyPage, Cta, CtaBand, Heading, PageHero, pct, Section, Stats, Steps, useParam } from './shell';
+import { PromoterHeroArt } from './heroArt';
+import { useDict } from '@/lib/i18n';
 
-const FEATURES = [
-  { icon: Gauge, title: 'Audience Match', body: 'Skor kecocokan artis dengan kota dan acaramu, dihitung dari pendengar nyata — bukan sekadar jumlah followers.' },
-  { icon: Search, title: 'Pencarian terarah', body: 'Saring artis berdasarkan genre, kota, kisaran fee, dan ketersediaan tanggal dalam satu layar.' },
-  { icon: MessagesSquare, title: 'Negosiasi terstruktur', body: 'Tawaran, counter-offer, dan rider tersimpan dalam satu utas — tidak ada lagi detail yang tercecer di chat.' },
-  { icon: FileSignature, title: 'Kontrak elektronik', body: 'Kontrak baku yang adil untuk kedua pihak, ditandatangani digital dan tersimpan permanen.' },
-  { icon: ShieldCheck, title: 'Rekening bersama', body: 'DP dan pelunasan ditahan aman sampai show selesai. Jika artis batal, dana kembali sesuai kontrak.' },
-  { icon: BadgeCheck, title: 'Rating dua arah', body: 'Lihat rekam jejak artis dari promotor lain, dan bangun reputasimu sendiri untuk booking berikutnya.' },
-  { icon: QrCode, title: 'Tiket & check-in', body: 'Jual tiket dengan QR yang berputar agar tidak bisa disalin, lalu check-in cepat di pintu masuk.' },
-  { icon: Radio, title: 'Siaran bertiket', body: 'Perluas penonton dengan live streaming yang hanya bisa ditonton pemegang tiket.' },
-];
+// Ikon per fitur (urutan sama dengan kamus company.forPromoters.features).
+const FEATURE_ICONS = [Gauge, Search, MessagesSquare, FileSignature, ShieldCheck, BadgeCheck, QrCode, Radio];
 
 export default function ForPromoters() {
+  const d = useDict('company').forPromoters;
+  const features = d.features.map((c, i) => ({ ...c, icon: FEATURE_ICONS[i] }));
   const fee = useParam('commission.promotor_service_fee_pct');
   const dp = useParam('booking.default_dp_pct');
   const settleDays = useParam('booking.settlement_days_before');
   const disputeHours = useParam('booking.dispute_window_hours');
   return (
-    <CompanyPage title="Untuk Promotor">
+    <CompanyPage title={d.title}>
       <PageHero
-        kicker="Untuk promotor, EO & venue"
-        title="Booking artis yang tepat, dengan aman."
-        lead="Promotor Hub membantu promotor kampus, EO, venue, dan penyelenggara acara privat menemukan artis yang benar-benar didengar di kotanya — lalu mengurus kontrak, pembayaran, dan tiket dalam satu tempat."
+        aside={<PromoterHeroArt />}
+        kicker={d.kicker}
+        title={d.heroTitle}
+        lead={d.lead}
         actions={
           <>
-            <Cta to="/promotor">Buka Promotor Hub</Cta>
+            <Cta to="/promotor">{d.openHub}</Cta>
             <Cta to="/login?signup=1" variant="ghost">
-              Daftar gratis
+              {d.signup}
             </Cta>
           </>
         }
       />
 
       <Section className="border-t border-white/10">
-        <Heading kicker="Fitur" title="Dari mencari artis sampai pintu masuk venue." />
-        <Cards items={FEATURES} cols={4} />
+        <Heading kicker={d.featuresHeading.kicker} title={d.featuresHeading.title} />
+        <Cards items={features} cols={4} />
       </Section>
 
       <Section>
-        <Heading kicker="Alur dana" title="Uangmu tidak pernah hilang begitu saja." body="Pembayaran tidak masuk ke rekening operasional GEMA maupun langsung ke artis, melainkan ditahan di rekening bersama hingga kewajiban kedua pihak terpenuhi." />
+        <Heading kicker={d.flowHeading.kicker} title={d.flowHeading.title} body={d.flowHeading.body} />
         <Steps
           items={[
-            { title: 'Kontrak diteken', body: 'Invoice DP terbit otomatis setelah kedua pihak menandatangani.' },
-            { title: `Bayar DP ${pct(dp)}`, body: 'Dana ditahan di rekening bersama; tanggal artis terkunci untukmu.' },
-            { title: `Pelunasan H-${settleDays}`, body: 'Status booking menjadi aman. Artis dan tim bersiap tampil.' },
-            { title: 'Show selesai', body: `Ada jendela ${disputeHours} jam untuk melaporkan masalah sebelum dana diteruskan.` },
-            { title: 'Dana diteruskan', body: 'Fee cair ke artis dan tim. Jika ada sengketa, dana dibekukan sampai mediasi selesai.' },
+            d.flow.signed,
+            { title: d.flow.dp.title(pct(dp)), body: d.flow.dp.body },
+            { title: d.flow.settle.title(settleDays), body: d.flow.settle.body },
+            { title: d.flow.show.title, body: d.flow.show.body(disputeHours) },
+            d.flow.forwarded,
           ]}
         />
       </Section>
 
       <Section>
-        <Heading kicker="Biaya" title="Transparan, tanpa biaya langganan." body="Membuat akun, mencari artis, dan mengirim inquiry gratis. Service fee hanya ditagihkan saat booking benar-benar terjadi." />
+        <Heading kicker={d.pricingHeading.kicker} title={d.pricingHeading.title} body={d.pricingHeading.body} />
         <Stats
           items={[
-            { value: 'Rp 0', label: 'Akun, pencarian artis, dan inquiry' },
-            { value: pct(fee), label: 'Service fee di atas fee artis, tertera di invoice' },
-            { value: pct(dp), label: 'DP default saat kontrak ditandatangani' },
-            { value: `H-${settleDays}`, label: 'Batas pelunasan sebelum hari acara' },
+            { value: 'Rp 0', label: d.stats.freeLabel },
+            { value: pct(fee), label: d.stats.feeLabel },
+            { value: pct(dp), label: d.stats.dpLabel },
+            { value: d.stats.settle(settleDays), label: d.stats.settleLabel },
           ]}
-          note="Besaran dapat berubah dan selalu ditampilkan sebelum kamu membayar. Untuk penjualan tiket, biaya layanan ditampilkan di halaman checkout."
+          note={d.stats.note}
         />
       </Section>
 
       <Section className="border-t border-white/10">
-        <Heading kicker="Cocok untuk" title="Dibangun untuk sirkuit musik Indonesia." />
-        <Checklist
-          items={[
-            { title: 'Promotor kampus & BEM', body: 'Pensi dan festival kampus dengan anggaran jelas, proses persetujuan rapi, dan bukti pembayaran resmi.' },
-            { title: 'EO & festival', body: 'Kelola banyak artis, tanggal, dan tim dalam satu organisasi dengan peran anggota yang terpisah.' },
-            { title: 'Venue & kafe musik', body: 'Isi jadwal mingguan dengan artis yang punya pendengar di kotamu.' },
-            { title: 'Corporate & wedding', body: 'Acara privat dengan kontrak, invoice berbadan usaha, dan jaminan dana yang dapat dipertanggungjawabkan.' },
-          ]}
-        />
+        <Heading kicker={d.fitHeading.kicker} title={d.fitHeading.title} />
+        <Checklist items={d.fit} />
       </Section>
 
-      <CtaBand title="Booking berikutnya, tanpa drama." body="Verifikasi organisasimu sekali, lalu mulai kirim inquiry ke artis pilihan.">
+      <CtaBand title={d.band.title} body={d.band.body}>
         <Cta to="/promotor" variant="light">
-          Mulai di Promotor Hub
+          {d.band.start}
         </Cta>
         <Cta to="/untuk-artis" variant="ghost">
-          Lihat sisi artis
+          {d.band.otherSide}
         </Cta>
       </CtaBand>
     </CompanyPage>

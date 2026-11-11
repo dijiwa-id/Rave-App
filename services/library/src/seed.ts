@@ -1,11 +1,11 @@
-import { SEED, SEED_RELEASES, SEED_TRACKS, seedId } from '@gema/domain';
-import type { ServiceContext } from '@gema/service-kit';
+import { SEED, SEED_RELEASES, SEED_TRACKS, seedId } from '@rave/domain';
+import type { ServiceContext } from '@rave/service-kit';
 
 const byArtist = (slug: string) => {
   const a = SEED.artists.find((x) => x.slug === slug)!;
   return SEED_TRACKS.filter((t) => t.artistId === a.id).map((t) => t.id);
 };
-const cover = (s: string) => `https://picsum.photos/seed/gema-pl-${s}/640/640`;
+const cover = (s: string) => `https://picsum.photos/seed/rave-pl-${s}/640/640`;
 const pick = (arr: string[], n: number, off = 0) => Array.from({ length: Math.min(n, arr.length) }, (_, i) => arr[(i + off) % arr.length]);
 const all = SEED_TRACKS.map((t) => t.id);
 const singles = SEED_RELEASES.filter((r) => r.type === 'SINGLE').flatMap((r) => r.tracks.map((t) => t.id));
@@ -27,13 +27,13 @@ export async function seed({ db, log }: ServiceContext) {
       const id = seedId(600, p.n);
       const r = await tx.query(
         `INSERT INTO playlists (id, owner_id, owner_name, title, description, cover_url, visibility, is_editorial, tags, sort_order)
-         VALUES ($1,'gema','GEMA',$2,$3,$4,'PUBLIC',true,$5,$6) ON CONFLICT (id) DO NOTHING`,
+         VALUES ($1,'rave','RAVE',$2,$3,$4,'PUBLIC',true,$5,$6) ON CONFLICT (id) DO NOTHING`,
         [id, p.title, p.desc, cover(String(p.n)), p.tags, p.n],
       );
       if (r.rowCount) {
         const uniq = [...new Set(p.tracks)];
         for (let i = 0; i < uniq.length; i++)
-          await tx.query(`INSERT INTO playlist_items (id, playlist_id, track_id, position, added_by) VALUES ($1,$2,$3,$4,'gema')`, [seedId(601, p.n * 1000 + i), id, uniq[i], i + 1]);
+          await tx.query(`INSERT INTO playlist_items (id, playlist_id, track_id, position, added_by) VALUES ($1,$2,$3,$4,'rave')`, [seedId(601, p.n * 1000 + i), id, uniq[i], i + 1]);
       }
     }
 

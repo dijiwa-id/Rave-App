@@ -6,6 +6,7 @@ import type { Epk, EpkContent } from '@/lib/types';
 import { Button, Card, cx, Field, Input, Modal, PageHeader, Select, Textarea, toast } from '@/components/ui';
 import { QueryState, useCurrentArtist } from '@/components/b2b/common';
 import { EpkView, METRICS } from '@/components/b2b/EpkView';
+import { useDict } from '@/lib/i18n';
 
 const DEFAULT_RIDER = {
   personnel: { performers: 4, crew: 2, total_travel: 6 },
@@ -19,18 +20,19 @@ const DEFAULT_RIDER = {
 };
 
 function ListEditor({ items, onChange, placeholder }: { items: string[]; onChange: (v: string[]) => void; placeholder: string }) {
+  const t = useDict('b2b').studio.epkEditor;
   return (
     <div className="space-y-2">
       {items.map((v, i) => (
         <div key={i} className="flex gap-2">
           <Input value={v} placeholder={placeholder} onChange={(e) => onChange(items.map((x, j) => (j === i ? e.target.value : x)))} />
-          <button aria-label="Hapus" onClick={() => onChange(items.filter((_, j) => j !== i))} className="text-b2b-muted hover:text-red-600">
+          <button aria-label={t.remove} onClick={() => onChange(items.filter((_, j) => j !== i))} className="text-b2b-muted hover:text-red-600">
             <Trash2 className="size-4" />
           </button>
         </div>
       ))}
       <button onClick={() => onChange([...items, ''])} className="flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
-        <Plus className="size-4" /> Tambah
+        <Plus className="size-4" /> {t.add}
       </button>
     </div>
   );
@@ -47,6 +49,8 @@ export default function EpkEditor() {
   const [tab, setTab] = useState<'edit' | 'preview'>('edit');
   const [saving, setSaving] = useState(false);
   const [share, setShare] = useState<{ open: boolean; days: number; url?: string; expires_at?: string }>({ open: false, days: 14 });
+  const d = useDict('b2b');
+  const t = d.studio.epkEditor;
 
   useEffect(() => {
     if (q.data && !f)
@@ -68,7 +72,7 @@ export default function EpkEditor() {
     try {
       const saved = await api<Epk>(`/v1/booking/artists/${aid}/epk`, { method: 'PUT', body: f });
       qc.setQueryData(['epk', aid], saved);
-      toast.success('EPK disimpan');
+      toast.success(t.saved);
     } catch (e) {
       toast.error(e);
     } finally {
@@ -91,22 +95,22 @@ export default function EpkEditor() {
   return (
     <div>
       <PageHeader
-        title="Electronic Press Kit"
-        subtitle="Data streaming (pendengar, kota, demografi) & off-air (show, rating) diperbarui otomatis."
+        title={t.title}
+        subtitle={t.subtitle}
         actions={
           <>
-            <div className="flex rounded-full border border-b2b-line bg-b2b-card p-0.5">
-              {(['edit', 'preview'] as const).map((t) => (
-                <button key={t} onClick={() => setTab(t)} className={cx('flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold', tab === t ? 'bg-b2b-ink text-b2b-on-ink' : 'text-b2b-muted')}>
-                  {t === 'edit' ? <Pencil className="size-3.5" /> : <Eye className="size-3.5" />} {t === 'edit' ? 'Edit' : 'Pratinjau'}
+            <div className="flex rounded-none border border-b2b-line bg-b2b-card p-0.5">
+              {(['edit', 'preview'] as const).map((m) => (
+                <button key={m} onClick={() => setTab(m)} className={cx('flex items-center gap-1 rounded-none px-3 py-1.5 text-xs font-bold', tab === m ? 'bg-b2b-ink text-b2b-on-ink' : 'text-b2b-muted')}>
+                  {m === 'edit' ? <Pencil className="size-3.5" /> : <Eye className="size-3.5" />} {m === 'edit' ? t.edit : t.preview}
                 </button>
               ))}
             </div>
             <Button variant="outline-ink" size="sm" icon={<Link2 className="size-4" />} onClick={() => setShare({ ...share, open: true, url: undefined })}>
-              Link privat
+              {t.privateLink}
             </Button>
             <Button variant="ink" size="sm" loading={saving} onClick={save} disabled={!f}>
-              Simpan
+              {t.save}
             </Button>
           </>
         }
@@ -117,152 +121,152 @@ export default function EpkEditor() {
         ) : (
           f && (
             <div className="grid gap-6 lg:grid-cols-2">
-              <Card title="Bio">
+              <Card title={t.bio}>
                 <div className="space-y-3">
-                  <Field label="Bio pendek" hint="maks. 280 karakter">
+                  <Field label={t.bioShort} hint={t.bioShortHint}>
                     <Textarea maxLength={280} value={f.bio_short} onChange={(e) => setF({ ...f, bio_short: e.target.value })} />
                   </Field>
-                  <Field label="Bio panjang">
+                  <Field label={t.bioLong}>
                     <Textarea className="min-h-40" value={f.bio_long} onChange={(e) => setF({ ...f, bio_long: e.target.value })} />
                   </Field>
                 </div>
               </Card>
-              <Card title="Metrik publik">
-                <p className="mb-3 text-sm text-b2b-muted">Metrik yang dicentang tampil untuk publik; sisanya hanya untuk promotor terverifikasi.</p>
+              <Card title={t.publicMetrics}>
+                <p className="mb-3 text-sm text-b2b-muted">{t.publicMetricsNote}</p>
                 <div className="space-y-2">
-                  {METRICS.map(([k, l]) => (
+                  {METRICS.map((k) => (
                     <label key={k} className="flex items-center gap-2 text-sm">
                       <input
                         type="checkbox"
                         checked={f.public_metrics.includes(k)}
                         onChange={(e) => setF({ ...f, public_metrics: e.target.checked ? [...f.public_metrics, k] : f.public_metrics.filter((x) => x !== k) })}
                       />
-                      {l}
+                      {d.epk.metrics[k]}
                     </label>
                   ))}
                 </div>
               </Card>
-              <Card title="Foto press (URL hi-res)">
+              <Card title={t.pressPhotos}>
                 <ListEditor items={f.press_photos} onChange={(v) => setF({ ...f, press_photos: v })} placeholder="https://…/foto.jpg" />
               </Card>
-              <Card title="Video live (YouTube/URL)">
+              <Card title={t.liveVideos}>
                 <ListEditor items={f.videos} onChange={(v) => setF({ ...f, videos: v })} placeholder="https://youtu.be/…" />
               </Card>
-              <Card title="Press quote">
+              <Card title={t.pressQuote}>
                 <div className="space-y-2">
                   {f.press_quotes.map((q, i) => (
                     <div key={i} className="grid grid-cols-[1fr_140px_24px] gap-2">
-                      <Input value={q.quote} placeholder="Kutipan" onChange={(e) => setF({ ...f, press_quotes: f.press_quotes.map((x, j) => (j === i ? { ...x, quote: e.target.value } : x)) })} />
-                      <Input value={q.source} placeholder="Media" onChange={(e) => setF({ ...f, press_quotes: f.press_quotes.map((x, j) => (j === i ? { ...x, source: e.target.value } : x)) })} />
-                      <button aria-label="Hapus" onClick={() => setF({ ...f, press_quotes: f.press_quotes.filter((_, j) => j !== i) })} className="text-b2b-muted hover:text-red-600">
+                      <Input value={q.quote} placeholder={t.quote} onChange={(e) => setF({ ...f, press_quotes: f.press_quotes.map((x, j) => (j === i ? { ...x, quote: e.target.value } : x)) })} />
+                      <Input value={q.source} placeholder={t.media} onChange={(e) => setF({ ...f, press_quotes: f.press_quotes.map((x, j) => (j === i ? { ...x, source: e.target.value } : x)) })} />
+                      <button aria-label={t.remove} onClick={() => setF({ ...f, press_quotes: f.press_quotes.filter((_, j) => j !== i) })} className="text-b2b-muted hover:text-red-600">
                         <Trash2 className="size-4" />
                       </button>
                     </div>
                   ))}
                   <button onClick={() => setF({ ...f, press_quotes: [...f.press_quotes, { quote: '', source: '' }] })} className="flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
-                    <Plus className="size-4" /> Tambah
+                    <Plus className="size-4" /> {t.add}
                   </button>
                 </div>
               </Card>
-              <Card title="Prestasi">
-                <ListEditor items={f.achievements} onChange={(v) => setF({ ...f, achievements: v })} placeholder="mis. Line-up Festival X 2026" />
+              <Card title={t.achievements}>
+                <ListEditor items={f.achievements} onChange={(v) => setF({ ...f, achievements: v })} placeholder={t.achievementPlaceholder} />
               </Card>
-              <Card title="Personel">
+              <Card title={t.members}>
                 <div className="space-y-2">
                   {f.members.map((m, i) => (
                     <div key={i} className="grid grid-cols-[1fr_1fr_24px] gap-2">
-                      <Input value={m.name} placeholder="Nama" onChange={(e) => setF({ ...f, members: f.members.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
-                      <Input value={m.role} placeholder="Peran (vokal, gitar…)" onChange={(e) => setF({ ...f, members: f.members.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)) })} />
-                      <button aria-label="Hapus" onClick={() => setF({ ...f, members: f.members.filter((_, j) => j !== i) })} className="text-b2b-muted hover:text-red-600">
+                      <Input value={m.name} placeholder={t.name} onChange={(e) => setF({ ...f, members: f.members.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
+                      <Input value={m.role} placeholder={t.rolePlaceholder} onChange={(e) => setF({ ...f, members: f.members.map((x, j) => (j === i ? { ...x, role: e.target.value } : x)) })} />
+                      <button aria-label={t.remove} onClick={() => setF({ ...f, members: f.members.filter((_, j) => j !== i) })} className="text-b2b-muted hover:text-red-600">
                         <Trash2 className="size-4" />
                       </button>
                     </div>
                   ))}
                   <button onClick={() => setF({ ...f, members: [...f.members, { name: '', role: '' }] })} className="flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
-                    <Plus className="size-4" /> Tambah
+                    <Plus className="size-4" /> {t.add}
                   </button>
                 </div>
               </Card>
-              <Card title="Technical & hospitality rider" className="lg:col-span-2">
+              <Card title={t.rider} className="lg:col-span-2">
                 <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-                  <Field label="Performer">
+                  <Field label={t.performers}>
                     <Input type="number" value={rider.personnel.performers} onChange={(e) => setRider({ personnel: { ...rider.personnel, performers: num(e.target.value) } })} />
                   </Field>
-                  <Field label="Kru">
+                  <Field label={t.crew}>
                     <Input type="number" value={rider.personnel.crew} onChange={(e) => setRider({ personnel: { ...rider.personnel, crew: num(e.target.value) } })} />
                   </Field>
-                  <Field label="Total travel">
+                  <Field label={t.totalTravel}>
                     <Input type="number" value={rider.personnel.total_travel} onChange={(e) => setRider({ personnel: { ...rider.personnel, total_travel: num(e.target.value) } })} />
                   </Field>
-                  <Field label="Panggung lebar (m)">
+                  <Field label={t.stageWidth}>
                     <Input type="number" value={rider.stage.min_width_m} onChange={(e) => setRider({ stage: { ...rider.stage, min_width_m: num(e.target.value) } })} />
                   </Field>
-                  <Field label="Panggung dalam (m)">
+                  <Field label={t.stageDepth}>
                     <Input type="number" value={rider.stage.min_depth_m} onChange={(e) => setRider({ stage: { ...rider.stage, min_depth_m: num(e.target.value) } })} />
                   </Field>
-                  <Field label="Min SPL (dB)">
+                  <Field label={t.minSpl}>
                     <Input type="number" value={rider.pa_system.min_spl_db} onChange={(e) => setRider({ pa_system: { ...rider.pa_system, min_spl_db: num(e.target.value) } })} />
                   </Field>
-                  <Field label="Wedge">
+                  <Field label={t.wedges}>
                     <Input type="number" value={rider.monitors.wedges} onChange={(e) => setRider({ monitors: { ...rider.monitors, wedges: num(e.target.value) } })} />
                   </Field>
-                  <Field label="IEM channel">
+                  <Field label={t.iem}>
                     <Input type="number" value={rider.monitors.iem_channels} onChange={(e) => setRider({ monitors: { ...rider.monitors, iem_channels: num(e.target.value) } })} />
                   </Field>
-                  <Field label="Soundcheck (mnt)">
+                  <Field label={t.soundcheck}>
                     <Input type="number" value={rider.soundcheck_minutes} onChange={(e) => setRider({ soundcheck_minutes: num(e.target.value) })} />
                   </Field>
-                  <Field label="Makan">
+                  <Field label={t.meals}>
                     <Input type="number" value={rider.hospitality.meals} onChange={(e) => setRider({ hospitality: { ...rider.hospitality, meals: num(e.target.value) } })} />
                   </Field>
-                  <Field label="Kamar hotel">
+                  <Field label={t.hotelRooms}>
                     <Input type="number" value={rider.hospitality.hotel_rooms} onChange={(e) => setRider({ hospitality: { ...rider.hospitality, hotel_rooms: num(e.target.value) } })} />
                   </Field>
-                  <Field label="Transport">
+                  <Field label={t.transport}>
                     <Input value={rider.hospitality.transport} onChange={(e) => setRider({ hospitality: { ...rider.hospitality, transport: e.target.value } })} />
                   </Field>
                 </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <Field label="Konsol FOH (pisah koma)">
+                  <Field label={t.foh}>
                     <Input value={rider.pa_system.foh_console.join(', ')} onChange={(e) => setRider({ pa_system: { ...rider.pa_system, foh_console: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) } })} />
                   </Field>
                   <label className="flex items-center gap-2 self-end pb-3 text-sm">
-                    <input type="checkbox" checked={rider.hospitality.green_room} onChange={(e) => setRider({ hospitality: { ...rider.hospitality, green_room: e.target.checked } })} /> Green room
+                    <input type="checkbox" checked={rider.hospitality.green_room} onChange={(e) => setRider({ hospitality: { ...rider.hospitality, green_room: e.target.checked } })} /> {t.greenRoom}
                   </label>
                 </div>
                 <div className="mt-4 grid gap-6 lg:grid-cols-2">
                   <div>
-                    <p className="mb-2 text-sm font-bold">Backline</p>
+                    <p className="mb-2 text-sm font-bold">{t.backline}</p>
                     {rider.backline.map((b, i) => (
                       <div key={i} className="mb-2 grid grid-cols-[1fr_1fr_auto_24px] items-center gap-2">
-                        <Input value={b.item} placeholder="Item" onChange={(e) => setRider({ backline: rider.backline.map((x, j) => (j === i ? { ...x, item: e.target.value } : x)) })} />
-                        <Input value={b.spec} placeholder="Spesifikasi" onChange={(e) => setRider({ backline: rider.backline.map((x, j) => (j === i ? { ...x, spec: e.target.value } : x)) })} />
+                        <Input value={b.item} placeholder={t.item} onChange={(e) => setRider({ backline: rider.backline.map((x, j) => (j === i ? { ...x, item: e.target.value } : x)) })} />
+                        <Input value={b.spec} placeholder={t.spec} onChange={(e) => setRider({ backline: rider.backline.map((x, j) => (j === i ? { ...x, spec: e.target.value } : x)) })} />
                         <label className="flex items-center gap-1 text-xs">
-                          <input type="checkbox" checked={b.substitutable} onChange={(e) => setRider({ backline: rider.backline.map((x, j) => (j === i ? { ...x, substitutable: e.target.checked } : x)) })} /> subst.
+                          <input type="checkbox" checked={b.substitutable} onChange={(e) => setRider({ backline: rider.backline.map((x, j) => (j === i ? { ...x, substitutable: e.target.checked } : x)) })} /> {t.subst}
                         </label>
-                        <button aria-label="Hapus" onClick={() => setRider({ backline: rider.backline.filter((_, j) => j !== i) })} className="text-b2b-muted hover:text-red-600">
+                        <button aria-label={t.remove} onClick={() => setRider({ backline: rider.backline.filter((_, j) => j !== i) })} className="text-b2b-muted hover:text-red-600">
                           <Trash2 className="size-4" />
                         </button>
                       </div>
                     ))}
                     <button onClick={() => setRider({ backline: [...rider.backline, { item: '', spec: '', substitutable: true }] })} className="flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
-                      <Plus className="size-4" /> Tambah backline
+                      <Plus className="size-4" /> {t.addBackline}
                     </button>
                   </div>
                   <div>
-                    <p className="mb-2 text-sm font-bold">Input list</p>
+                    <p className="mb-2 text-sm font-bold">{t.inputList}</p>
                     {rider.input_list.map((r, i) => (
                       <div key={i} className="mb-2 grid grid-cols-[48px_1fr_1fr_24px] gap-2">
-                        <Input value={r.ch} type="number" aria-label="Channel" onChange={(e) => setRider({ input_list: rider.input_list.map((x, j) => (j === i ? { ...x, ch: num(e.target.value) } : x)) })} />
-                        <Input value={r.source} placeholder="Sumber" onChange={(e) => setRider({ input_list: rider.input_list.map((x, j) => (j === i ? { ...x, source: e.target.value } : x)) })} />
-                        <Input value={r.mic} placeholder="Mic" onChange={(e) => setRider({ input_list: rider.input_list.map((x, j) => (j === i ? { ...x, mic: e.target.value } : x)) })} />
-                        <button aria-label="Hapus" onClick={() => setRider({ input_list: rider.input_list.filter((_, j) => j !== i) })} className="text-b2b-muted hover:text-red-600">
+                        <Input value={r.ch} type="number" aria-label={t.channel} onChange={(e) => setRider({ input_list: rider.input_list.map((x, j) => (j === i ? { ...x, ch: num(e.target.value) } : x)) })} />
+                        <Input value={r.source} placeholder={t.source} onChange={(e) => setRider({ input_list: rider.input_list.map((x, j) => (j === i ? { ...x, source: e.target.value } : x)) })} />
+                        <Input value={r.mic} placeholder={t.mic} onChange={(e) => setRider({ input_list: rider.input_list.map((x, j) => (j === i ? { ...x, mic: e.target.value } : x)) })} />
+                        <button aria-label={t.remove} onClick={() => setRider({ input_list: rider.input_list.filter((_, j) => j !== i) })} className="text-b2b-muted hover:text-red-600">
                           <Trash2 className="size-4" />
                         </button>
                       </div>
                     ))}
                     <button onClick={() => setRider({ input_list: [...rider.input_list, { ch: rider.input_list.length + 1, source: '', mic: '' }] })} className="flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
-                      <Plus className="size-4" /> Tambah channel
+                      <Plus className="size-4" /> {t.addChannel}
                     </button>
                   </div>
                 </div>
@@ -272,35 +276,35 @@ export default function EpkEditor() {
         )}
       </QueryState>
 
-      <Modal open={share.open} onClose={() => setShare({ ...share, open: false })} title="Link EPK privat">
-        <p className="text-sm text-b2b-muted">Bagikan EPK lengkap (termasuk metrik khusus promotor) lewat link berbatas waktu.</p>
+      <Modal open={share.open} onClose={() => setShare({ ...share, open: false })} title={t.shareTitle}>
+        <p className="text-sm text-b2b-muted">{t.shareNote}</p>
         <div className="mt-4 flex items-end gap-2">
-          <Field label="Berlaku">
+          <Field label={t.validFor}>
             <Select value={share.days} onChange={(e) => setShare({ ...share, days: Number(e.target.value) })}>
-              {[3, 7, 14, 30].map((d) => (
-                <option key={d} value={d}>
-                  {d} hari
+              {[3, 7, 14, 30].map((n) => (
+                <option key={n} value={n}>
+                  {t.days(n)}
                 </option>
               ))}
             </Select>
           </Field>
           <Button variant="ink" onClick={makeLink}>
-            Buat link
+            {t.createLink}
           </Button>
         </div>
         {share.url && (
-          <div className="mt-4 rounded-lg bg-b2b-bg p-3">
+          <div className="mt-4 rounded-none bg-b2b-bg p-3">
             <p className="font-mono text-xs break-all">{share.url}</p>
             <div className="mt-2 flex items-center justify-between">
-              <span className="text-xs text-b2b-muted">Kedaluwarsa {fmt.dateTime(share.expires_at)}</span>
+              <span className="text-xs text-b2b-muted">{t.expires(fmt.dateTime(share.expires_at))}</span>
               <button
                 onClick={() => {
                   void navigator.clipboard.writeText(share.url!);
-                  toast.success('Link disalin');
+                  toast.success(t.copied);
                 }}
                 className="flex items-center gap-1 text-xs font-bold"
               >
-                <Copy className="size-3.5" /> Salin
+                <Copy className="size-3.5" /> {t.copy}
               </button>
             </div>
           </div>

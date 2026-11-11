@@ -1,3 +1,4 @@
+import { currentLocale, dict, localeTag } from '@/lib/i18n';
 import { useAuth } from '@/stores/auth';
 import { queryClient } from '@/lib/queryClient';
 
@@ -14,8 +15,9 @@ export class ApiError extends Error {
 /** Pesan jelas untuk 503 dari gateway saat mode pemeliharaan / modul dimatikan Super Admin (docs/API.md §9). */
 function problemMessage(status: number, p: { title?: string; detail?: string; [k: string]: unknown }) {
   const type = typeof p.type === 'string' ? p.type : '';
-  if (status === 503 && type.endsWith('/maintenance')) return `Sedang pemeliharaan — ${p.detail ?? 'transaksi ditutup sementara. Coba lagi nanti.'}`;
-  if (status === 503 && type.endsWith('/module-disabled')) return `Fitur ini sedang dinonaktifkan sementara oleh admin.${p.detail ? ' ' + p.detail : ''}`;
+  const e = dict('common').errors;
+  if (status === 503 && type.endsWith('/maintenance')) return e.maintenance(p.detail ?? e.maintenanceDefault);
+  if (status === 503 && type.endsWith('/module-disabled')) return `${e.moduleDisabled}${p.detail ? ' ' + p.detail : ''}`;
   return p.detail ?? p.title ?? `HTTP ${status}`;
 }
 
@@ -36,7 +38,7 @@ let refreshing: Promise<boolean> | null = null;
 /** Satu refresh pada satu waktu di SEMUA tab (Web Locks); tanpa dukungan → per tab saja. */
 function withRefreshLock(fn: () => Promise<boolean>): Promise<boolean> {
   const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
-  return locks?.request ? (locks.request('gema-auth-refresh', fn) as unknown as Promise<boolean>) : fn();
+  return locks?.request ? (locks.request('rave-auth-refresh', fn) as unknown as Promise<boolean>) : fn();
 }
 
 /**
@@ -85,6 +87,7 @@ export async function api<T = any>(path: string, opts: Opts = {}): Promise<T> {
     const headers: Record<string, string> = {};
     if (opts.body !== undefined && !(opts.body instanceof Blob)) headers['content-type'] = 'application/json';
     if (token && opts.auth !== false) headers.authorization = `Bearer ${token}`;
+    headers['accept-language'] = currentLocale();
     if (opts.idempotencyKey) headers['idempotency-key'] = opts.idempotencyKey === true ? crypto.randomUUID() : opts.idempotencyKey;
     return fetch(url.pathname + url.search, {
       method: opts.method ?? (opts.body !== undefined ? 'POST' : 'GET'),
@@ -116,17 +119,22 @@ function safeJson(t: string) {
 /** Paksa refresh (mis. setelah membuat org agar klaim orgs di JWT terbarui). */
 export const forceRefresh = refreshToken;
 
+const T = () => localeTag();
+const EN = () => currentLocale() === 'en';
+
+/** Format angka/tanggal mengikuti bahasa aktif (lib/i18n). Mata uang tetap Rupiah. */
 export const fmt = {
-  idr: (n: number | null | undefined) => (n == null ? '—' : 'Rp ' + Math.round(n).toLocaleString('id-ID')),
+  idr: (n: number | null | undefined) => (n == null ? '—' : 'Rp ' + Math.round(n).toLocaleString(T())),
   idrShort: (n: number | null | undefined) => {
     if (n == null) return '—';
-    if (n >= 1_000_000_000) return `Rp ${(n / 1_000_000_000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} M`;
-    if (n >= 1_000_000) return `Rp ${(n / 1_000_000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} jt`;
-    if (n >= 1_000) return `Rp ${(n / 1_000).toLocaleString('id-ID', { maximumFractionDigits: 0 })} rb`;
+    const f = (v: number, d: number) => v.toLocaleString(T(), { maximumFractionDigits: d });
+    if (n >= 1_000_000_000) return `Rp ${f(n / 1_000_000_000, 1)} ${EN() ? 'B' : 'M'}`;
+    if (n >= 1_000_000) return `Rp ${f(n / 1_000_000, 1)} ${EN() ? 'M' : 'jt'}`;
+    if (n >= 1_000) return `Rp ${f(n / 1_000, 0)} ${EN() ? 'K' : 'rb'}`;
     return `Rp ${n}`;
   },
-  num: (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString('id-ID')),
-  compact: (n: number | null | undefined) => (n == null ? '—' : Intl.NumberFormat('id-ID', { notation: 'compact' }).format(n)),
+  num: (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString(T())),
+  compact: (n: number | null | undefined) => (n == null ? '—' : Intl.NumberFormat(T(), { notation: 'compact' }).format(n)),
   duration: (ms: number) => {
     const s = Math.max(0, Math.floor(ms / 1000));
     const h = Math.floor(s / 3600);
@@ -134,9 +142,10 @@ export const fmt = {
     const ss = String(s % 60).padStart(2, '0');
     return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
   },
-  minutes: (ms: number) => `${Math.round(ms / 60000)} mnt`,
+  minutes: (ms: number) => `${Math.round(ms / 60000)} ${EN() ? 'min' : 'mnt'}`,
   date: (iso: string | null | undefined, opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' }) =>
-    iso ? new Date(iso).toLocaleDateString('id-ID', opts) : '—',
+    iso ? new Date(iso).toLocaleDateString(T(), opts) : '—',
   dateTime: (iso: string | null | undefined) =>
-    iso ? new Date(iso).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }) + ' WIB' : '—',
+    iso ? new Date(iso).toLocaleString(T(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }) + ' WIB' : '—',
 };
+

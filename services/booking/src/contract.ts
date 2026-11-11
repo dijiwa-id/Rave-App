@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { bookingInvoice, formatIdr } from '@gema/domain';
+import { bookingInvoice, formatIdr } from '@rave/domain';
 import { commissionPolicy, type BookingRow } from './common.js';
 
 export const TEMPLATE_VERSION = 'booking-v1';
@@ -28,13 +28,13 @@ const CATEGORY: Record<string, string> = {
 export function renderContract({ b, fee, artistName, artistCity, promotorName, rider, riderNotes }: Ctx): { body: string; sha256: string } {
   const inv = bookingInvoice(fee, b.dp_pct, commissionPolicy());
   const r = rider ?? {};
-  const body = `# PERJANJIAN PERTUNJUKAN (BOOKING) — GEMA
+  const body = `# PERJANJIAN PERTUNJUKAN (BOOKING) — RAVE
 Templat: \`${TEMPLATE_VERSION}\` · Nomor booking: \`${b.id}\`
 
 ## 1. Para Pihak
 1. **Penyelenggara (Promotor):** ${promotorName} (selanjutnya "Pihak Pertama").
 2. **Pengisi Acara (Artis):** ${artistName}${artistCity ? `, berdomisili di ${artistCity}` : ''}, diwakili manajemen resminya (selanjutnya "Pihak Kedua").
-3. **PT GEMA (Platform Fasilitator):** menyediakan sistem kontrak elektronik, rekening bersama (escrow) melalui mitra berizin, dan mediasi. GEMA bukan pihak dalam pertunjukan.
+3. **PT RAVE (Platform Fasilitator):** menyediakan sistem kontrak elektronik, rekening bersama (escrow) melalui mitra berizin, dan mediasi. RAVE bukan pihak dalam pertunjukan.
 
 ## 2. Detail Pertunjukan
 | Butir | Ketentuan |
@@ -51,7 +51,7 @@ Templat: \`${TEMPLATE_VERSION}\` · Nomor booking: \`${b.id}\`
 ## 3. Fee, Termin & Rekening Bersama
 1. Fee pertunjukan: **${formatIdr(fee)}** (belum termasuk biaya layanan platform ${formatIdr(inv.serviceFee)} yang ditanggung Pihak Pertama).
 2. Termin: DP **${b.dp_pct}% = ${formatIdr(inv.dp)}** paling lambat 3×24 jam setelah kontrak ditandatangani; pelunasan **${formatIdr(inv.settlement)}** paling lambat H-${b.settlement_days_before}.
-3. Seluruh pembayaran dilakukan ke rekening bersama (escrow) mitra berizin yang ditunjuk GEMA atas nama booking ini. Dana dicairkan H+1 setelah status SELESAI bila tidak ada sengketa.
+3. Seluruh pembayaran dilakukan ke rekening bersama (escrow) mitra berizin yang ditunjuk RAVE atas nama booking ini. Dana dicairkan H+1 setelah status SELESAI bila tidak ada sengketa.
 4. Pajak: pemotongan PPh atas fee mengikuti status perpajakan penerima; bukti potong tersedia di aplikasi. Bea meterai elektronik dibebankan sesuai ketentuan.
 5. Transport & akomodasi: ${r.hospitality?.transport ? `ditanggung Pihak Pertama (${r.hospitality.transport})` : 'sesuai rate card yang disepakati'}; konsumsi ${r.hospitality?.meals ?? '-'} porsi; kamar hotel ${r.hospitality?.hotel_rooms ?? '-'}.
 
@@ -76,13 +76,13 @@ Pihak Kedua tidak tampil di acara publik berbayar lain dalam radius 30 km dari v
 | Force majeure (terbukti dokumen) | Ditahan untuk reschedule ≤ 90 hari atau refund dikurangi biaya riil | Idem |
 | Izin acara tidak keluar | Diperlakukan sebagai pembatalan Promotor | |
 
-Komisi platform dan biaya pembayaran yang telah terjadi tidak direfund kecuali pembatalan disebabkan kesalahan sistem GEMA.
+Komisi platform dan biaya pembayaran yang telah terjadi tidak direfund kecuali pembatalan disebabkan kesalahan sistem RAVE.
 
 ## 8. Keamanan, Keselamatan & Perizinan
-Pihak Pertama bertanggung jawab atas perizinan keramaian, keamanan, dan keselamatan acara, serta mengunggah bukti izin ke GEMA sebelum hari-H. Asuransi acara bersifat opsional.
+Pihak Pertama bertanggung jawab atas perizinan keramaian, keamanan, dan keselamatan acara, serta mengunggah bukti izin ke RAVE sebelum hari-H. Asuransi acara bersifat opsional.
 
 ## 9. Penyelesaian Sengketa
-Musyawarah → mediasi GEMA (keputusan maks. 14 hari kerja; sengketa diajukan ≤ 24 jam setelah acara, dana dibekukan) → arbitrase/pengadilan negeri domisili Pihak Pertama.
+Musyawarah → mediasi RAVE (keputusan maks. 14 hari kerja; sengketa diajukan ≤ 24 jam setelah acara, dana dibekukan) → arbitrase/pengadilan negeri domisili Pihak Pertama.
 
 ## 10. Penutup
 Perjanjian ini ditandatangani secara elektronik melalui PSrE tersertifikasi dan tidak dapat diubah setelah ditandatangani; perubahan dilakukan melalui adendum yang juga ditandatangani para pihak.

@@ -6,7 +6,7 @@ import type { ContractData } from './contract-data.js';
 
 const party = (name: string) => ({ org_id: null, legal_name: name, rep_name: 'Rep', rep_title: 'Direktur', nik_mask: '************0001', npwp_mask: '***********000', address: 'Jl. Uji 1', email: 'a@b.id', whatsapp: '+62', bank: null });
 const base = (): ContractData => ({
-  contract_no: 'GEMA/SPK/202610/ABCD1234',
+  contract_no: 'RAVE/SPK/202610/ABCD1234',
   version: 2,
   template: { id: 'spk', version: 'spk-v2' },
   generated_at: '2026-10-16T00:00:00.000Z',
@@ -33,7 +33,7 @@ describe('templat spk-v2', () => {
   it('memuat klausul terkunci, termin, pajak, e-Meterai, rider & QR', async () => {
     const html = await renderContractHtml(base(), opts);
     for (const t of Object.values(LOCKED_CLAUSE_TEXT)) expect(html).toContain(t.replace(/&/g, '&amp;').replace(/'/g, '&#x27;'));
-    expect(html).toContain('GEMA/SPK/202610/ABCD1234');
+    expect(html).toContain('RAVE/SPK/202610/ABCD1234');
     expect(html).toContain('Rp 10.000.000');
     expect(html).toContain('PPh 23');
     expect(html).toContain('e-Meterai');
@@ -113,7 +113,7 @@ describe.skipIf(!chromium)('render PDF (Chromium nyata)', () => {
   afterAll(() => closePdfBrowser());
   it('menghasilkan PDF multi-halaman dengan hash stabil di storage', async () => {
     const html = await renderContractHtml(base(), opts);
-    const { pdf, blocked } = await renderPdf(html, { contractNo: 'GEMA/SPK/202610/ABCD1234', version: 2, note: 'DRAF' });
+    const { pdf, blocked } = await renderPdf(html, { contractNo: 'RAVE/SPK/202610/ABCD1234', version: 2, note: 'DRAF' });
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
     expect((pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length).toBeGreaterThanOrEqual(2); // kontrak + lampiran rider
     expect(blocked).toEqual([]);

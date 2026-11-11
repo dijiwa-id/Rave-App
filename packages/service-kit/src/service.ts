@@ -6,6 +6,7 @@ import { createBus, type Consumers } from './bus.js';
 import { config, INSTANCE_ID } from './config.js';
 import { createDb, migrate, type Db } from './db.js';
 import { errorHandler } from './errors.js';
+import { BUILD_INFO } from './version.js';
 
 export interface ServiceContext {
   name: string;
@@ -38,7 +39,7 @@ export interface ServiceDefinition {
 }
 
 /**
- * Bootstrap standar microservice GEMA.
+ * Bootstrap standar microservice RAVE.
  * CLI: `tsx src/index.ts`          → migrate + serve
  *      `tsx src/index.ts migrate`  → migrate saja
  *      `tsx src/index.ts seed`     → migrate + seed
@@ -69,10 +70,10 @@ export function createService(def: ServiceDefinition) {
   app.addHook('onRequest', attachUser);
   app.setErrorHandler(errorHandler);
   app.register(cors, { origin: true, credentials: true });
-  app.get('/healthz', async () => ({ status: 'ok', service: def.name }));
+  app.get('/healthz', async () => ({ status: 'ok', service: def.name, version: BUILD_INFO.version, commit: BUILD_INFO.commit }));
   app.get('/readyz', async () => {
     await db.query('SELECT 1');
-    return { status: 'ready', service: def.name };
+    return { status: 'ready', service: def.name, version: BUILD_INFO.version };
   });
   const startedAt = Date.now();
   app.get('/internal/stats', { preHandler: requireService }, async () => {
@@ -81,6 +82,7 @@ export function createService(def: ServiceDefinition) {
       service: def.name,
       instance: INSTANCE_ID,
       pid: process.pid,
+      build: BUILD_INFO,
       uptime_s: Math.round((Date.now() - startedAt) / 1000),
       memory_mb: Math.round(mem.rss / 1048576),
       settings_loaded_at: settings.loadedAt() ? new Date(settings.loadedAt()!).toISOString() : null,
@@ -89,14 +91,35 @@ export function createService(def: ServiceDefinition) {
     };
   });
 
+  /**
+   * Tunggu Postgres siap sebelum migrasi. Service bisa start lebih dulu dari DB (restart Docker/host, failover DB terkelola);
+   * tanpa ini proses langsung mati — di bawah `tsx watch` (dev) container tetap "running" tetapi service tidak melayani.
+   * Batas: DB_WAIT_TIMEOUT_MS (default 120 dtk), lalu gagal seperti biasa agar orkestrator me-restart.
+   */
+  async function waitForDb() {
+    const deadline = Date.now() + Number(process.env.DB_WAIT_TIMEOUT_MS ?? 120_000);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await db.query('SELECT 1');
+        if (attempt > 1) log.info({ attempt }, 'database siap');
+        return;
+      } catch (err: any) {
+        if (Date.now() >= deadline) throw err;
+        if (attempt === 1 || attempt % 5 === 0) log.warn({ attempt, err: err?.message }, 'database belum siap — mencoba lagi');
+        await new Promise((r) => setTimeout(r, Math.min(1000 * attempt, 5000)));
+      }
+    }
+  }
+
   async function start() {
     const cmd = process.argv[2];
+    await waitForDb();
     await migrate(db, def.migrationsDir, (m) => log.info(m));
     if (cmd === 'migrate') return shutdown(0);
     if (cmd === 'seed') {
-      // Akun demo (superadmin@gema.id dll.) tidak boleh muncul di produksi tanpa sengaja.
-      if (!config.isDev && process.env.GEMA_ALLOW_SEED !== '1') {
-        log.error('seed ditolak di produksi (set GEMA_ALLOW_SEED=1 bila memang disengaja)');
+      // Akun demo (superadmin@rave.id dll.) tidak boleh muncul di produksi tanpa sengaja.
+      if (!config.isDev && process.env.RAVE_ALLOW_SEED !== '1') {
+        log.error('seed ditolak di produksi (set RAVE_ALLOW_SEED=1 bila memang disengaja)');
         return shutdown(1);
       }
       if (def.seed) await def.seed(ctx);
@@ -109,7 +132,7 @@ export function createService(def: ServiceDefinition) {
     });
     await app.listen({ port: def.port, host: process.env.HOST ?? '0.0.0.0' });
     bus.startRelay();
-    // Pengaturan platform: snapshot awal + LISTEN/NOTIFY `gema_settings` (setiap replika, termasuk platform —
+    // Pengaturan platform: snapshot awal + LISTEN/NOTIFY `rave_settings` (setiap replika, termasuk platform —
     // platform memuat dari DB lewat setSettingsLoader) + event bus + refresh berkala sebagai jaring pengaman.
     await refreshSettings(def.name);
     timers.push(setInterval(() => void refreshSettings(def.name), 60_000));

@@ -3,46 +3,53 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion, useMotionValue, useReducedMotion, useSpring, useTransform } from 'motion/react';
 import { ArrowRight, Headphones, Radio } from 'lucide-react';
-import Aurora from '@/components/reactbits/Aurora';
 import { api, fmt } from '@/lib/api';
 import type { LiveStream } from '@/lib/types';
 import { cx } from '@/components/ui';
-import { BRAND_GRADIENT } from './marketing';
+import { Vinyl } from './Vinyl';
+import { useLanding, usePartners, usePick } from '@/lib/landing';
+import { useDict } from '@/lib/i18n';
 // Foto: Unsplash (lisensi bebas pakai) — disimpan lokal agar landing tidak bergantung pada CDN luar.
-import performer from '@/assets/landing/hero-performer.webp';
-import stage from '@/assets/landing/hero-stage.webp';
+// Unsplash License — konser Jakarta oleh Kusuma (@iindahe); panggung pub Jakarta oleh Michael Effendy.
+import gigJakarta from '@/assets/landing/gig-jakarta.webp';
+import gigPub from '@/assets/landing/gig-jakarta-pub.webp';
+import halftone from '@/assets/brand/paper-halftone.webp';
+import folded from '@/assets/brand/hero-poster-folded.webp';
 
 
-const DESTINATIONS = ['panggung.', 'kotamu.', 'kampusmu.', 'festival.'];
 
 /** Kata dinamis judul: keluar lalu masuk dengan blur-geser; diam bila pengguna memilih gerak dikurangi. */
-function RotatingWord() {
+function RotatingWord({ words }: { words: string[] }) {
   const reduce = useReducedMotion();
   const [i, setI] = useState(0);
+  const n = words.length;
   useEffect(() => {
-    if (reduce) return;
-    const t = setInterval(() => setI((n) => (n + 1) % DESTINATIONS.length), 2400);
+    if (reduce || n < 2) return;
+    const t = setInterval(() => setI((k) => (k + 1) % n), 2400);
     return () => clearInterval(t);
-  }, [reduce]);
+  }, [reduce, n]);
+  const word = words[i % n] ?? '';
+  // Penahan lebar: kata terpanjang (dari CMS) agar baris tidak melompat.
+  const longest = words.reduce((a, b) => (b.length > a.length ? b : a), '');
   return (
     <span className="relative inline-grid align-baseline">
-      {/* Penahan lebar: kata terpanjang agar baris tidak melompat. */}
       <span className="invisible col-start-1 row-start-1" aria-hidden>
-        kampusmu.
+        {longest}
       </span>
       <AnimatePresence mode="wait" initial={false}>
         <motion.span
-          key={DESTINATIONS[i]}
-          className={cx('col-start-1 row-start-1 bg-clip-text pb-2 text-transparent', BRAND_GRADIENT)}
+          key={word}
+          className="col-start-1 row-start-1 text-rave-primary-text"
           initial={{ y: '40%', opacity: 0, filter: 'blur(6px)' }}
           animate={{ y: 0, opacity: 1, filter: 'blur(0px)' }}
           exit={{ y: '-40%', opacity: 0, filter: 'blur(6px)' }}
           transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+          aria-hidden
         >
-          {DESTINATIONS[i]}
+          {word}
         </motion.span>
       </AnimatePresence>
-      <span className="sr-only">panggung, kotamu, kampusmu, dan festival</span>
+      <span className="sr-only">{words.join(', ')}</span>
     </span>
   );
 }
@@ -54,7 +61,7 @@ function Equalizer() {
       {[0.5, 1, 0.7, 0.9].map((h, k) => (
         <motion.span
           key={k}
-          className="w-[3px] rounded-full bg-gema-primary"
+          className="w-[3px] rounded-full bg-rave-primary"
           style={{ height: `${h * 100}%` }}
           animate={reduce ? undefined : { scaleY: [0.35, 1, 0.55, 0.9, 0.35] }}
           transition={{ duration: 1.1 + k * 0.15, repeat: Infinity, ease: 'easeInOut' }}
@@ -68,7 +75,7 @@ function FloatCard({ className, delay = 0, drift = 8, children }: { className?: 
   const reduce = useReducedMotion();
   return (
     <motion.div
-      className={cx('absolute z-20 rounded-2xl border border-white/15 bg-black/55 p-3 shadow-2xl shadow-black/50 backdrop-blur-xl', className)}
+      className={cx('absolute z-20 rounded-none border-2 border-rave-ink bg-[#1e1c1f] p-3 shadow-[5px_5px_0_#0b0a0c]', className)}
       initial={{ opacity: 0, y: 24, scale: 0.96 }}
       animate={reduce ? { opacity: 1, y: 0, scale: 1 } : { opacity: 1, y: [0, -drift, 0], scale: 1 }}
       transition={{
@@ -88,6 +95,7 @@ function FloatCard({ className, delay = 0, drift = 8, children }: { className?: 
  */
 function HeroVisual() {
   const reduce = useReducedMotion();
+  const d = useDict('public').heroVisual;
   const ref = useRef<HTMLDivElement>(null);
   const mx = useMotionValue(0);
   const my = useMotionValue(0);
@@ -114,49 +122,65 @@ function HeroVisual() {
       }}
       onPointerLeave={() => (mx.set(0), my.set(0))}
     >
-      <div className="absolute -inset-10 -z-10 rounded-full bg-[radial-gradient(closest-side,rgba(236,72,153,0.32),rgba(124,58,237,0.16),transparent)] blur-2xl" aria-hidden />
+      {/*
+       * Vinyl di samping visual (seperti rave-website .groove): ditambatkan ke kolom visual, bukan tepi layar,
+       * jadi selalu menyembul di kanan foto dan tidak pernah menimpa judul di layar laptop.
+       */}
+      <Vinyl
+        className="absolute top-1/2 left-[34%] -z-10 w-[165%] -translate-y-1/2"
+        discClassName="animate-[rave-spin_9s_linear_infinite] motion-reduce:animate-none"
+      />
+      <div className="absolute -inset-10 -z-10 rounded-none bg-[radial-gradient(closest-side,rgba(138,47,63,0.32),rgba(91,42,110,0.16),transparent)] blur-2xl" aria-hidden />
 
       <motion.div style={{ rotateX: rx, rotateY: ry }} className="relative size-full [transform-style:preserve-3d]">
         <motion.div
-          className="absolute inset-y-0 right-0 left-[10%] overflow-hidden rounded-[32px] ring-1 ring-white/15"
+          className="absolute inset-y-0 right-0 left-[10%] overflow-hidden rounded-none border-[5px] border-rave-paper shadow-[10px_10px_0_#F4C21F] [rotate:1.5deg]"
           initial={{ opacity: 0, scale: 1.04 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
         >
-          <img src={performer} alt="Penampil di atas panggung bermandikan cahaya dan asap" className="size-full object-cover" fetchPriority="high" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/10" />
+          {/* Konser di Jakarta, dicetak ala flyer fotokopi: hitam-putih kontras + lipatan poster + halftone. */}
+          <img src={gigJakarta} alt={d.mainAlt} className="size-full object-cover grayscale contrast-[1.25] brightness-[1.05]" fetchPriority="high" />
+          <span className="absolute inset-0 bg-cover bg-center opacity-80 mix-blend-overlay" style={{ backgroundImage: `url(${folded})` }} aria-hidden />
+          <span className="absolute inset-0 bg-cover bg-center opacity-30 mix-blend-multiply" style={{ backgroundImage: `url(${halftone})` }} aria-hidden />
+          <span className="absolute inset-0 bg-rave-purple opacity-25 mix-blend-color" aria-hidden />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-black/10" />
+          <span className="rave-stamp absolute right-4 bottom-4 bg-rave-ink/60 text-rave-paper [--stamp-r:-3deg]">Live · Jakarta</span>
         </motion.div>
+        {/* Selotip penahan foto */}
+        <span className="pointer-events-none absolute -top-3 left-[22%] z-20 h-7 w-28 -rotate-[8deg] bg-rave-paper/75 shadow-[0_1px_2px_rgba(0,0,0,0.4)] [clip-path:polygon(0_10%,8%_0,18%_12%,30%_2%,44%_10%,58%_0,72%_9%,86%_1%,100%_10%,97%_55%,100%_92%,86%_100%,70%_91%,54%_100%,38%_92%,22%_100%,8%_92%,0_100%,3%_50%)]" aria-hidden />
+        <span className="pointer-events-none absolute -top-2 right-[6%] z-20 h-7 w-24 rotate-[10deg] bg-rave-paper/75 shadow-[0_1px_2px_rgba(0,0,0,0.4)] [clip-path:polygon(0_10%,8%_0,18%_12%,30%_2%,44%_10%,58%_0,72%_9%,86%_1%,100%_10%,97%_55%,100%_92%,86%_100%,70%_91%,54%_100%,38%_92%,22%_100%,8%_92%,0_100%,3%_50%)]" aria-hidden />
 
         <motion.img
-          src={stage}
-          alt="Vokalis tampil di panggung bercahaya neon"
-          className="absolute bottom-[8%] -left-[2%] z-10 aspect-square w-[36%] rounded-3xl object-cover shadow-2xl shadow-black/60 ring-4 ring-black"
+          src={gigPub}
+          alt={d.pubAlt}
+          className="absolute bottom-[8%] -left-[2%] z-10 aspect-square w-[36%] rounded-none border-[5px] border-b-[22px] border-rave-paper object-cover grayscale contrast-[1.2] shadow-[6px_6px_0_#0b0a0c] [rotate:-6deg]"
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.8, delay: 0.25 }}
           loading="lazy"
         />
 
-        <FloatCard className="top-[5%] right-[5%]" delay={0.5} drift={6}>
+        <FloatCard className="top-[5%] right-[5%] !bg-rave-paper !text-rave-ink" delay={0.5} drift={6}>
           {onAir ? (
             <Link to={`/app/live/${onAir.id}`} className="flex items-center gap-3 pr-1">
-              <span className="relative grid size-9 place-items-center rounded-full bg-red-600">
+              <span className="relative grid size-9 place-items-center border-2 border-rave-ink bg-red-600">
                 <Radio className="size-4 text-white" />
-                <span className="absolute inset-0 animate-ping rounded-full bg-red-600/50" />
+                <span className="absolute -top-1 -right-1 size-2.5 animate-ping rounded-full bg-red-600" />
               </span>
               <span className="min-w-0">
-                <span className="block text-[11px] font-bold tracking-wider text-red-400 uppercase">Live · {fmt.compact(Math.max(onAir.viewers, 1))} menonton</span>
-                <span className="block max-w-[11rem] truncate text-sm font-bold text-white">{onAir.artist?.name ?? onAir.org.name}</span>
+                <span className="block font-label text-[10px] font-bold tracking-[0.1em] text-red-700 uppercase">{d.liveWatching(fmt.compact(Math.max(onAir.viewers, 1)))}</span>
+                <span className="block max-w-[11rem] truncate text-sm font-bold text-rave-ink">{onAir.artist?.name ?? onAir.org.name}</span>
               </span>
             </Link>
           ) : (
             <span className="flex items-center gap-3 pr-1">
-              <span className="grid size-9 place-items-center rounded-full bg-white/10">
+              <span className="grid size-9 place-items-center border-2 border-rave-ink bg-rave-purple">
                 <Radio className="size-4 text-white" />
               </span>
               <span>
-                <span className="block text-[11px] font-bold tracking-wider text-white/60 uppercase">Live streaming</span>
-                <span className="block text-sm font-bold text-white">Sesi studio & konser</span>
+                <span className="block font-label text-[10px] font-bold tracking-[0.1em] text-rave-purple uppercase">{d.liveStreaming}</span>
+                <span className="block text-sm font-bold text-rave-ink">{d.studioSessions}</span>
               </span>
             </span>
           )}
@@ -164,23 +188,23 @@ function HeroVisual() {
 
         <FloatCard className="right-[4%] bottom-[30%] w-[58%] sm:right-[-4%] sm:w-[54%]" delay={0.75} drift={10}>
           <div className="flex items-center gap-3">
-            <img src={stage} alt="" className="size-11 rounded-lg object-cover" />
+            <img src={gigPub} alt="" className="size-11 rounded-none border-2 border-rave-ink object-cover grayscale" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-bold text-white">Hujan di Dago</p>
               <p className="truncate text-xs text-white/60">Senja Kolektif</p>
             </div>
             <Equalizer />
           </div>
-          <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/15">
+          <div className="mt-3 h-1.5 overflow-hidden border border-rave-ink bg-white/10">
             <motion.div
-              className={cx('h-full rounded-full', BRAND_GRADIENT)}
+              className="h-full rounded-none bg-rave-primary"
               initial={{ width: '18%' }}
               animate={reduce ? undefined : { width: ['18%', '72%'] }}
               transition={{ duration: 24, repeat: Infinity, ease: 'linear' }}
             />
           </div>
-          <p className="mt-2 flex items-center gap-1.5 text-[11px] font-semibold text-white/60">
-            <Headphones className="size-3.5" /> Lossless FLAC · gratis
+          <p className="mt-2 flex items-center gap-1.5 font-label text-[10px] font-bold tracking-[0.08em] text-white/60 uppercase">
+            <Headphones className="size-3.5" /> {d.losslessFree}
           </p>
         </FloatCard>
       </motion.div>
@@ -188,65 +212,141 @@ function HeroVisual() {
   );
 }
 
+/** Tautan CMS: path internal → <Link>, selain itu (#anchor, https://) → <a> (eksternal dibuka di tab baru). */
+function SmartLink({ to, className, children }: { to: string; className?: string; children: React.ReactNode }) {
+  if (to.startsWith('/')) return <Link to={to} className={className}>{children}</Link>;
+  const ext = /^https:/i.test(to);
+  return <a href={to} className={className} {...(ext ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{children}</a>;
+}
+
 export function Hero() {
   const reduce = useReducedMotion();
+  const { hero } = useLanding();
+  const t = usePick();
   const fade = (delay: number) => ({
     initial: { opacity: 0, y: reduce ? 0 : 18 },
     animate: { opacity: 1, y: 0 },
     transition: { duration: 0.7, delay, ease: [0.22, 1, 0.36, 1] as const },
   });
+  const rise = (delay: number) => ({
+    initial: { y: reduce ? 0 : '105%' },
+    animate: { y: 0 },
+    transition: { duration: 1.05, delay, ease: [0.2, 0.7, 0.1, 1] as const },
+  });
 
   return (
-    <section className="relative isolate overflow-hidden bg-black">
-      <div className="absolute inset-0 -z-10 opacity-55" aria-hidden>
-        <Aurora colorStops={['#662d91', '#da1c5c', '#f6851f']} amplitude={1} blend={0.6} speed={0.5} />
-      </div>
-      <div
-        className="absolute inset-0 -z-10 opacity-[0.06] [background-image:linear-gradient(rgba(255,255,255,.6)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.6)_1px,transparent_1px)] [background-size:56px_56px] [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_75%)]"
-        aria-hidden
-      />
-      <div className="absolute inset-0 -z-10 bg-gradient-to-b from-black/30 via-black/50 to-black" aria-hidden />
-
-      <div className="mx-auto grid max-w-6xl items-center gap-14 px-4 pt-12 pb-20 md:pt-16 xl:grid-cols-[1.1fr_1fr] xl:gap-12 xl:pt-20 xl:pb-28">
+    <section className="rave-grain rave-crumple rave-poster relative isolate overflow-hidden bg-[radial-gradient(120%_90%_at_70%_40%,#4a1f5c_0,#2a1233_45%,#181818_100%)]">
+      <div className="mx-auto grid max-w-[82.5rem] items-center gap-14 px-4 pt-[7.5rem] pb-28 md:pt-[8.5rem] xl:grid-cols-[1.15fr_1fr] xl:gap-10 xl:pt-[9.5rem] xl:pb-32">
         <div>
-          <motion.div {...fade(0)}>
-            <Link
-              to="/app/live"
-              className="group inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 py-1.5 pr-3 pl-1.5 text-sm text-white/80 backdrop-blur transition hover:border-white/30 hover:bg-white/10"
+          <motion.div {...fade(0)} className="flex flex-wrap items-center gap-4">
+            <p className="rave-label rave-eyebrow">{t(hero.kicker)}</p>
+            <SmartLink
+              to={hero.badge_href}
+              className="group inline-flex items-center gap-2 rounded-none border border-white/15 bg-black/30 py-1 pr-3 pl-1 text-sm text-white/80 transition hover:border-rave-primary/60"
             >
-              <span className={cx('rounded-full px-2 py-0.5 text-xs font-bold text-white', BRAND_GRADIENT)}>Baru</span>
-              Live streaming konser
+              <span className="rounded-none bg-rave-primary px-2 py-0.5 text-[11px] font-bold text-rave-on-primary uppercase">{t(hero.badge)}</span>
+              {t(hero.badge_link)}
               <ArrowRight className="size-4 transition group-hover:translate-x-0.5" />
-            </Link>
+            </SmartLink>
           </motion.div>
 
-          <motion.h1 {...fade(0.08)} className="mt-6 text-[2.75rem] leading-[1.04] font-black tracking-tight text-white sm:text-6xl xl:text-[4.25rem]">
-            Musik indie,
-            <br />
-            dari playlist ke
-            <br />
-            <RotatingWord />
-          </motion.h1>
+          <h1 className="mt-7 text-[3.4rem] leading-[0.9] whitespace-nowrap text-rave-paper sm:text-7xl xl:text-[6.25rem]">
+            <span className="block overflow-hidden pb-1">
+              <motion.span className="block" {...rise(0.05)}>
+                {t(hero.line1)}
+              </motion.span>
+            </span>
+            <span className="block overflow-hidden pb-1">
+              <motion.span className="block" {...rise(0.15)}>
+                {t(hero.line2)}
+              </motion.span>
+            </span>
+            <span className="block overflow-hidden pb-1">
+              <motion.span className="block" {...rise(0.25)}>
+                {t(hero.prefix)} <RotatingWord words={hero.words.map(t)} />
+              </motion.span>
+            </span>
+          </h1>
 
-          <motion.p {...fade(0.16)} className="mt-6 max-w-lg text-lg leading-relaxed text-white/70">
-            Dengarkan gratis dalam kualitas lossless, temukan musisi independen Indonesia, lalu saksikan mereka di panggung kotamu.
+          <motion.p {...fade(0.4)} className="mt-7 max-w-lg text-lg leading-relaxed text-[#cfc4d8]">
+            {t(hero.lead)}
           </motion.p>
 
-          <motion.div {...fade(0.24)} className="mt-9 flex flex-wrap gap-3">
-            <Link
-              to="/app"
-              className="group inline-flex items-center gap-2 rounded-full bg-white px-7 py-3.5 font-bold text-black shadow-[0_0_40px_-8px_rgba(236,72,153,0.7)] transition hover:scale-[1.03]"
+          <motion.div {...fade(0.5)} className="mt-9 flex flex-wrap gap-3">
+            <SmartLink
+              to={hero.cta_primary_href}
+              className="rave-label group inline-flex items-center gap-3 rounded-none border-[1.5px] border-rave-primary bg-rave-primary px-7 py-4 !text-[12.5px] text-rave-on-primary transition hover:-translate-y-0.5 hover:border-rave-paper hover:bg-rave-paper"
             >
-              Mulai mendengarkan
-              <ArrowRight className="size-4 transition group-hover:translate-x-0.5" />
-            </Link>
-            <a href="#ekosistem" className="inline-flex items-center rounded-full border border-white/25 px-7 py-3.5 font-bold text-white transition hover:border-white/60 hover:bg-white/5">
-              Untuk artis & promotor
-            </a>
+              {t(hero.cta_primary)}
+              <ArrowRight className="size-4 transition group-hover:translate-x-1" />
+            </SmartLink>
+            <SmartLink
+              to={hero.cta_secondary_href}
+              className="rave-label inline-flex items-center rounded-none border-[1.5px] border-rave-paper/80 px-7 py-4 !text-[12.5px] text-rave-paper transition hover:-translate-y-0.5 hover:bg-rave-paper hover:text-rave-ink"
+            >
+              {t(hero.cta_secondary)}
+            </SmartLink>
           </motion.div>
         </div>
 
         <HeroVisual />
+      </div>
+
+    </section>
+  );
+}
+
+/**
+ * Pita marquee mustard miring (rave-website: .band) — satu-satunya teks berjalan di landing.
+ * Isi dari Editor Landing (`content.partners`: logo partner musik, tampil sebagai siluet ink);
+ * bila belum ada partner, menampilkan slogan `fallback`. Berhenti saat di-hover; berhenti total bila "kurangi gerakan".
+ */
+export function RaveBand({ fallback: fallbackProp }: { fallback?: string[] }) {
+  const { band } = useLanding();
+  const t = usePick();
+  const d = useDict('public').band;
+  const fallback = fallbackProp ?? band.map(t);
+  const partners = usePartners();
+  const hasPartners = partners.length > 0;
+  type Item = { key: string; name: string; logo?: string; url?: string };
+  const base: Item[] = hasPartners ? partners.map((p, i) => ({ key: `p${i}`, name: p.name, logo: p.logo || undefined, url: p.url || undefined })) : fallback.map((w, i) => ({ key: `w${i}`, name: w }));
+  // Ulangi sampai cukup panjang untuk mengisi layar lebar, lalu gandakan untuk loop -50% yang mulus.
+  const reps = Math.max(1, Math.ceil(10 / base.length));
+  const run = Array.from({ length: reps }, () => base).flat();
+  const all = [...run, ...run];
+  const external = (u?: string) => !!u && /^https?:/i.test(u);
+
+  return (
+    <section className="relative z-30 -mx-5 -mt-12 -rotate-[1.2deg]" aria-label={hasPartners ? d.partnersAria : d.spiritAria}>
+      {hasPartners && (
+        <ul className="sr-only">
+          {partners.map((p) => (
+            <li key={p.name}>{p.url ? <a href={p.url}>{p.name}</a> : p.name}</li>
+          ))}
+        </ul>
+      )}
+      <div className="rave-band relative py-4 md:py-5">
+        <div className="items-center font-display text-[clamp(26px,3.6vw,50px)] leading-none uppercase" style={{ animationDuration: `${Math.max(24, run.length * 3.2)}s` }} aria-hidden>
+          {all.map((it, i) => {
+            const body = it.logo ? (
+              <img src={it.logo} alt="" loading="lazy" className="h-[clamp(28px,3.4vw,46px)] w-auto max-w-[12rem] object-contain [filter:brightness(0)] opacity-90" />
+            ) : (
+              it.name
+            );
+            return (
+              <span key={`${it.key}-${i}`} className="flex shrink-0 items-center gap-12">
+                {it.url ? (
+                  <a href={it.url} tabIndex={-1} {...(external(it.url) ? { target: '_blank', rel: 'noopener noreferrer' } : {})} className="transition hover:opacity-60">
+                    {body}
+                  </a>
+                ) : (
+                  body
+                )}
+                <span className="text-[0.55em] text-rave-ink/70">✺</span>
+              </span>
+            );
+          })}
+        </div>
       </div>
     </section>
   );

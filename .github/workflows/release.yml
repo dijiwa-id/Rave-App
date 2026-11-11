@@ -1,0 +1,78 @@
+# Rilis: `npm run release -- auto` (lokal) → `git push --follow-tags` → workflow ini membangun & mendorong image
+#   ghcr.io/<owner>/rave-<komponen>:<versi>, :<major>.<minor>, :sha-<commit>, dan :latest (hanya versi stabil),
+# lalu membuat GitHub Release dari bagian CHANGELOG.md. Lihat docs/VERSIONING.md.
+name: Release
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          [ "$TAG" = "$PKG" ] || { echo "::error::tag v$TAG ≠ package.json $PKG — gunakan npm run release"; exit 1; }
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          [[ "$TAG" == *-* ]] && echo "prerelease=true" >> "$GITHUB_OUTPUT" || echo "prerelease=false" >> "$GITHUB_OUTPUT"
+
+  images:
+    needs: meta
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [gateway, iam, catalog, library, playback, booking, finance, ticketing, notification, platform, live, ads, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ secrets.GITHUB_TOKEN }}' }
+      - id: tags
+        run: |
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          V='${{ needs.meta.outputs.version }}'
+          IMG="ghcr.io/$OWNER/rave-${{ matrix.component }}"
+          T="$IMG:$V,$IMG:sha-${GITHUB_SHA::12}"
+          if [ '${{ needs.meta.outputs.prerelease }}' = false ]; then T="$T,$IMG:${V%.*},$IMG:latest"; fi
+          echo "tags=$T" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.component == 'web' && 'infra/docker/Dockerfile.web' || 'infra/docker/Dockerfile.service' }}
+          target: runtime
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            SERVICE=${{ matrix.component }}
+            APP_VERSION=${{ needs.meta.outputs.version }}
+            GIT_SHA=${{ github.sha }}
+            BUILD_DATE=${{ steps.tags.outputs.date }}
+
+  github-release:
+    needs: [meta, images]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Catatan rilis dari CHANGELOG.md
+        run: |
+          V='${{ needs.meta.outputs.version }}'
+          awk -v v="$V" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ && f {exit} f' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "Rilis v$V" > notes.md
+      - env: { GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "RAVE $GITHUB_REF_NAME" --notes-file notes.md \
+            $([ '${{ needs.meta.outputs.prerelease }}' = true ] && echo --prerelease)

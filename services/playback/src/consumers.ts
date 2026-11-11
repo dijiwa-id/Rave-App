@@ -1,4 +1,4 @@
-import { callService, type Consumers, type ServiceContext } from '@gema/service-kit';
+import { callService, type Consumers, type ServiceContext } from '@rave/service-kit';
 import { bumpArtistDaily } from './aggregates.js';
 import { todayWib } from './util.js';
 

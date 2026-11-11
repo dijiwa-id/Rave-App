@@ -1,5 +1,5 @@
-import { SEED } from '@gema/domain';
-import { publish, uuidv7, type Client, type ServiceContext } from '@gema/service-kit';
+import { SEED } from '@rave/domain';
+import { publish, uuidv7, type Client, type ServiceContext } from '@rave/service-kit';
 import { encrypt, mask } from './core.js';
 
 const U = SEED.users;
@@ -38,8 +38,11 @@ export async function seed({ db, log }: ServiceContext) {
     await user(tx, U.artist, E.artist, 'Sekar (Senja Kolektif)', { city: 'Bandung', onboarded: true });
     await user(tx, U.manager, E.manager, 'Dimas Manajer', { city: 'Jakarta', onboarded: true });
     await user(tx, U.promotor, E.promotor, 'Laras Promotor', { city: 'Jakarta', onboarded: true });
-    await user(tx, U.admin, E.admin, 'Admin GEMA', { city: 'Jakarta', onboarded: true, is_admin: true });
-    await user(tx, U.superadmin, E.superadmin, 'Super Admin GEMA', { city: 'Jakarta', onboarded: true, is_admin: true });
+    await user(tx, U.admin, E.admin, 'Admin RAVE', { city: 'Jakarta', onboarded: true, is_admin: true });
+    await user(tx, U.superadmin, E.superadmin, 'Super Admin RAVE', { city: 'Jakarta', onboarded: true, is_admin: true });
+    // Fan Premium demo: kualitas tinggi (AAC 320) & Lossless (FLAC) hanya untuk pelanggan Premium.
+    await user(tx, U.premium, E.premium, 'Nadia Premium', { city: 'Yogyakarta', genres: ['indie-rock', 'shoegaze'], onboarded: true, premium: true });
+    await tx.query(`UPDATE users SET premium = true WHERE id = $1 AND NOT premium`, [U.premium]);
     await tx.query(`UPDATE users SET admin_role = 'OPS' WHERE id = $1 AND admin_role IS NULL`, [U.admin]);
     await tx.query(`UPDATE users SET admin_role = 'SUPER_ADMIN' WHERE id = $1`, [U.superadmin]);
 

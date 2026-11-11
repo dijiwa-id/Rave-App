@@ -1,10 +1,10 @@
-import { config, publish, settings, uuidv7, type Job } from '@gema/service-kit';
+import { config, publish, settings, uuidv7, type Job } from '@rave/service-kit';
 import { processRefundEvent, releaseEscrow, releaseEventEscrow, settleRefund, signPayload, verifySignature } from './escrow.js';
 import { PermanentRefundError, paymentProvider } from './providers.js';
 import { C, D, post, serial } from './ledger.js';
 
-/** Fast clock dev (GEMA_FAST_CLOCK, default aktif di non-produksi): jendela dispute 30 dtk, bukan 24 jam. */
-export const FAST_CLOCK = (process.env.GEMA_FAST_CLOCK ?? (config.isDev ? '1' : '0')) === '1';
+/** Fast clock dev (RAVE_FAST_CLOCK, default aktif di non-produksi): jendela dispute 30 dtk, bukan 24 jam. */
+export const FAST_CLOCK = (process.env.RAVE_FAST_CLOCK ?? (config.isDev ? '1' : '0')) === '1';
 /** Jendela dispute dari pengaturan platform (booking.dispute_window_hours). */
 export const disputeWindowMs = () => (FAST_CLOCK ? 30_000 : settings.num('booking.dispute_window_hours') * 3600_000);
 

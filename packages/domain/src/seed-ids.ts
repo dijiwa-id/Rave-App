@@ -14,14 +14,16 @@ export const SEED = {
     promotor: '01900000-0000-7000-8000-000000000004',
     admin: '01900000-0000-7000-8000-000000000005', // admin_role OPS
     superadmin: '01900000-0000-7000-8000-000000000006', // admin_role SUPER_ADMIN
+    premium: '01900000-0000-7000-8000-000000000007', // fan berlangganan Premium (HQ/Lossless, bebas iklan)
   },
   emails: {
-    fan: 'fan@gema.id',
-    artist: 'artis@gema.id',
-    manager: 'manajer@gema.id',
-    promotor: 'promotor@gema.id',
-    admin: 'admin@gema.id',
-    superadmin: 'superadmin@gema.id',
+    fan: 'fan@rave.id',
+    artist: 'artis@rave.id',
+    manager: 'manajer@rave.id',
+    promotor: 'promotor@rave.id',
+    admin: 'admin@rave.id',
+    superadmin: 'superadmin@rave.id',
+    premium: 'premium@rave.id',
   },
   /** Siaran live demo (service live). */
   liveStreams: {
@@ -48,6 +50,19 @@ export const SEED = {
   ],
 } as const;
 
+/**
+ * Tanggal jadwal data demo ditulis relatif terhadap jangkar 2026-10-24 (event pertama). Agar seed tidak "basi"
+ * (event demo sudah lewat), semua tanggal digeser per minggu penuh — hari & jam tetap — hingga event pertama
+ * minimal 14 hari ke depan. Hanya memengaruhi baris baru (seed idempoten, ON CONFLICT DO NOTHING).
+ */
+export function seedSchedule(iso: string, now = Date.now()): string {
+  const WEEK = 7 * 86_400_000;
+  const anchor = Date.parse('2026-10-24T00:00:00+07:00');
+  const min = now + 14 * 86_400_000;
+  const weeks = anchor >= min ? 0 : Math.ceil((min - anchor) / WEEK);
+  return new Date(Date.parse(iso) + weeks * WEEK).toISOString();
+}
+
 export const SEED_ARTIST_IDS = SEED.artists.map((a) => a.id);
 
 export const SEED_CITIES = ['Jakarta', 'Bandung', 'Yogyakarta', 'Surabaya', 'Malang', 'Bali', 'Medan', 'Semarang', 'Makassar', 'Solo'];
@@ -55,7 +70,7 @@ export const SEED_CITIES = ['Jakarta', 'Bandung', 'Yogyakarta', 'Surabaya', 'Mal
 // ---------------- Katalog demo deterministik ----------------
 // Audio demo: SoundHelix (CC, contoh publik). Produksi: rendisi HLS/DASH ber-DRM dari CDN.
 const audio = (n: number) => `https://www.soundhelix.com/examples/mp3/SoundHelix-Song-${((n - 1) % 16) + 1}.mp3`;
-const img = (seed: string, size = 640) => `https://picsum.photos/seed/gema-${seed}/${size}/${size}`;
+const img = (seed: string, size = 640) => `https://picsum.photos/seed/rave-${seed}/${size}/${size}`;
 
 const TITLES: Record<string, { ep: string; single: string; tracks: string[] }> = {
   'senja-kolektif': { ep: 'Pulang ke Utara', single: 'Hujan di Dago', tracks: ['Pulang ke Utara', 'Kopi Pukul Dua', 'Lampu Kota', 'Surat yang Tak Terkirim', 'Hujan di Dago'] },
@@ -133,4 +148,4 @@ export const SEED_RELEASES: SeedRelease[] = SEED.artists.flatMap((a, ai) => {
 export const SEED_TRACKS = SEED_RELEASES.flatMap((r) => r.tracks.map((t) => ({ ...t, releaseId: r.id, artistId: r.artistId })));
 
 export const SEED_ARTIST_IMAGE = (slug: string) => img(`artist-${slug}`, 640);
-export const SEED_ARTIST_COVER = (slug: string) => `https://picsum.photos/seed/gema-cover-${slug}/1600/600`;
+export const SEED_ARTIST_COVER = (slug: string) => `https://picsum.photos/seed/rave-cover-${slug}/1600/600`;

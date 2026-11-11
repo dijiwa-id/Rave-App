@@ -10,7 +10,7 @@
 import pg from 'pg';
 
 const APPLY = process.argv.includes('--apply');
-const DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://gema:gema@127.0.0.1:55432/gema';
+const DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://rave:rave@127.0.0.1:55432/rave';
 const db = new pg.Client({ connectionString: DATABASE_URL });
 await db.connect();
 

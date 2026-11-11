@@ -2,7 +2,17 @@
 // Satu sumber kebenaran: dipakai service `platform` untuk validasi, service lain untuk default,
 // dan frontend Super Admin untuk merender form. Menambah kunci = menambah entri di sini.
 
-export type SettingType = 'boolean' | 'number' | 'string' | 'text' | 'enum' | 'list' | 'image';
+import { coerceLanding, LANDING_DEFAULT } from './landing';
+
+export type SettingType = 'boolean' | 'number' | 'string' | 'text' | 'enum' | 'list' | 'image' | 'partners' | 'landing';
+
+/** Satu entri CMS partner (pita berjalan landing). `logo` = file di bucket branding (slot `partner`), `url` opsional. */
+export interface PartnerEntry {
+  name: string;
+  logo: string;
+  url: string;
+}
+export const PARTNERS_MAX = 40;
 
 export interface SettingDef {
   key: string;
@@ -27,13 +37,20 @@ export interface SettingDef {
    * agar Super Admin tidak mengira nilai sudah berlaku. Hapus field ini ketika consumer sudah membacanya.
    */
   planned?: string;
-  /** Khusus type 'image': slot upload di bucket branding & aturan file. */
+  /** Khusus type 'image' / 'partners': slot upload di bucket branding & aturan file. */
   image?: { slot: BrandingSlot; square?: boolean; minPx: number; background: 'light' | 'dark' };
+  /** Khusus type 'enum': opsi adalah pilihan font → UI menampilkan pratinjau tiap opsi dengan `fontFamily` ini (CSS). */
+  fontPreview?: Record<string, string>;
+  /** Bobot pratinjau per opsi (mis. stensil 800). */
+  fontPreviewWeight?: Record<string, number>;
+  /** `font-size-adjust` pratinjau per opsi — sama dengan yang diterapkan di aplikasi. */
+  fontPreviewAdjust?: Record<string, string>;
 }
 
 export const SETTING_GROUPS = {
   general: { label: 'Umum', description: 'Identitas platform, pengumuman, dan registrasi.' },
-  branding: { label: 'Branding & Tema', description: 'Logo, ikon/favicon, dan tema terang/gelap dasbor (Studio, Promotor Hub, Back Office).' },
+  branding: { label: 'Branding & Tema', description: 'Logo, ikon/favicon, font primer, dan tema terang/gelap dasbor (Studio, Promotor Hub, Back Office).' },
+  content: { label: 'Konten Landing', description: 'Konten halaman publik yang dikelola tanpa deploy lewat Editor Landing (Platform → Editor Landing): section, slogan & logo partner pita kuning.' },
   maintenance: { label: 'Pemeliharaan', description: 'Mode pemeliharaan ditegakkan di API Gateway.' },
   modules: { label: 'Modul & Fitur', description: 'Nyalakan/matikan modul tanpa deploy (feature flag).' },
   live: { label: 'Live Streaming', description: 'Siaran langsung konser & sesi studio: ingest RTMP/browser, latensi, chat, dan batas.' },
@@ -42,7 +59,7 @@ export const SETTING_GROUPS = {
   booking: { label: 'Booking Off-Air', description: 'Parameter saga booking & escrow (§7.1–7.3).' },
   payout: { label: 'Payout', description: 'Penarikan saldo wallet ke rekening bank: batas, kontrol ganda, dan jadwal pemrosesan.' },
   royalty: { label: 'Royalti', description: 'Perhitungan & statement royalti bulanan dari stream qualified (model user-centric, BRD §6.3).' },
-  subscription: { label: 'Langganan Premium', description: 'Harga paket, masa coba, masa tenggang, dan GEMA Pro (REQ-PAY-03).' },
+  subscription: { label: 'Langganan Premium', description: 'Harga paket, masa coba, masa tenggang, dan RAVE Pro (REQ-PAY-03).' },
   refund: { label: 'Refund Tiket', description: 'Kebijakan pengembalian dana tiket: pembatalan event, permintaan pembeli, dan pembayaran terlambat.' },
   transcoding: { label: 'Transcoding Audio', description: 'Pengolahan master: standar kualitas upload, normalisasi loudness, dan rendisi streaming.' },
   streaming: { label: 'Streaming', description: 'Pratinjau, kualitas audio, dan anti-fraud (§6.3, REQ-ADM-03).' },
@@ -54,8 +71,8 @@ export type SettingGroup = keyof typeof SETTING_GROUPS;
 
 export const SETTINGS: SettingDef[] = [
   // ---- Umum ----
-  { key: 'general.platform_name', group: 'general', label: 'Nama platform', description: 'Ditampilkan di judul & email.', type: 'string', default: 'GEMA', public: true, consumers: ['web', 'notification'] },
-  { key: 'general.support_email', group: 'general', label: 'Email dukungan', description: 'Kontak bantuan untuk pengguna.', type: 'string', default: 'bantuan@gema.id', public: true, consumers: ['web'] },
+  { key: 'general.platform_name', group: 'general', label: 'Nama platform', description: 'Ditampilkan di judul & email.', type: 'string', default: 'RAVE', public: true, consumers: ['web', 'notification'] },
+  { key: 'general.support_email', group: 'general', label: 'Email dukungan', description: 'Kontak bantuan untuk pengguna.', type: 'string', default: 'bantuan@rave.id', public: true, consumers: ['web'] },
   { key: 'general.announcement', group: 'general', label: 'Pengumuman global', description: 'Banner di semua halaman. Kosongkan untuk menyembunyikan.', type: 'text', default: '', public: true, consumers: ['web'] },
   {
     key: 'general.announcement_level',
@@ -72,14 +89,53 @@ export const SETTINGS: SettingDef[] = [
     public: true,
     consumers: ['web'],
   },
+  {
+    key: 'general.default_locale',
+    group: 'general',
+    label: 'Bahasa default',
+    description: 'Bahasa antarmuka untuk pengunjung baru bila bahasa perangkatnya tidak didukung. Pengguna tetap bisa memilih sendiri (tersimpan di akun).',
+    type: 'enum',
+    default: 'id',
+    options: [
+      { value: 'id', label: 'Bahasa Indonesia' },
+      { value: 'en', label: 'English' },
+    ],
+    public: true,
+    consumers: ['web', 'notification'],
+  },
   { key: 'general.registrations_open', group: 'general', label: 'Pendaftaran akun baru dibuka', description: 'Bila mati, OTP hanya untuk akun yang sudah ada.', type: 'boolean', default: true, public: true, consumers: ['iam', 'web'] },
+
+  // ---- Konten Landing (CMS) ----
+  {
+    key: 'content.partners',
+    group: 'content',
+    label: 'Partner musik (pita berjalan)',
+    description:
+      'Label, kolektif, venue, media, dan komunitas yang benar-benar bermitra dengan RAVE — tampil sebagai logo (siluet hitam) di pita kuning landing. Dikelola di Editor Landing → Pita kuning. Kosong = pita menampilkan slogan RAVE.',
+    type: 'partners',
+    default: [],
+    image: { slot: 'partner', minPx: 32, background: 'light' },
+    public: true,
+    consumers: ['web'],
+  },
+
+  {
+    key: 'content.landing',
+    group: 'content',
+    label: 'Konten landing page',
+    description: 'Hero, statistik, testimoni, FAQ, banner sponsor, slogan pita, dan visibilitas section — dalam Bahasa Indonesia & English. Diedit lewat Editor Landing (Platform → Landing).',
+    type: 'landing',
+    default: LANDING_DEFAULT,
+    public: true,
+    consumers: ['web'],
+  },
 
   // ---- Branding & Tema ----
   {
     key: 'branding.logo_url',
     group: 'branding',
     label: 'Logo (latar terang)',
-    description: 'Wordmark untuk dasbor tema terang & halaman berlatar putih. SVG atau PNG, tinggi ≥ 32 px. Kosong = logo bawaan GEMA.',
+    description: 'Wordmark untuk dasbor tema terang & halaman berlatar putih. SVG atau PNG, tinggi ≥ 32 px. Kosong = logo bawaan RAVE.',
     type: 'image',
     default: '',
     image: { slot: 'logo', minPx: 32, background: 'light' },
@@ -105,6 +161,24 @@ export const SETTINGS: SettingDef[] = [
     type: 'image',
     default: '',
     image: { slot: 'icon', square: true, minPx: 64, background: 'light' },
+    public: true,
+    consumers: ['web'],
+  },
+  {
+    key: 'branding.primary_font',
+    group: 'branding',
+    label: 'Font primer',
+    description:
+      'Huruf poster untuk judul, angka besar, dan wordmark di seluruh platform (landing, aplikasi dengar, semua dasbor). Paragraf & label tidak berubah. Primary Font 1 = poster konstruktivis, Primary Font 2 = huruf tebal bertekstur kasar ala sablon/flyer gig DIY (otomatis dinormalkan agar judul tetap muat); keduanya berkarakter Latin lengkap. Perubahan berlaku tanpa deploy.',
+    type: 'enum',
+    default: 'primary1',
+    options: [
+      { value: 'primary1', label: 'Primary Font 1 — Staatliches (bawaan)' },
+      { value: 'primary2', label: 'Primary Font 2 — Rubik Dirt' },
+    ],
+    fontPreview: { primary1: 'var(--font-primary-1)', primary2: 'var(--font-primary-2)' },
+    fontPreviewWeight: { primary1: 400, primary2: 400 },
+    fontPreviewAdjust: { primary1: 'none', primary2: 'cap-height 0.5' },
     public: true,
     consumers: ['web'],
   },
@@ -136,7 +210,7 @@ export const SETTINGS: SettingDef[] = [
 
   // ---- Pemeliharaan ----
   { key: 'maintenance.enabled', group: 'maintenance', label: 'Mode pemeliharaan', description: 'Semua operasi tulis (selain login & admin) ditolak 503 di gateway. Baca tetap jalan.', type: 'boolean', default: false, public: true, consumers: ['gateway', 'web'], dangerous: true },
-  { key: 'maintenance.message', group: 'maintenance', label: 'Pesan pemeliharaan', description: 'Ditampilkan ke pengguna saat mode pemeliharaan aktif.', type: 'text', default: 'GEMA sedang dalam pemeliharaan terjadwal. Streaming tetap berjalan; transaksi dibuka kembali segera.', public: true, consumers: ['gateway', 'web'] },
+  { key: 'maintenance.message', group: 'maintenance', label: 'Pesan pemeliharaan', description: 'Ditampilkan ke pengguna saat mode pemeliharaan aktif.', type: 'text', default: 'RAVE sedang dalam pemeliharaan terjadwal. Streaming tetap berjalan; transaksi dibuka kembali segera.', public: true, consumers: ['gateway', 'web'] },
 
   // ---- Modul ----
   { key: 'modules.booking', group: 'modules', label: 'Booking off-air', description: 'Inquiry, negosiasi, kontrak (Promotor Hub & Inbox Booking).', type: 'boolean', default: true, public: true, consumers: ['gateway', 'web'], dangerous: true },
@@ -191,8 +265,8 @@ export const SETTINGS: SettingDef[] = [
     consumers: ['ads'],
   },
   { key: 'ads.podcast_preroll', group: 'ads', label: 'Pre-roll podcast', description: 'Iklan sebelum episode podcast gratis (tidak pernah pada episode Premium).', type: 'boolean', default: true, consumers: ['ads'] },
-  { key: 'ads.sensitive_adjacency', group: 'ads', label: 'Lindungi merek dari konten sensitif', description: 'Setelah konten berperingatan (horor, dewasa) hanya promosi internal GEMA yang ditayangkan.', type: 'boolean', default: true, consumers: ['ads'] },
-  { key: 'ads.house_ads_enabled', group: 'ads', label: 'Promosi internal GEMA', description: 'Isi slot kosong dengan promosi GEMA (event, Premium, live) bila tidak ada kampanye berbayar yang cocok.', type: 'boolean', default: true, consumers: ['ads'] },
+  { key: 'ads.sensitive_adjacency', group: 'ads', label: 'Lindungi merek dari konten sensitif', description: 'Setelah konten berperingatan (horor, dewasa) hanya promosi internal RAVE yang ditayangkan.', type: 'boolean', default: true, consumers: ['ads'] },
+  { key: 'ads.house_ads_enabled', group: 'ads', label: 'Promosi internal RAVE', description: 'Isi slot kosong dengan promosi RAVE (event, Premium, live) bila tidak ada kampanye berbayar yang cocok.', type: 'boolean', default: true, consumers: ['ads'] },
 
   // ---- Komisi ----
   { key: 'commission.promotor_service_fee_pct', group: 'commission', label: 'Service fee promotor', description: 'Ditagihkan di atas fee artis.', type: 'number', default: 4, min: 0, max: 20, step: 0.5, unit: '%', public: true, consumers: ['booking', 'finance', 'web'] },
@@ -222,13 +296,16 @@ export const SETTINGS: SettingDef[] = [
   },
   { key: 'contract.sign_window_days', group: 'booking', label: 'Batas tanda tangan kontrak', description: 'Kontrak kedaluwarsa bila belum selesai ditandatangani dalam jangka ini.', type: 'number', default: 7, min: 1, max: 60, unit: 'hari', consumers: ['booking'] },
   { key: 'contract.file_url_ttl_sec', group: 'booking', label: 'Masa berlaku URL dokumen', description: 'Signed URL pratinjau/unduh PDF kontrak.', type: 'number', default: 600, min: 60, max: 3600, unit: 'detik', consumers: ['booking'] },
+  { key: 'contract.sign_otp_ttl_sec', group: 'booking', label: 'Masa berlaku OTP tanda tangan', description: 'OTP tanda tangan kontrak berlaku singkat dan sekali pakai.', type: 'number', default: 300, min: 60, max: 900, unit: 'detik', consumers: ['booking'] },
+  { key: 'contract.sign_otp_max_per_window', group: 'booking', label: 'Maks OTP tanda tangan', description: 'Permintaan OTP per pihak per kontrak dalam satu jendela.', type: 'number', default: 3, min: 1, max: 20, unit: 'OTP', consumers: ['booking'] },
+  { key: 'contract.sign_otp_window_minutes', group: 'booking', label: 'Jendela batas OTP tanda tangan', description: '', type: 'number', default: 10, min: 1, max: 120, unit: 'menit', consumers: ['booking'] },
 
   // ---- Payout ----
   { key: 'payout.min_amount_idr', group: 'payout', label: 'Penarikan minimum', description: 'Nominal terkecil per permintaan penarikan.', type: 'number', default: 50_000, min: 10_000, max: 10_000_000, step: 10_000, unit: 'Rp', public: true, consumers: ['finance', 'web'] },
   { key: 'payout.daily_limit_idr', group: 'payout', label: 'Batas penarikan harian', description: 'Total penarikan per wallet (artis/org) dalam satu hari kalender WIB. Membatasi kerugian bila akun diambil alih.', type: 'number', default: 100_000_000, min: 1_000_000, max: 10_000_000_000, step: 1_000_000, unit: 'Rp', consumers: ['finance'], dangerous: true },
   { key: 'payout.approval_threshold_idr', group: 'payout', label: 'Ambang persetujuan admin', description: 'Penarikan di atas nominal ini menunggu persetujuan tim finance (dual control) sebelum diproses.', type: 'number', default: 25_000_000, min: 0, max: 10_000_000_000, step: 1_000_000, unit: 'Rp', consumers: ['finance'], planned: 'Butuh antrean persetujuan payout di Back Office.' },
   { key: 'payout.bank_change_cooldown_hours', group: 'payout', label: 'Masa tunggu rekening baru', description: 'Penarikan ke rekening yang baru diganti ditahan selama masa ini (mitigasi pengambilalihan akun, §11.5).', type: 'number', default: 24, min: 0, max: 168, unit: 'jam', consumers: ['finance'], planned: 'Butuh pengelolaan rekening bank terpisah dari permintaan penarikan.' },
-  { key: 'payout.fee_idr', group: 'payout', label: 'Biaya transfer', description: 'Dipotong dari nominal penarikan. 0 = ditanggung GEMA.', type: 'number', default: 0, min: 0, max: 25_000, step: 500, unit: 'Rp', public: true, consumers: ['finance', 'web'], planned: 'Butuh adapter disbursement payment gateway (biaya riil per bank).' },
+  { key: 'payout.fee_idr', group: 'payout', label: 'Biaya transfer', description: 'Dipotong dari nominal penarikan. 0 = ditanggung RAVE.', type: 'number', default: 0, min: 0, max: 25_000, step: 500, unit: 'Rp', public: true, consumers: ['finance', 'web'], planned: 'Butuh adapter disbursement payment gateway (biaya riil per bank).' },
   { key: 'payout.sla_business_days', group: 'payout', label: 'Target dana diterima', description: 'Janji layanan yang ditampilkan ke artis & promotor saat menarik dana.', type: 'number', default: 2, min: 1, max: 14, unit: 'hari kerja', public: true, consumers: ['web'], planned: 'Ditampilkan setelah payout memakai disbursement riil.' },
 
   // ---- Royalti ----
@@ -264,8 +341,8 @@ export const SETTINGS: SettingDef[] = [
   { key: 'subscription.download_devices', group: 'subscription', label: 'Perangkat unduhan', description: 'Jumlah perangkat yang boleh menyimpan unduhan offline per akun Premium.', type: 'number', default: 5, min: 1, max: 10, unit: 'perangkat', public: true, consumers: ['web'] },
   { key: 'subscription.grace_days', group: 'subscription', label: 'Masa tenggang gagal bayar', description: 'Akses Premium tetap aktif selama sekian hari sejak perpanjangan gagal, sambil penagihan diulang.', type: 'number', default: 7, min: 0, max: 30, unit: 'hari', consumers: ['iam', 'finance'], planned: 'Butuh billing langganan berulang.' },
   { key: 'subscription.renewal_reminder_days', group: 'subscription', label: 'Pengingat perpanjangan', description: 'Notifikasi dikirim sekian hari sebelum tagihan berikutnya (wajib untuk perpanjangan otomatis).', type: 'number', default: 3, min: 1, max: 14, unit: 'hari', consumers: ['notification'], planned: 'Butuh billing langganan berulang.' },
-  { key: 'subscription.pro_promotor_service_fee_pct', group: 'subscription', label: 'GEMA Pro — service fee promotor', description: 'Pengganti service fee standar untuk organisasi pelanggan GEMA Pro.', type: 'number', default: 3, min: 0, max: 20, step: 0.5, unit: '%', public: true, consumers: ['booking', 'finance', 'web'], planned: 'Butuh langganan GEMA Pro untuk organisasi.' },
-  { key: 'subscription.pro_artist_commission_pct', group: 'subscription', label: 'GEMA Pro — komisi artis', description: 'Pengganti komisi standar dari fee artis untuk organisasi pelanggan GEMA Pro.', type: 'number', default: 5, min: 0, max: 30, step: 0.5, unit: '%', public: true, consumers: ['booking', 'finance', 'web'], planned: 'Butuh langganan GEMA Pro untuk organisasi.' },
+  { key: 'subscription.pro_promotor_service_fee_pct', group: 'subscription', label: 'RAVE Pro — service fee promotor', description: 'Pengganti service fee standar untuk organisasi pelanggan RAVE Pro.', type: 'number', default: 3, min: 0, max: 20, step: 0.5, unit: '%', public: true, consumers: ['booking', 'finance', 'web'], planned: 'Butuh langganan RAVE Pro untuk organisasi.' },
+  { key: 'subscription.pro_artist_commission_pct', group: 'subscription', label: 'RAVE Pro — komisi artis', description: 'Pengganti komisi standar dari fee artis untuk organisasi pelanggan RAVE Pro.', type: 'number', default: 5, min: 0, max: 30, step: 0.5, unit: '%', public: true, consumers: ['booking', 'finance', 'web'], planned: 'Butuh langganan RAVE Pro untuk organisasi.' },
 
   // ---- Refund tiket ----
   { key: 'refund.event_cancel_sla_days', group: 'refund', label: 'Batas waktu refund event batal', description: 'Janji ke pembeli: dana kembali paling lambat sekian hari sejak event dibatalkan. Refund ini selalu penuh, termasuk biaya layanan, dan diajukan otomatis (sandbox: dana langsung kembali).', type: 'number', default: 14, min: 1, max: 30, unit: 'hari', public: true, consumers: ['ticketing', 'finance', 'web'] },
@@ -276,18 +353,18 @@ export const SETTINGS: SettingDef[] = [
   { key: 'refund.late_payment_auto_refund', group: 'refund', label: 'Refund otomatis pembayaran terlambat', description: 'Pembayaran yang masuk setelah reservasi kedaluwarsa saat kuota habis, atau setelah event selesai, dikembalikan penuh otomatis. Mati = order masuk antrean tinjauan admin (Finance → Refund tiket).', type: 'boolean', default: true, consumers: ['ticketing', 'finance'] },
 
   // ---- Transcoding ----
-  { key: 'transcoding.enabled', group: 'transcoding', label: 'Transcoding otomatis', description: 'Master yang diunggah diolah menjadi rendisi streaming. Mati = file master diputar apa adanya.', type: 'boolean', default: false, consumers: ['catalog'], dangerous: true, planned: 'Butuh worker transcoding (ffmpeg).' },
+  { key: 'transcoding.enabled', group: 'transcoding', label: 'Transcoding otomatis', description: 'Master yang diunggah diolah menjadi rendisi streaming (AAC 64/160/320 + FLAC dari master lossless). Mati = master diputar apa adanya; master lossless tidak bisa diputar pengguna Gratis sampai rendisi standar tersedia.', type: 'boolean', default: true, consumers: ['catalog'], dangerous: true },
   { key: 'transcoding.loudness_target_lufs', group: 'transcoding', label: 'Target loudness', description: 'Normalisasi integrated loudness (ITU-R BS.1770 / EBU R128). Standar layanan streaming: −14 LUFS.', type: 'number', default: -14, min: -23, max: -9, step: 0.5, unit: 'LUFS', consumers: ['catalog', 'playback'], planned: 'Butuh worker transcoding (ffmpeg).' },
   { key: 'transcoding.true_peak_dbtp', group: 'transcoding', label: 'Batas true peak', description: 'Puncak maksimum setelah normalisasi untuk mencegah clipping saat dikodekan ke format lossy.', type: 'number', default: -1, min: -3, max: 0, step: 0.1, unit: 'dBTP', consumers: ['catalog'], planned: 'Butuh worker transcoding (ffmpeg).' },
-  { key: 'transcoding.renditions', group: 'transcoding', label: 'Rendisi streaming', description: 'Format yang dihasilkan dari master. Pilihan: aac_48 (HE-AAC Hemat), aac_160, aac_320, flac (lossless).', type: 'list', default: ['aac_48', 'aac_160', 'aac_320', 'flac'], consumers: ['catalog', 'playback'], planned: 'Butuh worker transcoding (ffmpeg).' },
+  { key: 'transcoding.renditions', group: 'transcoding', label: 'Rendisi streaming', description: 'Format yang dihasilkan dari master. Pilihan: aac_48 (Hemat, AAC 64), aac_160 (Normal), aac_320 (Tinggi — Premium), flac (Lossless — Premium, hanya dari master lossless).', type: 'list', default: ['aac_48', 'aac_160', 'aac_320', 'flac'], consumers: ['catalog', 'playback'] },
   { key: 'transcoding.segment_seconds', group: 'transcoding', label: 'Durasi segmen HLS', description: 'Segmen lebih pendek = mulai putar lebih cepat; lebih panjang = lebih hemat permintaan CDN.', type: 'number', default: 6, min: 2, max: 10, unit: 'detik', consumers: ['catalog'], planned: 'Butuh worker transcoding (ffmpeg).' },
-  { key: 'transcoding.min_sample_rate_hz', group: 'transcoding', label: 'Sample rate master minimum', description: 'Master di bawah standar CD (44.100 Hz) ditolak saat QC teknis.', type: 'number', default: 44_100, min: 22_050, max: 192_000, unit: 'Hz', consumers: ['catalog'], planned: 'Butuh analisis master (ffprobe) saat upload.' },
-  { key: 'transcoding.min_bit_depth', group: 'transcoding', label: 'Bit depth master minimum', description: 'Berlaku untuk master lossless (WAV/FLAC).', type: 'number', default: 16, min: 16, max: 32, step: 8, unit: 'bit', consumers: ['catalog'], planned: 'Butuh analisis master (ffprobe) saat upload.' },
-  { key: 'transcoding.max_concurrent_jobs', group: 'transcoding', label: 'Job paralel', description: 'Jumlah transcoding yang berjalan bersamaan per instance worker.', type: 'number', default: 2, min: 1, max: 16, unit: 'job', consumers: ['catalog'], planned: 'Butuh worker transcoding (ffmpeg).' },
+  { key: 'transcoding.min_sample_rate_hz', group: 'transcoding', label: 'Sample rate master minimum', description: 'Master di bawah standar CD (44.100 Hz) ditolak saat QC teknis.', type: 'number', default: 44_100, min: 22_050, max: 192_000, unit: 'Hz', consumers: ['catalog'] },
+  { key: 'transcoding.min_bit_depth', group: 'transcoding', label: 'Bit depth master minimum', description: 'Berlaku untuk master lossless (WAV/FLAC).', type: 'number', default: 16, min: 16, max: 32, step: 8, unit: 'bit', consumers: ['catalog'] },
+  { key: 'transcoding.max_concurrent_jobs', group: 'transcoding', label: 'Job paralel', description: 'Jumlah transcoding yang berjalan bersamaan per instance worker.', type: 'number', default: 2, min: 1, max: 16, unit: 'job', consumers: ['catalog'] },
 
   // ---- Streaming ----
   { key: 'streaming.preview_seconds', group: 'streaming', label: 'Durasi pratinjau anonim', description: 'REQ-WEB-04.', type: 'number', default: 30, min: 10, max: 120, unit: 'detik', public: true, consumers: ['playback'] },
-  { key: 'streaming.lossless_enabled', group: 'streaming', label: 'Lossless gratis', description: 'Keputusan D-03. Bila mati, permintaan lossless diturunkan ke AAC 320.', type: 'boolean', default: true, public: true, consumers: ['playback', 'web'] },
+  { key: 'streaming.lossless_enabled', group: 'streaming', label: 'Lossless untuk Premium', description: 'Kualitas tinggi (AAC 320) & Lossless (FLAC) hanya untuk pelanggan Premium (menggantikan D-03 "lossless gratis"). Bila mati, permintaan lossless Premium diturunkan ke AAC 320.', type: 'boolean', default: true, public: true, consumers: ['playback', 'web'] },
   { key: 'streaming.fraud_max_streams_per_hour', group: 'streaming', label: 'Batas stream qualified per jam', description: 'Di atas ini stream ditandai fraud (RATE_LIMIT) dan tidak dihitung royalti.', type: 'number', default: 120, min: 10, max: 1000, unit: 'stream', consumers: ['playback'] },
 
   // ---- Keamanan ----
@@ -298,7 +375,7 @@ export const SETTINGS: SettingDef[] = [
 
   // ---- Storage ----
   { key: 'storage.max_upload_mb', group: 'storage', label: 'Ukuran upload maksimum', description: 'Master audio & artwork di Artist Studio.', type: 'number', default: 50, min: 1, max: 2048, unit: 'MB', public: true, consumers: ['catalog', 'web'] },
-  { key: 'storage.allowed_audio_types', group: 'storage', label: 'Format audio diizinkan', description: 'MIME type, pisahkan dengan koma.', type: 'list', default: ['audio/wav', 'audio/x-wav', 'audio/flac', 'audio/mpeg'], consumers: ['catalog'] },
+  { key: 'storage.allowed_audio_types', group: 'storage', label: 'Format audio diizinkan', description: 'MIME type, pisahkan dengan koma.', type: 'list', default: ['audio/wav', 'audio/x-wav', 'audio/flac', 'audio/aiff', 'audio/mp4', 'audio/mpeg', 'audio/aac', 'audio/ogg', 'audio/opus'], consumers: ['catalog'] },
   { key: 'storage.allowed_image_types', group: 'storage', label: 'Format gambar diizinkan', description: 'MIME type, pisahkan dengan koma.', type: 'list', default: ['image/jpeg', 'image/png'], consumers: ['catalog'] },
   { key: 'storage.quota_uploads_gb', group: 'storage', label: 'Kuota bucket uploads', description: 'Upload baru ditolak bila kuota terlampaui.', type: 'number', default: 10, min: 1, max: 100000, unit: 'GB', consumers: ['catalog', 'platform'] },
   { key: 'storage.quota_backups_gb', group: 'storage', label: 'Kuota bucket backups', description: 'Backup terlama dihapus otomatis bila terlampaui.', type: 'number', default: 20, min: 1, max: 100000, unit: 'GB', consumers: ['platform'] },
@@ -311,7 +388,7 @@ export const SETTINGS: SettingDef[] = [
 ];
 
 // ---- Branding ----
-export const BRANDING_SLOTS = ['logo', 'logo_dark', 'icon'] as const;
+export const BRANDING_SLOTS = ['logo', 'logo_dark', 'icon', 'partner'] as const;
 export type BrandingSlot = (typeof BRANDING_SLOTS)[number];
 export const BRANDING_PUBLIC_PREFIX = '/v1/platform/branding/';
 export const BRANDING_URL_RE = /^\/v1\/platform\/branding\/[\w.-]+\.(svg|png)$/;
@@ -425,6 +502,31 @@ export function coerceSetting(key: string, value: unknown): unknown {
       if (value !== '' && !BRANDING_URL_RE.test(value)) throw new Error(`${def.label}: unggah file lewat panel (path ${BRANDING_PUBLIC_PREFIX}…)`);
       return value;
     }
+    case 'partners': {
+      if (!Array.isArray(value)) throw new Error(`${def.label}: harus daftar partner`);
+      if (value.length > PARTNERS_MAX) throw new Error(`${def.label}: maksimal ${PARTNERS_MAX} partner`);
+      return value.map((raw, i): PartnerEntry => {
+        const n = `${def.label} #${i + 1}`;
+        if (!raw || typeof raw !== 'object') throw new Error(`${n}: format tidak valid`);
+        const r = raw as Record<string, unknown>;
+        const name = String(r.name ?? '').trim();
+        const logo = String(r.logo ?? '').trim();
+        const url = String(r.url ?? '').trim();
+        if (!name) throw new Error(`${n}: nama wajib diisi`);
+        if (name.length > 80) throw new Error(`${n}: nama maksimal 80 karakter`);
+        if (logo && !BRANDING_URL_RE.test(logo)) throw new Error(`${n}: unggah logo lewat panel (path ${BRANDING_PUBLIC_PREFIX}…)`);
+        // Tautan: HTTPS eksternal atau path internal — cegah javascript:/http polos.
+        // Situs partner (label/venue/komunitas indie) belum tentu ber-HTTPS → http:// juga diterima.
+        if (url && !/^https?:\/\/[^\s]{3,300}$/i.test(url) && !/^\/(?!\/)[^\s]{0,300}$/.test(url)) throw new Error(`${n}: tautan harus http(s)://… atau path internal /…`);
+        return { name, logo, url };
+      });
+    }
+    case 'landing':
+      try {
+        return coerceLanding(value);
+      } catch (e) {
+        throw new Error(`${def.label} — ${(e as Error).message}`);
+      }
     case 'string':
     case 'text': {
       if (typeof value !== 'string') throw new Error(`${def.label}: harus teks`);

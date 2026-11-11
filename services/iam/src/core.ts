@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomInt } from 'node:crypto';
-import { adminPermissions } from '@gema/domain/settings';
-import { config, settings, signAccessToken, uuidv7, ACCESS_TOKEN_TTL_SEC, type OrgClaim, type PlatformRole } from '@gema/service-kit';
+import { adminPermissions } from '@rave/domain/settings';
+import { config, settings, signAccessToken, uuidv7, ACCESS_TOKEN_TTL_SEC, type OrgClaim, type PlatformRole } from '@rave/service-kit';
 
 /** Pool atau client transaksi — keduanya punya .query() yang mengembalikan { rows }. */
 export interface Q {
@@ -101,6 +101,8 @@ export async function buildMe(q: Q, userId: string) {
     display_name: u.display_name,
     avatar_url: u.avatar_url,
     city: u.city,
+    /** Bahasa antarmuka pilihan ('id' | 'en'); null = ikuti perangkat / default platform. */
+    locale: (u.locale as 'id' | 'en' | null) ?? null,
     genres: u.genres,
     roles: deriveRoles(u.admin_role ?? (u.is_admin ? 'OPS' : null), orgs),
     orgs: orgs.map((o) => ({ id: o.id, type: o.type, name: o.name, role: o.role, artist_id: o.artist_id })),

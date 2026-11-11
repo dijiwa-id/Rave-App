@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 import { createGzip } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
-import { audit, config, conflict, idempotent, notFound, requireSuperAdmin, settings, uuidv7, z, type Db, type ServiceContext } from '@gema/service-kit';
+import { audit, config, conflict, idempotent, notFound, requireSuperAdmin, settings, uuidv7, z, type Db, type ServiceContext } from '@rave/service-kit';
 import { BUCKETS, filePath, invalidateBucket } from './storage.js';
 
 const GB = 1024 ** 3;
@@ -51,7 +51,7 @@ function backupOut(r: any) {
 async function insertBackup(q: { query: (s: string, p?: unknown[]) => Promise<any> }, trigger: 'manual' | 'schedule', note: string | null, by: string | null) {
   const id = uuidv7();
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
-  const filename = `gema-${stamp}-${id.slice(-8)}.sql.gz`;
+  const filename = `rave-${stamp}-${id.slice(-8)}.sql.gz`;
   const r = await q.query(`INSERT INTO backups (id, filename, status, trigger, note, created_by) VALUES ($1,$2,'RUNNING',$3,$4,$5) RETURNING *`, [id, filename, trigger, note, by]);
   return (Array.isArray(r) ? r[0] : r.rows[0]) as any;
 }

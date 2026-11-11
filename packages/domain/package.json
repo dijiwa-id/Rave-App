@@ -1,5 +1,5 @@
 {
-  "name": "@gema/domain",
+  "name": "@rave/domain",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,10 +8,13 @@
   "exports": {
     ".": "./src/index.ts",
     "./booking": "./src/booking.ts",
+    "./contract": "./src/contract.ts",
     "./money": "./src/money.ts",
     "./events": "./src/events.ts",
     "./seed-ids": "./src/seed-ids.ts",
     "./settings": "./src/settings.ts",
-    "./ads": "./src/ads.ts"
+    "./ads": "./src/ads.ts",
+    "./landing": "./src/landing.ts",
+    "./audio": "./src/audio.ts"
   }
 }

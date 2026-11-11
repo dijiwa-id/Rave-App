@@ -16,7 +16,7 @@ import {
   z,
   type Client,
   type ServiceContext,
-} from '@gema/service-kit';
+} from '@rave/service-kit';
 import {
   buildMe,
   encrypt,
@@ -83,7 +83,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       `SELECT u.suspended_at FROM identities i JOIN users u ON u.id = i.user_id WHERE i.provider = $1 AND i.subject = $2 AND u.deleted_at IS NULL`,
       [provider, dest],
     );
-    if (existing?.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan GEMA.');
+    if (existing?.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan RAVE.');
     if (!existing && !settings.bool('general.registrations_open')) throw forbidden('Pendaftaran akun baru sedang ditutup');
     const windowMin = settings.num('security.otp_window_minutes');
     const code = otpCode();
@@ -142,7 +142,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         }
         const me = await buildMe(tx, userId);
         if (!me) throw forbidden('Akun telah dihapus');
-        if (me.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan GEMA.');
+        if (me.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan RAVE.');
         return issueTokens(tx, me);
       });
     }
@@ -204,7 +204,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       if (!row) {
         let code = '';
         for (let i = 0; i < 5; i++) {
-          code = 'GEMA-' + randomToken().replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase();
+          code = 'RAVE-' + randomToken().replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase();
           if (!(await tx.query(`SELECT 1 FROM waitlist WHERE referral_code = $1`, [code])).rows.length) break;
         }
         const referrer = b.referral_code ? (await tx.query(`SELECT referral_code FROM waitlist WHERE referral_code = $1`, [b.referral_code.toUpperCase()])).rows[0] : null;
@@ -239,13 +239,15 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
           display_name: z.string().min(1).max(80).optional(),
           avatar_url: z.string().url().nullable().optional(),
           city: z.string().max(80).nullable().optional(),
+          locale: z.enum(['id', 'en']).nullable().optional(),
         })
         .parse(req.body);
       await db.query(
         `UPDATE users SET display_name = coalesce($2, display_name),
            avatar_url = CASE WHEN $3::boolean THEN $4 ELSE avatar_url END,
-           city = CASE WHEN $5::boolean THEN $6 ELSE city END, updated_at = now() WHERE id = $1`,
-        [req.user!.sub, b.display_name ?? null, 'avatar_url' in b, b.avatar_url ?? null, 'city' in b, b.city ?? null],
+           city = CASE WHEN $5::boolean THEN $6 ELSE city END,
+           locale = CASE WHEN $7::boolean THEN $8 ELSE locale END, updated_at = now() WHERE id = $1`,
+        [req.user!.sub, b.display_name ?? null, 'avatar_url' in b, b.avatar_url ?? null, 'city' in b, b.city ?? null, 'locale' in b, b.locale ?? null],
       );
       return buildMe(pool, req.user!.sub);
     });

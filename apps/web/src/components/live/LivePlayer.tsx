@@ -6,6 +6,7 @@ import { Loader2, Maximize, Minimize, Pause, PictureInPicture2, Play, RadioTower
 import { api, ApiError, fmt } from '@/lib/api';
 import type { LivePlayback, LiveStreamDetail } from '@/lib/types';
 import { cx } from '@/components/ui';
+import { dict, useDict } from '@/lib/i18n';
 import { usePlayer } from '@/stores/player';
 import { isOnAir, LivePill, liveViewerId } from './common';
 
@@ -76,6 +77,7 @@ export interface LivePlayerProps {
 
 export function LivePlayer({ streamId, countViewer = true, className, endCard, preview }: LivePlayerProps) {
   const qc = useQueryClient();
+  const d = useDict('live');
   const stream = useQuery({
     queryKey: ['live-stream', streamId],
     queryFn: () => api<LiveStreamDetail>(`/v1/live/streams/${streamId}`),
@@ -189,9 +191,9 @@ export function LivePlayer({ streamId, countViewer = true, className, endCard, p
             rebuildIn(5000);
             return null;
           }
-          if (e.status === 401) return fail('Masuk ke akunmu untuk menonton siaran ini.');
-          if (e.status === 403) return fail('Siaran ini khusus pemegang tiket event terkait.');
-          if (e.status === 404) return fail('Siaran tidak ditemukan.');
+          if (e.status === 401) return fail(dict('live').player.needLogin);
+          if (e.status === 403) return fail(dict('live').player.ticketOnly);
+          if (e.status === 404) return fail(dict('live').player.notFound);
         }
         retryWithBackoff();
         return null;
@@ -257,7 +259,7 @@ export function LivePlayer({ streamId, countViewer = true, className, endCard, p
       const H = await loadHls().catch(() => null);
       if (disposed) return;
       if (!H) return void retryWithBackoff();
-      if (!H.isSupported()) return void fail('Browser ini tidak mendukung pemutaran live. Coba Chrome, Firefox, Edge, atau Safari terbaru.');
+      if (!H.isSupported()) return void fail(dict('live').player.unsupported);
       mediaErrors = 0;
       hls = new H({
         ...HLS_CONFIG,
@@ -516,8 +518,8 @@ export function LivePlayer({ streamId, countViewer = true, className, endCard, p
       onMouseMove={poke}
       onTouchStart={poke}
       onMouseLeave={() => !paused && setShowControls(false)}
-      aria-label={s ? `Pemutar live: ${s.title}` : 'Pemutar live'}
-      className={cx('group/player relative aspect-video w-full overflow-hidden rounded-xl bg-black text-white outline-none focus-visible:ring-2 focus-visible:ring-white/60', className)}
+      aria-label={s ? d.player.ariaTitled(s.title) : d.player.aria}
+      className={cx('group/player relative aspect-video w-full overflow-hidden rounded-none bg-black text-white outline-none focus-visible:ring-2 focus-visible:ring-white/60', className)}
     >
       <video
         ref={videoRef}
@@ -534,23 +536,23 @@ export function LivePlayer({ streamId, countViewer = true, className, endCard, p
       {stream.isError && !stream.data && (
         <Center>
           <WifiOff className="size-8" />
-          <p className="text-sm">Gagal memuat siaran.</p>
-          <OverlayButton onClick={() => stream.refetch()}>Coba lagi</OverlayButton>
+          <p className="text-sm">{d.player.loadFailed}</p>
+          <OverlayButton onClick={() => stream.refetch()}>{d.player.retry}</OverlayButton>
         </Center>
       )}
       {loading && <Center pointer="none"><Loader2 className="size-10 animate-spin drop-shadow" /></Center>}
       {active && phase === 'waiting' && status === 'LIVE' && (
         <Center>
           <RadioTower className="size-8 animate-pulse" />
-          <p className="font-bold">Menunggu sinyal dari penyiar…</p>
-          <p className="text-xs text-white/70">Video akan muncul otomatis.</p>
+          <p className="font-bold">{d.player.waitingSignal}</p>
+          <p className="text-xs text-white/70">{d.player.autoAppear}</p>
         </Center>
       )}
       {status === 'INTERRUPTED' && (
         <Center>
           <Loader2 className="size-8 animate-spin" />
-          <p className="font-bold">Sinyal terputus — menyambung ulang…</p>
-          <p className="text-xs text-white/70">Jangan tutup halaman ini, siaran akan berlanjut otomatis.</p>
+          <p className="font-bold">{d.player.reconnecting}</p>
+          <p className="text-xs text-white/70">{d.player.dontClose}</p>
         </Center>
       )}
       {active && fatal && (
@@ -558,24 +560,24 @@ export function LivePlayer({ streamId, countViewer = true, className, endCard, p
           <WifiOff className="size-8" />
           <p className="max-w-sm text-center text-sm">{fatal}</p>
           <OverlayButton onClick={() => rebuildRef.current?.()}>
-            <RotateCw className="size-4" /> Coba lagi
+            <RotateCw className="size-4" /> {d.player.retry}
           </OverlayButton>
         </Center>
       )}
       {status === 'SCHEDULED' && (
         <Center>
           <RadioTower className="size-8" />
-          <p className="font-bold">Siaran belum dimulai</p>
-          {s?.scheduled_at && <p className="text-sm text-white/70">Dijadwalkan {fmt.dateTime(s.scheduled_at)}</p>}
+          <p className="font-bold">{d.player.notStarted}</p>
+          {s?.scheduled_at && <p className="text-sm text-white/70">{d.player.scheduled(fmt.dateTime(s.scheduled_at))}</p>}
         </Center>
       )}
       {status === 'ENDED' && (
         <Center className="bg-black/80">
-          <p className="text-xs font-bold tracking-widest text-white/60 uppercase">Siaran telah berakhir</p>
+          <p className="text-xs font-bold tracking-widest text-white/60 uppercase">{d.player.ended}</p>
           <p className="max-w-md text-center text-xl font-black">{s?.title}</p>
           {s && (
             <p className="text-sm text-white/70">
-              {fmt.num(s.peak_viewers)} penonton puncak · {fmt.num(s.total_views)} total penonton
+              {d.player.endStats(fmt.num(s.peak_viewers), fmt.num(s.total_views))}
             </p>
           )}
           {endCard}
@@ -596,18 +598,18 @@ export function LivePlayer({ streamId, countViewer = true, className, endCard, p
         </div>
       )}
       {active && muted && unmuteHint && phase === 'ready' && (
-        <button onClick={toggleMute} className="absolute top-3 right-3 inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-black shadow-lg transition hover:scale-105">
-          <VolumeX className="size-4" /> Ketuk untuk suara
+        <button onClick={toggleMute} className="absolute top-3 right-3 inline-flex items-center gap-2 rounded-none bg-white px-3 py-1.5 text-xs font-bold text-black shadow-lg transition hover:scale-105">
+          <VolumeX className="size-4" /> {d.player.tapForSound}
         </button>
       )}
 
       {/* ---- Bawah: kontrol ---- */}
       {active && (
         <div className={cx('absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/85 to-transparent px-3 pt-10 pb-2.5 transition-opacity duration-200', controlsVisible ? 'opacity-100' : 'opacity-0 group-focus-within/player:opacity-100')}>
-          <CtlButton label={paused ? 'Putar (k)' : 'Jeda (k)'} onClick={togglePlay}>
+          <CtlButton label={paused ? d.player.play : d.player.pause} onClick={togglePlay}>
             {paused ? <Play className="size-5 fill-white" /> : <Pause className="size-5 fill-white" />}
           </CtlButton>
-          <CtlButton label={muted ? 'Suarakan (m)' : 'Bisukan (m)'} onClick={toggleMute}>
+          <CtlButton label={muted ? d.player.unmute : d.player.mute} onClick={toggleMute}>
             {muted || volume === 0 ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
           </CtlButton>
           <input
@@ -616,7 +618,7 @@ export function LivePlayer({ streamId, countViewer = true, className, endCard, p
             max={1}
             step={0.05}
             value={muted ? 0 : volume}
-            aria-label="Volume"
+            aria-label={d.player.volume}
             onChange={(e) => {
               const v = videoRef.current;
               if (!v) return;
@@ -627,8 +629,8 @@ export function LivePlayer({ streamId, countViewer = true, className, endCard, p
             className="hidden w-20 accent-white sm:block"
           />
           {behind ? (
-            <button onClick={goLive} className="ml-1 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-bold hover:bg-white/25">
-              <span className="size-2 rounded-full bg-white/60" /> Ke siaran langsung
+            <button onClick={goLive} className="ml-1 inline-flex items-center gap-1.5 rounded-none bg-white/15 px-3 py-1 text-xs font-bold hover:bg-white/25">
+              <span className="size-2 rounded-full bg-white/60" /> {d.player.goLive}
             </button>
           ) : (
             <span className="ml-1 inline-flex items-center gap-1.5 text-xs font-bold">
@@ -640,10 +642,10 @@ export function LivePlayer({ streamId, countViewer = true, className, endCard, p
             <select
               value={level}
               onChange={(e) => chooseLevel(Number(e.target.value))}
-              aria-label="Kualitas video"
-              className="rounded bg-black/60 px-1.5 py-1 text-xs font-bold text-white focus:outline-none"
+              aria-label={d.player.quality}
+              className="rounded-none bg-black/60 px-1.5 py-1 text-xs font-bold text-white focus:outline-none"
             >
-              <option value={-1}>Otomatis</option>
+              <option value={-1}>{d.player.auto}</option>
               {levels.map((l) => (
                 <option key={l.index} value={l.index}>
                   {l.label}
@@ -656,7 +658,7 @@ export function LivePlayer({ streamId, countViewer = true, className, endCard, p
               <PictureInPicture2 className="size-5" />
             </CtlButton>
           )}
-          <CtlButton label={fullscreen ? 'Keluar layar penuh (f)' : 'Layar penuh (f)'} onClick={toggleFullscreen}>
+          <CtlButton label={fullscreen ? d.player.exitFullscreen : d.player.fullscreen} onClick={toggleFullscreen}>
             {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
           </CtlButton>
         </div>
@@ -675,7 +677,7 @@ function Center({ children, className, pointer }: { children: ReactNode; classNa
 
 function OverlayButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
-    <button onClick={onClick} className="mt-1 inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-sm font-bold text-black hover:scale-105">
+    <button onClick={onClick} className="mt-1 inline-flex items-center gap-2 rounded-none bg-white px-4 py-1.5 text-sm font-bold text-black hover:scale-105">
       {children}
     </button>
   );

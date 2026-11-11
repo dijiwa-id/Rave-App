@@ -4,19 +4,21 @@ import { promotorOrgs, useAuth } from '@/stores/auth';
 import { OrgSwitcher, useB2BContext, useCurrentPromotor } from '@/components/b2b/common';
 import { OrgOnboarding } from '@/components/b2b/OrgOnboarding';
 import { useModule } from '@/components/ModuleGate';
+import { useDict } from '@/lib/i18n';
 
-type Item = B2BNavItem & { module?: 'booking' | 'ticketing' | 'live' };
+type NavKey = 'dashboard' | 'discover' | 'bookings' | 'contracts' | 'invoices' | 'events' | 'checkin' | 'live' | 'ratings' | 'team';
+type Item = Omit<B2BNavItem, 'label'> & { key: NavKey; module?: 'booking' | 'ticketing' | 'live' };
 const NAV: Item[] = [
-  { to: '/promotor', label: 'Dasbor', icon: LayoutDashboard, end: true },
-  { to: '/promotor/discover', label: 'Cari Artis', icon: Search, module: 'booking' },
-  { to: '/promotor/bookings', label: 'Inquiry & Negosiasi', icon: Inbox, module: 'booking' },
-  { to: '/promotor/contracts', label: 'Kontrak', icon: FileSignature, module: 'booking' },
-  { to: '/promotor/invoices', label: 'Pembayaran & Invoice', icon: Receipt, module: 'booking' },
-  { to: '/promotor/events', label: 'Event Saya', icon: CalendarRange, module: 'ticketing' },
-  { to: '/promotor/checkin', label: 'Check-in', icon: ScanLine, module: 'ticketing' },
-  { to: '/promotor/live', label: 'Live', icon: Radio, module: 'live' },
-  { to: '/promotor/ratings', label: 'Rating', icon: Star, module: 'booking' },
-  { to: '/promotor/team', label: 'Tim & KYC', icon: Users },
+  { to: '/promotor', key: 'dashboard', icon: LayoutDashboard, end: true },
+  { to: '/promotor/discover', key: 'discover', icon: Search, module: 'booking' },
+  { to: '/promotor/bookings', key: 'bookings', icon: Inbox, module: 'booking' },
+  { to: '/promotor/contracts', key: 'contracts', icon: FileSignature, module: 'booking' },
+  { to: '/promotor/invoices', key: 'invoices', icon: Receipt, module: 'booking' },
+  { to: '/promotor/events', key: 'events', icon: CalendarRange, module: 'ticketing' },
+  { to: '/promotor/checkin', key: 'checkin', icon: ScanLine, module: 'ticketing' },
+  { to: '/promotor/live', key: 'live', icon: Radio, module: 'live' },
+  { to: '/promotor/ratings', key: 'ratings', icon: Star, module: 'booking' },
+  { to: '/promotor/team', key: 'team', icon: Users },
 ];
 
 export default function PromotorLayout() {
@@ -26,13 +28,14 @@ export default function PromotorLayout() {
   // Menu modul yang dimatikan Super Admin (modules.live / booking / ticketing) disembunyikan.
   const on = { live: useModule('live'), booking: useModule('booking'), ticketing: useModule('ticketing') };
   const orgs = promotorOrgs(user);
+  const d = useDict('b2b').promotor;
   if (!orgs.length) return <OrgOnboarding kind="promotor" />;
   return (
     <B2BLayout
       product="Promotor Hub"
-      accent="#e8115b"
-      nav={NAV.filter((n) => !n.module || on[n.module])}
-      context={<OrgSwitcher label="Organisasi" orgs={orgs} value={current?.id} onChange={(id) => set({ promotorOrgId: id })} />}
+      accent="#F4C21F"
+      nav={NAV.filter((n) => !n.module || on[n.module]).map(({ key, module: _m, ...n }) => ({ ...n, label: d.nav[key] }))}
+      context={<OrgSwitcher label={d.orgSwitcher} orgs={orgs} value={current?.id} onChange={(id) => set({ promotorOrgId: id })} />}
     />
   );
 }
