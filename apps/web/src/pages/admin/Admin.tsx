@@ -195,6 +195,9 @@ export function AdminQc() {
                     ))}
                   </ol>
                   {r.qc_reason && <p className="mt-2 text-sm text-red-600">{r.qc_reason}</p>}
+                  {(r as Release & { qc_warnings?: string[] }).qc_warnings?.map((w) => (
+                    <p key={w} className="mt-1 text-xs font-semibold text-amber-700">⚠ {w}</p>
+                  ))}
                   {!!(r as Release & { qc_signals?: QcSignal[] }).qc_signals?.length && (
                     <div className="mt-2 rounded-none border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
                       <p className="font-bold">{t.dupSignals}</p>
@@ -316,11 +319,12 @@ export function AdminDisputes() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['admin-disputes'], queryFn: () => api<{ data: Dispute[] }>('/v1/admin/disputes') });
   const [sel, setSel] = useState<Dispute | null>(null);
-  const [outcome, setOutcome] = useState<'RELEASE_TO_ARTIST' | 'REFUND_PROMOTOR'>('RELEASE_TO_ARTIST');
+  const [outcome, setOutcome] = useState<'RELEASE_TO_ARTIST' | 'REFUND_PROMOTOR' | 'FORCE_MAJEURE'>('RELEASE_TO_ARTIST');
+  const [award, setAward] = useState(0);
   const [note, setNote] = useState('');
   async function resolve() {
     try {
-      await api(`/v1/admin/disputes/${sel!.id}/resolve`, { body: { outcome, note } });
+      await api(`/v1/admin/disputes/${sel!.id}/resolve`, { body: outcome === 'FORCE_MAJEURE' ? { outcome, note, awarded_costs: award } : { outcome, note } });
       toast.success(t.resolved);
       setSel(null);
       setNote('');
@@ -339,7 +343,9 @@ export function AdminDisputes() {
               <td className="px-4 py-3 whitespace-nowrap">{fmt.dateTime(d.created_at)}</td>
               <td className="px-4 py-3 font-mono text-xs">{d.booking_id.slice(0, 8)}…</td>
               <td className="px-4 py-3">{d.by_party}</td>
-              <td className="max-w-sm px-4 py-3">{d.reason}</td>
+              <td className="max-w-sm px-4 py-3">
+                {d.kind === 'FORCE_MAJEURE' && <Badge tone="amber">{t.fmBadge}</Badge>} {d.reason}
+              </td>
               <td className="px-4 py-3">
                 <Badge tone={d.status === 'OPEN' ? 'red' : 'neutral'}>{d.status}</Badge>
                 {d.outcome && <p className="mt-1 text-xs text-b2b-muted">{d.outcome}</p>}
@@ -357,12 +363,27 @@ export function AdminDisputes() {
       </QueryState>
       <Modal open={!!sel} onClose={() => setSel(null)} title={t.modalTitle}>
         <p className="mb-3 text-sm text-b2b-muted">{sel?.reason}</p>
+        {sel?.kind === 'FORCE_MAJEURE' && (
+          <div className="mb-3 space-y-1 border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+            <p className="font-bold">{t.fmEvidence}</p>
+            <p className="break-words whitespace-pre-wrap">{sel.evidence}</p>
+            {sel.claimed_costs != null && <p className="text-b2b-muted">{t.fmClaimed(fmt.idr(sel.claimed_costs))}</p>}
+          </div>
+        )}
         <Field label={t.decision}>
           <Select value={outcome} onChange={(e) => setOutcome(e.target.value as typeof outcome)}>
             <option value="RELEASE_TO_ARTIST">{t.releaseToArtist}</option>
             <option value="REFUND_PROMOTOR">{t.refundPromotor}</option>
+            {sel?.kind === 'FORCE_MAJEURE' && <option value="FORCE_MAJEURE">{t.fmOutcome}</option>}
           </Select>
         </Field>
+        {outcome === 'FORCE_MAJEURE' && (
+          <div className="mt-3">
+            <Field label={t.fmAward} hint={t.fmAwardHint}>
+              <Input type="number" min={0} value={award || ''} onChange={(e) => setAward(Math.max(0, Number(e.target.value) || 0))} />
+            </Field>
+          </div>
+        )}
         <div className="mt-3">
           <Field label={t.note}>
             <Textarea required value={note} onChange={(e) => setNote(e.target.value)} />
@@ -583,12 +604,21 @@ function PayoutQueue() {
   const me = useAuth((s) => s.user);
   const canDecide = can(me, 'finance.payout');
   const [filter, setFilter] = useState<'' | PayoutStatus>('PENDING_APPROVAL');
-  const [acting, setActing] = useState<{ row: AdminPayoutRow; kind: 'approve' | 'reject' } | null>(null);
+  const [acting, setActing] = useState<{ row: AdminPayoutRow; kind: 'approve' | 'reject' | 'complete' } | null>(null);
+  const [account, setAccount] = useState<{ id: string; bank: string; holder: string; number: string } | null>(null);
+  async function reveal(r: AdminPayoutRow) {
+    try {
+      const a = await api<{ bank: string; holder: string; number: string }>(`/v1/admin/finance/payouts/${r.id}/reveal`, { body: {} });
+      setAccount({ id: r.id, ...a });
+    } catch (e) {
+      toast.error(e);
+    }
+  }
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const q = useQuery({
     queryKey: ['admin-payouts', filter],
-    queryFn: () => api<{ data: AdminPayoutRow[]; counts: Record<string, number>; threshold_idr: number; cooldown_hours: number }>('/v1/admin/finance/payouts', { query: { status: filter || undefined } }),
+    queryFn: () => api<{ data: AdminPayoutRow[]; counts: Record<string, number>; threshold_idr: number; cooldown_hours: number; auto_complete: boolean }>('/v1/admin/finance/payouts', { query: { status: filter || undefined } }),
   });
   const mine = (r: AdminPayoutRow) => !!me && (r.requested_by === me.id || r.party_id === me.id || me.orgs.some((o) => o.id === r.party_id));
   async function submit() {
@@ -596,8 +626,10 @@ function PayoutQueue() {
     setBusy(true);
     try {
       if (acting.kind === 'approve') await api(`/v1/admin/finance/payouts/${acting.row.id}/approve`, { body: { note: text.trim() || undefined } });
+      else if (acting.kind === 'complete') await api(`/v1/admin/finance/payouts/${acting.row.id}/complete`, { body: { transfer_ref: text.trim() } });
       else await api(`/v1/admin/finance/payouts/${acting.row.id}/reject`, { body: { reason: text.trim() } });
-      toast.success(acting.kind === 'approve' ? t.toastApproved : t.toastRejected);
+      toast.success(acting.kind === 'approve' ? t.toastApproved : acting.kind === 'complete' ? t.toastCompleted : t.toastRejected);
+      setAccount(null);
       qc.invalidateQueries({ queryKey: ['admin-payouts'] });
       qc.invalidateQueries({ queryKey: ['recon'] });
       setActing(null);
@@ -659,6 +691,11 @@ function PayoutQueue() {
                           {d.common.approve}
                         </Button>
                       )}
+                      {r.status === 'REQUESTED' && !held && q.data && !q.data.auto_complete && (
+                        <Button size="sm" variant="ink" onClick={() => { setText(''); setAccount(null); setActing({ row: r, kind: 'complete' }); }}>
+                          {t.markTransferred}
+                        </Button>
+                      )}
                     </span>
                   ))}
                 </td>
@@ -668,21 +705,35 @@ function PayoutQueue() {
         </Table>
       </QueryState>
       {acting && (
-        <Modal open onClose={() => setActing(null)} title={acting.kind === 'approve' ? t.approveTitle : t.rejectTitle}>
+        <Modal open onClose={() => setActing(null)} title={acting.kind === 'approve' ? t.approveTitle : acting.kind === 'complete' ? t.completeTitle : t.rejectTitle}>
           <div className="space-y-4 text-sm">
             <p>
               <strong>{acting.row.bank.holder}</strong> — {t.confirmBody(fmt.idr(acting.row.amount), `${acting.row.bank.bank} ${acting.row.bank.number}`)}
             </p>
             {acting.kind === 'reject' && <p className="text-b2b-muted">{t.rejectBody}</p>}
-            <Field label={acting.kind === 'approve' ? t.note : t.reason} hint={d.common.auditHint}>
+            {acting.kind === 'complete' && (
+              <div className="space-y-2 border border-b2b-line bg-b2b-bg p-3">
+                <p className="text-b2b-muted">{t.completeBody}</p>
+                {account?.id === acting.row.id ? (
+                  <p className="font-mono text-base font-bold">
+                    {account.bank} · {account.number} · {account.holder}
+                  </p>
+                ) : (
+                  <Button size="sm" variant="outline-ink" onClick={() => reveal(acting.row)}>
+                    {t.revealAccount}
+                  </Button>
+                )}
+              </div>
+            )}
+            <Field label={acting.kind === 'approve' ? t.note : acting.kind === 'complete' ? t.transferRef : t.reason} hint={d.common.auditHint}>
               <Textarea value={text} onChange={(e) => setText(e.target.value)} />
             </Field>
             <div className="flex justify-end gap-2">
               <Button variant="outline-ink" onClick={() => setActing(null)}>
                 {d.common.cancel}
               </Button>
-              <Button variant={acting.kind === 'approve' ? 'ink' : 'danger'} loading={busy} disabled={acting.kind === 'reject' && text.trim().length < 5} onClick={submit}>
-                {acting.kind === 'approve' ? d.common.approve : d.common.reject}
+              <Button variant={acting.kind === 'reject' ? 'danger' : 'ink'} loading={busy} disabled={(acting.kind === 'reject' && text.trim().length < 5) || (acting.kind === 'complete' && text.trim().length < 4)} onClick={submit}>
+                {acting.kind === 'approve' ? d.common.approve : acting.kind === 'complete' ? t.markTransferred : d.common.reject}
               </Button>
             </div>
           </div>

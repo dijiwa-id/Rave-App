@@ -13,6 +13,10 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 - Kesiapan go-live: `npm run prod:preflight`, validasi secret saat boot, CORS terbatas di produksi, docs/GO-LIVE.md.
 
 ### Ditambahkan
+- **Batch 1 go-live (keamanan & uang, docs/GO-LIVE-AUDIT.md)**: admin back office tidak lagi bertindak sebagai OWNER
+  semua org/wallet; master audio wajib URL bertanda tangan; refund booking lewat mesin refund; rekening bank terenkripsi
+  & payout manual oleh Finance di produksi; KYC wajib untuk payout & event bertiket; pajak/komisi/split dari kontrak;
+  force majeure lewat mediasi; denda artis ditagih; ISRC/UPC tanpa kode palsu; klaim produk dikoreksi sesuai D-03.
 - **Kesiapan go-live (BRD v3.0 §15.1):**
   - **Pengirim OTP & notifikasi** (`@rave/service-kit` `messaging`): email `resend`/`mailgun`/`postmark`/`webhook`,
     WhatsApp `meta` (Cloud API, templat OTP)/`webhook` — dipilih lewat `EMAIL_PROVIDER`/`WHATSAPP_PROVIDER`, default

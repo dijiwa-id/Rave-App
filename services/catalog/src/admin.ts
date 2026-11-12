@@ -41,6 +41,10 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
            WHERE t.release_id = $1 LIMIT 10`,
           [id],
         );
+        // Peringatan non-blokir untuk reviewer (mis. ISRC belum ada saat kode pendaftar RAVE belum diatur).
+        r.qc_warnings = (r.tracks as { title: string; isrc: string | null }[])
+          .filter((t) => !t.isrc)
+          .map((t) => `"${t.title}": ISRC kosong`);
         delete r.artist_id;
         data.push(r);
       }

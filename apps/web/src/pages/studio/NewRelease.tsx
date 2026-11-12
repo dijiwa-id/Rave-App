@@ -83,7 +83,7 @@ export default function NewRelease() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [step, setStep] = useState(1);
-  const [meta, setMeta] = useState({ title: '', type: 'SINGLE' as 'SINGLE' | 'EP' | 'ALBUM', release_date: new Date(Date.now() + 8 * 86400_000).toISOString().slice(0, 10), genre: GENRES[0], label: '', explicit: false });
+  const [meta, setMeta] = useState({ title: '', type: 'SINGLE' as 'SINGLE' | 'EP' | 'ALBUM', release_date: new Date(Date.now() + 8 * 86400_000).toISOString().slice(0, 10), genre: GENRES[0], label: '', upc: '', explicit: false });
   const [tracks, setTracks] = useState<TrackDraft[]>(() => [newTrack()]);
   const [cover, setCover] = useState({ url: '', uploading: false, warn: '' });
   const [master, setMaster] = useState<ShareDraft[]>([{ party_name: artist.name, email: '', pct: 100 }]);
@@ -145,6 +145,7 @@ export default function NewRelease() {
           artist_id: artist.artist_id,
           ...meta,
           label: meta.label || undefined,
+          upc: meta.upc.trim() || undefined,
           cover_url: cover.url,
           tracks: tracks.map((t) => ({ title: t.title, audio_url: t.audio_url, duration_ms: t.duration_ms, isrc: t.isrc || undefined, explicit: t.explicit })),
         },
@@ -215,6 +216,10 @@ export default function NewRelease() {
             <Field label={d.label} hint={d.labelHint}>
               <Input value={meta.label} onChange={(e) => setMeta({ ...meta, label: e.target.value })} />
             </Field>
+            {/* UPC/EAN tidak dibuat otomatis: isi hanya bila sudah punya dari label/agregator (divalidasi digit periksanya di server). */}
+            <Field label={d.upc} hint={d.upcHint}>
+              <Input value={meta.upc} inputMode="numeric" maxLength={20} onChange={(e) => setMeta({ ...meta, upc: e.target.value })} />
+            </Field>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={meta.explicit} onChange={(e) => setMeta({ ...meta, explicit: e.target.checked })} /> {d.explicitContent}
             </label>
@@ -229,7 +234,7 @@ export default function NewRelease() {
                 <div className="grid gap-2 sm:grid-cols-[32px_1fr_160px_32px] sm:items-center">
                   <span className="text-sm font-bold text-b2b-muted">{i + 1}</span>
                   <Input placeholder={d.trackTitle} value={t.title} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} />
-                  <Input placeholder={d.isrcOptional} value={t.isrc} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, isrc: e.target.value } : x)))} />
+                  <Input placeholder={d.isrcOptional} title={d.isrcTitle} value={t.isrc} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, isrc: e.target.value } : x)))} />
                   <button type="button" aria-label={d.removeTrack} disabled={tracks.length === 1} onClick={() => setTracks(tracks.filter((_, j) => j !== i))} className="text-b2b-muted hover:text-red-600 disabled:opacity-30">
                     <Trash2 className="size-4" />
                   </button>
@@ -239,8 +244,8 @@ export default function NewRelease() {
                     <Upload className="size-3.5" /> {t.uploading ? d.uploading : d.uploadMaster}
                     <input type="file" accept={AUDIO_ACCEPT} className="hidden" onChange={(e) => e.target.files?.[0] && void onAudio(t.key, e.target.files[0])} />
                   </label>
-                  <span className="text-xs text-b2b-muted">{d.orUrl}</span>
-                  <Input className="max-w-sm py-1.5! text-xs" placeholder="https://…/master.flac" value={t.audio_url} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, audio_url: e.target.value } : x)))} />
+                  {/* Audio wajib diunggah (validasi + transcoding); URL eksternal tidak lagi diterima server. */}
+                  {t.audio_url && !t.uploading && <span className="text-xs font-bold text-emerald-600">✓ {d.masterUploaded}</span>}
                   {t.duration_ms && <span className="text-xs text-b2b-muted">{fmt.duration(t.duration_ms)}</span>}
                   <label className="flex items-center gap-1 text-xs">
                     <input type="checkbox" checked={t.explicit} onChange={(e) => setTracks(tracks.map((x, j) => (j === i ? { ...x, explicit: e.target.checked } : x)))} /> {d.explicit}

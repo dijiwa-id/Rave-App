@@ -394,8 +394,14 @@ export function BookingDetail({ id }: { id: string }) {
         ) : (
           <CancelForm
             busy={busy === 'cancel'}
-            onSubmit={async (reason, fm) => {
-              const r: any = await run('cancel', '/cancel', { reason, force_majeure: fm });
+            onSubmit={async (reason, fm, evidence, costs) => {
+              const r: any = await run('cancel', '/cancel', fm ? { reason, force_majeure: true, evidence, incurred_costs: costs || undefined } : { reason });
+              // Klaim force majeure → diteruskan ke mediasi (bukan pembatalan langsung).
+              if (r?.force_majeure_claim) {
+                toast.success(d.fmClaimSent);
+                setCancelOpen(false);
+                return;
+              }
               setCancelResult(r?.cancellation ?? {});
             }}
           />
@@ -589,16 +595,18 @@ function RatingCard({ booking: b, run, busy }: { booking: Booking; run: ReturnTy
   );
 }
 
-function CancelForm({ onSubmit, busy }: { onSubmit: (reason: string, fm: boolean) => Promise<void>; busy: boolean }) {
+function CancelForm({ onSubmit, busy }: { onSubmit: (reason: string, fm: boolean, evidence: string, costs: number) => Promise<void>; busy: boolean }) {
   const [reason, setReason] = useState('');
   const [fm, setFm] = useState(false);
+  const [evidence, setEvidence] = useState('');
+  const [costs, setCosts] = useState(0);
   const d = useDict('b2b').booking;
   return (
     <form
       className="space-y-3"
       onSubmit={(e) => {
         e.preventDefault();
-        void onSubmit(reason, fm).catch(() => {});
+        void onSubmit(reason, fm, evidence, costs).catch(() => {});
       }}
     >
       <p className="text-sm text-b2b-muted">
@@ -610,8 +618,19 @@ function CancelForm({ onSubmit, busy }: { onSubmit: (reason: string, fm: boolean
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={fm} onChange={(e) => setFm(e.target.checked)} /> {d.forceMajeure}
       </label>
-      <Button variant="danger" type="submit" loading={busy}>
-        {d.confirmCancel}
+      {fm && (
+        <div className="space-y-3 border border-amber-500/40 bg-amber-500/5 p-3">
+          <p className="text-xs text-b2b-muted">{d.fmNote}</p>
+          <Field label={d.fmEvidence} hint={d.fmEvidenceHint}>
+            <Textarea required minLength={20} value={evidence} onChange={(e) => setEvidence(e.target.value)} />
+          </Field>
+          <Field label={d.fmCosts} hint={d.fmCostsHint}>
+            <Input type="number" min={0} value={costs || ''} onChange={(e) => setCosts(Math.max(0, Number(e.target.value) || 0))} />
+          </Field>
+        </div>
+      )}
+      <Button variant="danger" type="submit" loading={busy} disabled={fm && evidence.trim().length < 20}>
+        {fm ? d.fmSubmit : d.confirmCancel}
       </Button>
     </form>
   );

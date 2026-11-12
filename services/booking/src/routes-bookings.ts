@@ -27,6 +27,7 @@ import {
   type Client,
   type Db,
   type ServiceContext,
+  unprocessable,
 } from '@rave/service-kit';
 import { FAST_CLOCK, RATING_REVEAL_DAYS, commissionPolicy, daysUntil, isPromotorMember, partyOf, requireParty, todayWib, type BookingRow, type Party } from './common.js';
 import { renderContract } from './contract.js';
@@ -34,7 +35,7 @@ import { SPK_TEMPLATE_VERSION, buildContractData } from './contract-data.js';
 import { enqueueContractJob } from './contract-jobs.js';
 import { contractAudit } from './routes-contracts.js';
 import { activateBooking } from './contract-sign.js';
-import { feeSplits, loadBooking, transition } from './repo.js';
+import { feeSplits, loadBooking, transition, releaseTerms } from './repo.js';
 
 const SUMMARY_SQL = `SELECT b.*, a.name AS artist_name, a.image_url AS artist_image, a.city AS artist_city, coalesce(o.name, 'Promotor') AS promotor_name
   FROM bookings b JOIN artists a ON a.id=b.artist_id LEFT JOIN orgs o ON o.id=b.promotor_org_id`;
@@ -120,6 +121,10 @@ export const pickDispute = (d: any) => ({
   id: d.id,
   booking_id: d.booking_id,
   by_party: d.by_party,
+  kind: d.kind ?? 'GENERAL',
+  evidence: d.evidence ?? null,
+  claimed_costs: d.claimed_costs != null ? Number(d.claimed_costs) : null,
+  awarded_costs: d.awarded_costs != null ? Number(d.awarded_costs) : null,
   reason: d.reason,
   status: d.status,
   outcome: d.outcome,
@@ -184,8 +189,8 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
   app.post('/v1/booking/inquiries', async (req, reply) => {
     const p = inquirySchema.parse(req.body);
     const u = req.user!;
-    if (!isPromotorMember(u, p.promotor_org_id) && !isAdmin(u)) throw forbidden('Anda bukan anggota organisasi promotor ini');
-    if (!u.kyc && !isAdmin(u)) throw forbidden('Verifikasi KYC/KYB wajib sebelum mengirim inquiry (REQ-IAM-04)');
+    if (!isPromotorMember(u, p.promotor_org_id)) throw forbidden('Anda bukan anggota organisasi promotor ini');
+    if (!u.kyc) throw forbidden('Verifikasi KYC/KYB wajib sebelum mengirim inquiry (REQ-IAM-04)');
     if (p.event_date <= todayWib()) throw badRequest('Tanggal acara harus di masa depan');
     return idempotent(db, req, reply, 'inquiry', async (c) => {
       const a = (await c.query(`SELECT * FROM artists WHERE id=$1`, [p.artist_id])).rows[0];
@@ -364,7 +369,15 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
   // ---------- Pembatalan (REQ-B2B-11, matriks §7.3) ----------
   app.post('/v1/booking/bookings/:id/cancel', async (req) => {
     const { id } = req.params as { id: string };
-    const p = z.object({ reason: z.string().min(3).max(2000), force_majeure: z.boolean().optional(), incurred_costs: z.number().int().min(0).optional() }).parse(req.body);
+    const p = z
+      .object({
+        reason: z.string().min(3).max(2000),
+        force_majeure: z.boolean().optional(),
+        incurred_costs: z.number().int().min(0).optional(),
+        // Bukti force majeure (tautan dokumen resmi / uraian kejadian) — wajib untuk klaim FM.
+        evidence: z.string().trim().max(4000).optional(),
+      })
+      .parse(req.body);
     return db.tx(async (c) => {
       const b = await loadBooking(c, id, true);
       const party = requireParty(req.user, b, false) as Exclude<Party, 'admin'>;
@@ -374,9 +387,23 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
         await transition(c, b, 'DECLINED', party, { actorId: req.user!.sub, note: p.reason });
         return view(id, req.user, c);
       }
-      const cancelParty = p.force_majeure ? 'force_majeure' : party === 'promotor' ? 'promotor' : 'artist';
-      const to: BookingStatus = p.force_majeure ? 'FORCE_MAJEURE' : party === 'promotor' ? 'CANCELLED_BY_PROMOTOR' : 'CANCELLED_BY_ARTIST';
       const days = daysUntil(b.event_date);
+      // Force majeure TIDAK dapat dinyatakan sepihak (audit go-live B6): klaim + bukti membuka sengketa, escrow
+      // dibekukan, dan mediator RAVE memutuskan (biaya riil ke artis, sisa refund) — mencegah lolos dari denda H-3.
+      if (p.force_majeure) {
+        if ((p.evidence ?? '').length < 20) throw unprocessable('Klaim force majeure wajib disertai bukti (tautan dokumen resmi / uraian kejadian, min. 20 karakter)');
+        const disputeId = uuidv7();
+        await transition(c, b, 'DISPUTED', party, { actorId: req.user!.sub, note: `Klaim force majeure: ${p.reason}`, set: { prev_status: b.status } });
+        await c.query(
+          `INSERT INTO disputes (id, booking_id, by_party, author_id, reason, kind, evidence, claimed_costs) VALUES ($1,$2,$3,$4,$5,'FORCE_MAJEURE',$6,$7)`,
+          [disputeId, id, party, req.user!.sub, `Klaim force majeure: ${p.reason}`, p.evidence, p.incurred_costs ?? null],
+        );
+        await audit(c, { actorId: req.user!.sub, action: 'booking.force_majeure_claim', entity: 'booking', entityId: id, data: { dispute_id: disputeId, claimed_costs: p.incurred_costs ?? null }, ip: req.ip });
+        await publish(c, 'booking.dispute.opened', id, { bookingId: id, disputeId, byParty: party });
+        return { ...(await view(id, req.user, c)), force_majeure_claim: { dispute_id: disputeId } };
+      }
+      const cancelParty = party === 'promotor' ? 'promotor' : 'artist';
+      const to: BookingStatus = party === 'promotor' ? 'CANCELLED_BY_PROMOTOR' : 'CANCELLED_BY_ARTIST';
       const out = computeCancellation({
         party: cancelParty,
         daysBeforeEvent: days,
@@ -384,10 +411,10 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
         settlementPaid: b.settlement_paid,
         fee: b.agreed_fee ?? 0,
         artistPenaltyPct: 25,
-        incurredCosts: p.incurred_costs,
+        // Pelunasan promotor terlambat → manajemen membatalkan: DP hangus ke artis (kontrak §pembayaran).
+        settlementLate: party === 'management' && b.status === 'AT_RISK',
       });
-      // Force majeure diajukan salah satu pihak; bila tidak sepakat diputus mediasi (dispute).
-      await transition(c, b, to, p.force_majeure ? 'both' : party, { actorId: req.user!.sub, note: p.reason, set: { cancellation: JSON.stringify({ ...out, days_before_event: days, reason: p.reason }) } });
+      await transition(c, b, to, party, { actorId: req.user!.sub, note: p.reason, set: { cancellation: JSON.stringify({ ...out, days_before_event: days, reason: p.reason }) } });
       await audit(c, { actorId: req.user!.sub, action: 'booking.cancel', entity: 'booking', entityId: id, data: out, ip: req.ip });
       await publish(c, 'booking.cancelled', id, {
         bookingId: id,
@@ -400,6 +427,7 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
         artistId: b.artist_id,
         artistOrgId: b.artist_org_id,
         promotorOrgId: b.promotor_org_id,
+        ...(await releaseTerms(c, b).then((rt) => ({ taxPct: rt.taxPct, commissionPct: rt.commissionPct, splits: rt.splits }))),
       });
       return { ...(await view(id, req.user, c)), cancellation: out };
     });
@@ -454,7 +482,8 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
 /** SHOW_DAY → COMPLETED + event booking.completed (memicu jendela dispute & pencairan di finance). */
 export async function completeBooking(c: Client, b: BookingRow, actor: 'both' | 'system', actorId?: string) {
   const nb = await transition(c, b, 'COMPLETED', actor, { actorId, set: { completed_at: new Date().toISOString() }, note: actor === 'system' ? 'Otomatis: 24 jam tanpa keberatan' : 'Show Done dikonfirmasi kedua pihak' });
-  await publish(c, 'booking.completed', b.id, { bookingId: b.id, artistId: b.artist_id, fee: nb.agreed_fee!, splits: await feeSplits(c, nb), payeeType: 'individual' });
+  const rt = await releaseTerms(c, nb);
+  await publish(c, 'booking.completed', b.id, { bookingId: b.id, artistId: b.artist_id, fee: nb.agreed_fee!, splits: rt.splits, payeeType: rt.payeeType, taxPct: rt.taxPct, commissionPct: rt.commissionPct });
   return nb;
 }
 

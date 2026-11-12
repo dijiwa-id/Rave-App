@@ -74,6 +74,10 @@ export default function Press() {
       </Section>
 
       <Section>
+        <Heading kicker={d.releasesHeading.kicker} title={d.releasesHeading.title} body={d.releasesEmpty} />
+      </Section>
+
+      <Section>
         <Heading kicker={d.assetsHeading.kicker} title={d.assetsHeading.title} body={d.assetsHeading.body} />
         <div className="mt-12 grid gap-4 md:grid-cols-3">
           {ASSETS.map((a, i) => ({ ...a, name: d.assets[i] })).map((a) => (

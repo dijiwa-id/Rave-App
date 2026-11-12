@@ -21,6 +21,7 @@ import {
   z,
   type Client,
   type ServiceContext,
+  isSuperAdmin,
 } from '@rave/service-kit';
 import { detailOut, orderOut, refundCancelledOrders, refundOut, refundPolicy, releasePendingOrder, releaseReservation, requestInvoice, requestRefund, summaryOut, SUMMARY_SQL, type Q } from './shared.js';
 
@@ -66,9 +67,12 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     const r = await q.query(`${SUMMARY_SQL} WHERE ${isUuid(idOrSlug) ? 'e.id = $1' : 'e.slug = $1'}`, [idOrSlug]);
     return r.rows[0] ?? null;
   }
-  /** Staf event = anggota org promotor pemilik event (klaim JWT) atau admin. */
-  function assertStaff(req: FastifyRequest, e: any) {
-    if (isAdmin(req.user)) return;
+  /**
+   * Staf event = anggota org promotor pemilik event. `readOnly`: admin back office boleh melihat (mis. draf);
+   * mengubah, menerbitkan, dan check-in hanya anggota (audit go-live A1).
+   */
+  function assertStaff(req: FastifyRequest, e: any, readOnly = false) {
+    if (readOnly && isAdmin(req.user)) return;
     assertOrg(req.user, e.org_id);
   }
 
@@ -106,7 +110,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     if (e.status === 'DRAFT') {
       if (!req.user) throw notFound('Event');
       try {
-        assertStaff(req, e);
+        assertStaff(req, e, true);
       } catch {
         throw notFound('Event');
       }
@@ -141,10 +145,10 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     a.post('/v1/ticketing/events', async (req, reply) => {
       const b = eventBody.parse(req.body);
       if (new Date(b.ends_at) <= new Date(b.starts_at)) throw badRequest('ends_at harus setelah starts_at');
-      if (!isAdmin(req.user)) {
-        const m = assertOrg(req.user, b.org_id, ['OWNER', 'ADMIN', 'MEMBER']);
-        if (m.type !== 'PROMOTOR' && m.type !== 'VENUE') throw forbidden('Hanya org promotor yang dapat membuat event');
-      }
+      const m = assertOrg(req.user, b.org_id, ['OWNER', 'ADMIN', 'MEMBER']);
+      if (m.type !== 'PROMOTOR' && m.type !== 'VENUE') throw forbidden('Hanya org promotor yang dapat membuat event');
+      // Penjual tiket wajib KYC terverifikasi (mencegah event palsu menampung uang pembeli — audit go-live B3).
+      if (!req.user!.kyc) throw forbidden('Verifikasi KYC wajib sebelum membuat event bertiket. Ajukan di menu Tim & KYC.');
       const id = uuidv7();
       await db.tx(async (tx) => {
         const slug = await uniqueEventSlug(tx, b.title, b.city);
@@ -211,6 +215,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       const e = await findEvent((req.params as any).id);
       if (!e) throw notFound('Event');
       assertStaff(req, e);
+      if (!req.user!.kyc) throw forbidden('Verifikasi KYC wajib sebelum menerbitkan event bertiket.');
       if (e.status !== 'DRAFT') throw conflict(`Event berstatus ${e.status}`);
       const n = await db.one(`SELECT count(*)::int AS n FROM ticket_types WHERE event_id = $1`, [e.id]);
       if (!n?.n) throw unprocessable('Tambahkan minimal satu kategori tiket sebelum publish');
@@ -233,7 +238,8 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     a.post('/v1/ticketing/events/:id/cancel', async (req) => {
       const e = await findEvent((req.params as any).id);
       if (!e) throw notFound('Event');
-      if (!isAdmin(req.user)) assertOrg(req.user, e.org_id, ['OWNER', 'ADMIN']);
+      // Super Admin boleh membatalkan (penipuan/keadaan darurat); admin lain tidak (audit go-live A1).
+      if (!isSuperAdmin(req.user)) assertOrg(req.user, e.org_id, ['OWNER', 'ADMIN']);
       const b = z.object({ reason: z.string().trim().min(10, 'Jelaskan alasan pembatalan (min. 10 karakter)').max(1000) }).parse(req.body);
       if (e.status === 'CANCELLED') throw conflict('Event sudah dibatalkan');
       if (e.status === 'COMPLETED') throw conflict('Event sudah selesai — gunakan mediasi untuk sengketa');

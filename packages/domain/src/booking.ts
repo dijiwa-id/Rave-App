@@ -57,6 +57,7 @@ export const BOOKING_TRANSITIONS: Transition[] = [
   { from: 'DISPUTED', to: 'SETTLED', actors: ['admin'], description: 'Keputusan mediasi: dana dicairkan' },
   { from: 'DISPUTED', to: 'CANCELLED_BY_ARTIST', actors: ['admin'], description: 'Keputusan mediasi: refund promotor' },
   { from: 'DISPUTED', to: 'CANCELLED_BY_PROMOTOR', actors: ['admin'], description: 'Keputusan mediasi: hangus ke artis' },
+  { from: 'DISPUTED', to: 'FORCE_MAJEURE', actors: ['admin'], description: 'Keputusan mediasi: force majeure terbukti (biaya riil ke artis, sisa refund)' },
 ];
 
 export function findTransition(from: BookingStatus, to: BookingStatus): Transition | undefined {

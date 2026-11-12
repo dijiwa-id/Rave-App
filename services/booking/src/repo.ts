@@ -1,5 +1,5 @@
 import { assertTransition, calendarStatusFor, type BookingActor, type BookingStatus } from '@rave/domain';
-import { notFound, publish, uuidv7, type Client } from '@rave/service-kit';
+import { notFound, publish, settings, uuidv7, type Client } from '@rave/service-kit';
 import type { BookingRow } from './common.js';
 
 const TERMINAL_FREE: BookingStatus[] = ['DECLINED', 'EXPIRED', 'CANCELLED_BY_PROMOTOR', 'CANCELLED_BY_ARTIST', 'FORCE_MAJEURE'];
@@ -82,6 +82,45 @@ export async function feeSplits(c: Client, b: BookingRow): Promise<{ partyId: st
   const fallback = b.artist_org_id ?? b.artist_id;
   if (!r.rows.length) return [{ partyId: fallback, pct: 100 }];
   return r.rows.map((x) => ({ partyId: x.party_id ?? fallback, pct: Number(x.pct) }));
+}
+
+export interface ReleaseTerms {
+  splits: { partyId: string; pct: number }[];
+  /** Tarif PPh dari kontrak (%). */
+  taxPct: number;
+  /** Komisi platform dari kontrak (%). */
+  commissionPct?: number;
+  payeeType: 'individual' | 'company';
+}
+
+/**
+ * Syarat pencairan booking (audit go-live B4): yang dibekukan saat kontrak aktif (`contracts.release_terms`);
+ * kontrak lama tanpa snapshot → tarif & komisi dari data kontrak, split dari `fee_splits` (perilaku lama).
+ */
+export async function releaseTerms(c: Client, b: BookingRow): Promise<ReleaseTerms> {
+  const k = (await c.query(`SELECT release_terms, terms, data_snapshot FROM contracts WHERE booking_id=$1`, [b.id])).rows[0];
+  const rt = k?.release_terms;
+  if (rt?.splits?.length) return { splits: rt.splits, taxPct: Number(rt.tax_pct), commissionPct: rt.commission_pct ?? undefined, payeeType: rt.tax_kind === 'PPH21' ? 'individual' : 'company' };
+  const tax = k?.data_snapshot?.money?.tax;
+  return {
+    splits: await feeSplits(c, b),
+    taxPct: tax?.pct != null ? Number(tax.pct) : settings.num('contract.pph23_pct'),
+    commissionPct: k?.terms?.fee_split?.platform_pct ?? undefined,
+    payeeType: tax?.payee === 'individual' ? 'individual' : 'company',
+  };
+}
+
+/** Bekukan syarat pencairan saat kontrak menjadi aktif (dipanggil sekali; tidak menimpa yang sudah ada). */
+export async function freezeReleaseTerms(c: Client, b: BookingRow, contractId: string) {
+  const k = (await c.query(`SELECT terms, data_snapshot FROM contracts WHERE id=$1`, [contractId])).rows[0];
+  const tax = k?.data_snapshot?.money?.tax;
+  const terms = {
+    splits: await feeSplits(c, b),
+    tax_pct: tax?.pct != null ? Number(tax.pct) : settings.num('contract.pph23_pct'),
+    tax_kind: tax?.kind ?? 'PPH23',
+    commission_pct: k?.terms?.fee_split?.platform_pct ?? null,
+  };
+  await c.query(`UPDATE contracts SET release_terms = $2 WHERE id=$1 AND release_terms IS NULL`, [contractId, JSON.stringify(terms)]);
 }
 
 export async function managementOrgId(c: Client, b: BookingRow): Promise<string | null> {

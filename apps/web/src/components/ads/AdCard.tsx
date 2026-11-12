@@ -7,7 +7,8 @@ import { useDict } from '@/lib/i18n';
 // Kartu kreatif iklan seperti tampil di pemutar fan (docs/API.md §11). Dipakai juga sebagai pratinjau
 // di Back Office (form kampanye & modal tinjauan), jadi selalu bertema gelap — sama seperti aplikasi fan.
 
-export type AdCardCreative = Pick<AdCreative, 'type' | 'advertiser' | 'title' | 'body' | 'image_url' | 'click_url' | 'cta_label' | 'theme_color' | 'duration_s' | 'skippable_after_s' | 'label'>;
+export type AdCardCreative = Pick<AdCreative, 'type' | 'advertiser' | 'title' | 'body' | 'image_url' | 'click_url' | 'cta_label' | 'theme_color' | 'duration_s' | 'skippable_after_s' | 'label'> &
+  Partial<Pick<AdCreative, 'is_house'>>;
 
 export const BRAND_GRADIENT = 'bg-gradient-to-br from-[#5B2A6E] via-[#2A1233] to-[#8A2F3F]';
 
@@ -45,12 +46,15 @@ export function AdCard({
   const skipAt = ad.skippable_after_s;
   const canSkip = skipAt != null && elapsed >= skipAt;
   const color = safeHex(ad.theme_color);
-  const house = ad.label === 'Dari RAVE';
+  // Promosi internal: pakai flag `is_house` dari API; string label server hanya cadangan untuk pemanggil lama.
+  const house = ad.is_house ?? ad.label === 'Dari RAVE';
   const d = useDict('common');
+  const houseLabel = useDict('public').houseAdLabel;
+  const label = house ? houseLabel : d.ads.ad;
   return (
     <article
       className={cx('w-full max-w-md overflow-hidden rounded-none bg-[#181818] text-white shadow-2xl ring-1 ring-white/10', className)}
-      aria-label={`${ad.label}: ${ad.advertiser} — ${ad.title}`}
+      aria-label={`${label}: ${ad.advertiser} — ${ad.title}`}
     >
       {/* Visual: gambar, atau gradien dari theme_color / gradien merek */}
       <div
@@ -65,7 +69,7 @@ export function AdCard({
           </div>
         )}
         <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-2 bg-gradient-to-b from-black/60 to-transparent p-3">
-          <span className={cx('rounded-none px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide uppercase', house ? `${BRAND_GRADIENT} text-white` : 'bg-white text-black')}>{ad.label}</span>
+          <span className={cx('rounded-none px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide uppercase', house ? `${BRAND_GRADIENT} text-white` : 'bg-white text-black')}>{label}</span>
           <span className="flex items-center gap-1.5 text-[11px] font-semibold text-white/85">
             {ad.type === 'audio' && (
               <span className="flex items-center gap-1 rounded-none bg-black/40 px-2 py-0.5">

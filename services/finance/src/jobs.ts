@@ -1,4 +1,4 @@
-import { config, publish, settings, uuidv7, type Job } from '@rave/service-kit';
+import { config, publish, settings, uuidv7, type Client, type Job } from '@rave/service-kit';
 import { processRefundEvent, releaseEscrow, releaseEventEscrow, settleRefund, signPayload, verifySignature } from './escrow.js';
 import { PermanentRefundError, providerByName } from './providers.js';
 import { C, D, post, serial } from './ledger.js';
@@ -28,26 +28,41 @@ export const releaseJob: Job = {
   },
 };
 
-/** Proses payout ke bank (adapter disbursement PG di produksi). */
+/**
+ * Mode payout otomatis: hanya development (sandbox) — payout langsung "ditransfer" agar alur bisa diuji.
+ * Produksi: payout REQUESTED menunggu Finance mentransfer lalu mencatat referensi (`/v1/admin/finance/payouts/:id/complete`),
+ * atau adapter disbursement PG kelak. Tidak pernah lagi menandai selesai tanpa transfer (audit go-live B2).
+ * Override: PAYOUT_AUTO_COMPLETE=1/0.
+ */
+export const AUTO_PAYOUT = (process.env.PAYOUT_AUTO_COMPLETE ?? (config.isDev ? '1' : '0')) === '1';
+
+/** Selesaikan payout: COMPLETED + jurnal kliring → kas escrow + event untuk notifikasi pemilik wallet. */
+export async function completePayout(c: Client, p: any, o: { transferRef: string; by: string | null }) {
+  const r = await c.query(
+    `UPDATE payouts SET status='COMPLETED', completed_at=now(), transfer_ref=$2, completed_by=$3 WHERE id=$1 AND status='REQUESTED' RETURNING id`,
+    [p.id, o.transferRef, o.by],
+  );
+  if (!r.rowCount) return false;
+  await post(c, {
+    key: `payout-complete:${p.id}`,
+    kind: 'payout.complete',
+    referenceId: p.id,
+    description: `Transfer ke ${p.bank_snapshot.bank} ${p.bank_snapshot.number} (ref ${o.transferRef})`,
+    lines: [D('asset:payout_clearing', p.amount), C('asset:escrow_bank:mitra-sandbox', p.amount)],
+  });
+  await publish(c, 'finance.payout.completed', p.id, { payoutId: p.id, partyId: p.party_id, amount: Number(p.amount) });
+  return true;
+}
+
 export const payoutJob: Job = {
   name: 'payouts',
   everyMs: FAST_CLOCK ? 3_000 : 60_000,
   async run({ db, log }) {
+    if (!AUTO_PAYOUT) return;
     // Yang menunggu persetujuan (PENDING_APPROVAL) tidak diambil; yang tertahan masa tunggu rekening dilewati sampai hold_until.
     const rows = await db.query(`SELECT * FROM payouts WHERE status='REQUESTED' AND (hold_until IS NULL OR hold_until <= now()) ORDER BY created_at LIMIT 20`);
     for (const p of rows) {
-      await serial(db, async (c) => {
-        const r = await c.query(`UPDATE payouts SET status='COMPLETED', completed_at=now() WHERE id=$1 AND status='REQUESTED' AND (hold_until IS NULL OR hold_until <= now()) RETURNING id`, [p.id]);
-        if (!r.rowCount) return;
-        await post(c, {
-          key: `payout-complete:${p.id}`,
-          kind: 'payout.complete',
-          referenceId: p.id,
-          description: `Transfer ke ${p.bank_snapshot.bank} ${p.bank_snapshot.number}`,
-          lines: [D('asset:payout_clearing', p.amount), C('asset:escrow_bank:mitra-sandbox', p.amount)],
-        });
-        await publish(c, 'finance.payout.completed', p.id, { payoutId: p.id, partyId: p.party_id, amount: p.amount });
-      }).catch((e) => log.error({ err: e?.message, id: p.id }, 'payout gagal'));
+      await serial(db, (c) => completePayout(c, p, { transferRef: `sandbox-${String(p.id).slice(0, 8)}`, by: null })).catch((e) => log.error({ err: e?.message, id: p.id }, 'payout gagal'));
     }
   },
 };

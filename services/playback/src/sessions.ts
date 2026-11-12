@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { resolvePlayback, type AudioMeta, type Renditions } from '@rave/domain/audio';
-import { callService, HttpError, notFound, settings, signMediaUrl, uuidv7, z, type ServiceContext } from '@rave/service-kit';
+import { callService, HttpError, notFound, settings, signProtectedMediaUrl, uuidv7, z, type ServiceContext } from '@rave/service-kit';
 import { signStream, verifyStream } from './util.js';
 
 const body = z
@@ -30,6 +30,8 @@ export async function sessionRoutes(app: FastifyInstance, { db, name }: ServiceC
         if (e instanceof HttpError && e.status === 404) throw notFound('Lagu');
         throw e;
       });
+      // Hanya rilis LIVE yang bisa diputar lewat sesi (URL master/Premium ditandatangani di bawah). Pratinjau rilis yang belum
+      // tayang untuk artis pemilik/admin lewat GET /v1/studio/tracks/:id/preview (tidak tercatat sebagai stream).
       if (t.status !== 'LIVE' || !t.audio_url) throw notFound('Lagu');
       media = t;
     } else {
@@ -61,8 +63,9 @@ export async function sessionRoutes(app: FastifyInstance, { db, name }: ServiceC
       throw new HttpError(503, 'Service Unavailable', 'Versi streaming standar lagu ini sedang diproses. Coba lagi sebentar lagi.', { retry_after_s: 30 });
     }
     const quality = choice.quality;
-    // Berkas khusus Premium hanya bisa diambil lewat URL bertanda tangan (catalog memverifikasi; kedaluwarsa bersama sesi).
-    const audioUrl = /\.(high\.m4a|lossless\.flac)$/.test(choice.url) ? signMediaUrl(choice.url, ttlSec) : choice.url;
+    // Master asli & rendisi khusus Premium hanya bisa diambil lewat URL bertanda tangan (catalog memverifikasi; kedaluwarsa
+    // bersama sesi). Rendisi gratis (AAC 64/160) & URL eksternal data demo dikembalikan apa adanya.
+    const audioUrl = signProtectedMediaUrl(choice.url, ttlSec);
     await db.tx(async (tx) => {
       await tx.query(
         `INSERT INTO sessions (id, user_id, track_id, episode_id, artist_id, quality, codec_label, city, source, preview_only, audio_url, duration_ms, expires_at)

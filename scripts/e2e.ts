@@ -53,7 +53,12 @@ async function callOtpClass(method: string, path: string, body: unknown) {
 }
 
 async function login(email: string) {
-  const otp = await callOtpClass('POST', '/v1/auth/otp', { channel: 'email', destination: email });
+  let otp = await callOtpClass('POST', '/v1/auth/otp', { channel: 'email', destination: email });
+  // Pengirim email sementara tidak tersedia (mis. cache konfigurasi integrasi ±15 dtk setelah diganti) → 503; coba lagi.
+  for (let i = 0; i < 6 && (otp.status === 502 || otp.status === 503); i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    otp = await callOtpClass('POST', '/v1/auth/otp', { channel: 'email', destination: email });
+  }
   const tok = await callOtpClass('POST', '/v1/auth/token', { grant_type: 'otp', destination: email, code: otp.data?.dev_code });
   if (tok.status !== 200) throw new Error(`login ${email} gagal: ${JSON.stringify(tok.data)}`);
   return tok.data as { access_token: string; refresh_token: string; user: any };
@@ -162,6 +167,8 @@ console.log('\n▶ Master multi-format & rendisi (Artist Studio)');
   check('rendisi standar dapat diputar (audio/mp4)', std.status === 200 && std.headers.get('content-type') === 'audio/mp4', std.status);
   const [hq, ll] = await Promise.all([fetch(`${BASE}${baseUrl}.high.m4a`), fetch(`${BASE}${baseUrl}.lossless.flac`)]);
   check('rendisi Premium tanpa URL bertanda tangan ditolak (403)', hq.status === 403 && ll.status === 403, [hq.status, ll.status]);
+  const raw = await fetch(`${BASE}${up.public_url}`, { headers: { range: 'bytes=0-99' } });
+  check('master mentah tanpa tanda tangan ditolak (403) — audit A2', raw.status === 403, raw.status);
   const rng = await fetch(`${BASE}${baseUrl}.normal.m4a`, { headers: { range: 'bytes=0-99' } });
   check('media mendukung Range (206) untuk seek', rng.status === 206 && (await rng.arrayBuffer()).byteLength === 100, rng.status);
   const other = await call(F, 'GET', `/v1/studio/uploads/${init.data?.upload_id}`);
@@ -991,6 +998,99 @@ console.log('\n▶ Akses per peran (fan, artis, manajer, promotor, admin, Super 
   await call(S, 'DELETE', '/v1/admin/platform/integrations/payment', { reason: 'selesai uji Midtrans e2e' });
   await call(P, 'POST', `/v1/ticketing/events/${ev.data?.id}/cancel`, { reason: 'selesai uji e2e' }).catch(() => null);
   relay.close();
+}
+
+// ---------------- Batch 1 go-live: hak admin, KYC, force majeure, refund booking, kode rilis ----------------
+{
+  console.log('\n▶ Batch 1 go-live (audit 2026-11-12)');
+  const OPS = admin.access_token;
+  const artistOrg = SEED.artists[0].orgId;
+  // A1 — admin back office bukan OWNER semua org/wallet
+  const opsPayout = await call(OPS, 'POST', '/v1/finance/payouts', { party_id: artistOrg, amount: 100_000, bank_account: { bank: 'BCA', number: '5555666677', holder: 'Penyusup' } }, true);
+  check('A1: admin OPS tidak bisa menarik dana wallet org lain (403)', opsPayout.status === 403, opsPayout.status);
+  const opsMember = await call(OPS, 'POST', `/v1/orgs/${SEED.orgs.pensiPromotor}/members`, { email: `e2e-sneak-${Date.now()}@rave.test`, role: 'FINANCE' });
+  check('A1: admin OPS tidak bisa menambah anggota ke org promotor (403)', opsMember.status === 403, opsMember.status);
+  const opsWallet = await call(OPS, 'GET', `/v1/finance/wallets/${artistOrg}`);
+  check('A1: admin dengan izin finance.view tetap bisa MEMBACA wallet', opsWallet.status === 200, opsWallet.status);
+  const opsReveal = await call(OPS, 'POST', `/v1/admin/finance/payouts/${crypto.randomUUID()}/reveal`, {});
+  check('A1/B2: membuka nomor rekening butuh izin finance.payout (OPS 403)', opsReveal.status === 403, opsReveal.status);
+
+  // B3 — KYC wajib untuk menarik dana & membuat event; KYC tidak bisa disetujui sendiri
+  const nk = await login(`e2e-nokyc-${Date.now()}@rave.test`);
+  const nkPayout = await call(nk.access_token, 'POST', '/v1/finance/payouts', { party_id: nk.user.id, amount: 60_000, bank_account: { bank: 'BCA', number: '1112223334', holder: 'Tanpa KYC' } }, true);
+  check('B3: penarikan tanpa KYC ditolak (403)', nkPayout.status === 403 && /KYC/.test(nkPayout.data?.detail ?? ''), [nkPayout.status, nkPayout.data?.detail]);
+  const nkOrg = await call(nk.access_token, 'POST', '/v1/orgs', { type: 'PROMOTOR', name: `E2E Promotor Tanpa KYC ${Date.now()}`, city: 'Jakarta' });
+  const nk2 = await login(nk.user.email);
+  const st0 = new Date(Date.now() + 50 * 86_400_000);
+  const nkEvent = await call(nk2.access_token, 'POST', '/v1/ticketing/events', {
+    org_id: nkOrg.data?.id, title: 'Event Tanpa KYC', city: 'Jakarta', venue_name: 'Aula Tanpa KYC',
+    starts_at: st0.toISOString(), ends_at: new Date(st0.getTime() + 3 * 3600_000).toISOString(), ticket_types: [{ name: 'Reguler', price: 50_000, quota: 10, max_per_account: 2 }],
+  });
+  check('B3: membuat event bertiket tanpa KYC ditolak (403)', nkOrg.status === 201 && nkEvent.status === 403, [nkOrg.status, nkEvent.status, nkEvent.data?.detail ?? nkEvent.data?.errors]);
+  const ownKyc = await call(OPS, 'POST', '/v1/me/kyc', { level: 'INDIVIDUAL', full_name: 'Admin RAVE', id_number: '3174000011112222' });
+  const selfDecide = ownKyc.data?.id ? await call(OPS, 'POST', `/v1/admin/iam/kyc/${ownKyc.data.id}/decision`, { approve: true }) : { status: 0 };
+  check('B3: admin tidak bisa menyetujui KYC miliknya sendiri (403)', selfDecide.status === 403, [ownKyc.status, selfDecide.status]);
+  if (ownKyc.data?.id) await call(S, 'POST', `/v1/admin/iam/kyc/${ownKyc.data.id}/decision`, { approve: false, reason: 'Uji e2e — dibersihkan' });
+  const noReason = await call(S, 'POST', `/v1/admin/iam/kyc/${crypto.randomUUID()}/decision`, { approve: false });
+  check('B3: penolakan KYC wajib beralasan / pengajuan harus ada', noReason.status === 400 || noReason.status === 404, noReason.status);
+
+  // B7 — rilis tidak boleh memakai URL audio eksternal
+  const ART = (await login(SEED.emails.artist)).access_token;
+  const ext = await call(ART, 'POST', '/v1/studio/releases', { artist_id: SEED.artists[0].id, title: 'E2E Eksternal', type: 'SINGLE', genre: 'indie-pop', release_date: '2027-01-01', tracks: [{ title: 'x', audio_url: 'https://example.com/a.mp3', duration_ms: 1000 }] });
+  check('B7: audio eksternal ditolak (422/400)', ext.status === 422 || ext.status === 400, [ext.status, ext.data?.detail]);
+  const badUpc = await call(ART, 'POST', '/v1/studio/releases', { artist_id: SEED.artists[0].id, title: 'E2E UPC', type: 'SINGLE', genre: 'indie-pop', release_date: '2027-01-01', upc: '899000000001', tracks: [] });
+  check('B7: UPC dengan check digit salah ditolak', badUpc.status === 422 || badUpc.status === 400, badUpc.status);
+
+  // Booking sampai BOOKED (DP dibayar) untuk menguji force majeure (B6) & refund booking (B1).
+  const bookToBooked = async (name: string, days: number) => {
+    const d = new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+    const iq = await call(P, 'POST', '/v1/booking/inquiries', { ...inqBody, event_name: name, event_date: d, hold: true }, true);
+    const id = iq.data?.id;
+    await call(M, 'POST', `/v1/booking/bookings/${id}/offers`, { fee: 20_000_000, dp_pct: 50, settlement_days_before: 7, message: 'offer e2e' }, true);
+    const ac = await call(P, 'POST', `/v1/booking/bookings/${id}/accept`);
+    const kid = ac.data?.contract?.id;
+    await until(() => call(P, 'GET', `/v1/booking/contracts/${kid}/preview-url`), (r) => r.status === 200, 60000, 1000);
+    for (const tok of [P, M]) {
+      const o = await call(tok, 'POST', `/v1/booking/contracts/${kid}/sign/request-otp`, {});
+      await call(tok, 'POST', `/v1/booking/contracts/${kid}/sign/verify-otp`, { code: o.data?.dev_code });
+    }
+    const dpInv = await until(() => call(P, 'GET', `/v1/finance/invoices?reference_id=${id}`), (r) => r.data?.data?.some((i: any) => i.purpose === 'BOOKING_DP'), 30000, 1000);
+    const dpI = dpInv.data?.data?.find((i: any) => i.purpose === 'BOOKING_DP');
+    await call(P, 'POST', `/v1/finance/invoices/${dpI?.id}/simulate-pay`, { method: 'VA' }, true);
+    const bk = await until(() => call(P, 'GET', `/v1/booking/bookings/${id}`), (r) => r.data?.status === 'BOOKED', 30000, 1000);
+    // Bagian escrow DP (tanpa biaya layanan platform, yang tidak ikut dikembalikan saat batal).
+    return { id, status: bk.data?.status as string, dp: Number(dpI?.escrow_amount ?? dpI?.amount ?? 0) };
+  };
+
+  const fm = await bookToBooked('E2E Force Majeure', 45 + Math.floor(Math.random() * 300));
+  check('booking uji B6 mencapai BOOKED (DP dibayar)', fm.status === 'BOOKED', fm.status);
+  const fmNoEvidence = await call(P, 'POST', `/v1/booking/bookings/${fm.id}/cancel`, { reason: 'Banjir besar', force_majeure: true });
+  check('B6: klaim force majeure tanpa bukti ditolak (422)', fmNoEvidence.status === 422, fmNoEvidence.status);
+  const fmClaim = await call(P, 'POST', `/v1/booking/bookings/${fm.id}/cancel`, { reason: 'Banjir besar', force_majeure: true, evidence: 'Surat BPBD nomor 123/2026 tentang status darurat banjir kota', incurred_costs: 2_000_000 });
+  check('B6: klaim force majeure → DISPUTED (bukan batal sepihak)', fmClaim.status === 200 && fmClaim.data?.status === 'DISPUTED' && !!fmClaim.data?.force_majeure_claim, [fmClaim.status, fmClaim.data?.status]);
+  const disputes = await call(S, 'GET', '/v1/admin/disputes');
+  const dsp = disputes.data?.data?.find((x: any) => x.booking_id === fm.id && x.status === 'OPEN');
+  check('B6: sengketa berjenis FORCE_MAJEURE dengan bukti tampil di mediasi', dsp?.kind === 'FORCE_MAJEURE' && !!dsp?.evidence && dsp?.claimed_costs === 2_000_000, dsp);
+  const wal0 = Number((await call(ART, 'GET', `/v1/finance/wallets/${artistOrg}`)).data?.balances?.offair ?? 0);
+  const resolved = await call(S, 'POST', `/v1/admin/disputes/${dsp?.id}/resolve`, { outcome: 'FORCE_MAJEURE', note: 'Bukti valid, biaya riil disetujui sebagian', awarded_costs: 1_000_000 });
+  check('B6: mediator memutus force majeure dengan biaya riil', resolved.status === 200 && resolved.data?.awarded_costs === 1_000_000, [resolved.status, resolved.data]);
+  const fmBk = await until(() => call(P, 'GET', `/v1/booking/bookings/${fm.id}`), (r) => r.data?.status === 'FORCE_MAJEURE', 15000, 1000);
+  check('B6: booking berstatus FORCE_MAJEURE setelah putusan', fmBk.data?.status === 'FORCE_MAJEURE', fmBk.data?.status);
+  // B1 — sisa DP direfund lewat mesin refund (baris refunds → dispatch → selesai di sandbox)
+  const rf = await until(
+    () => call(S, 'GET', `/v1/admin/finance/refunds?kind=booking&reference_id=${fm.id}`),
+    (r) => r.data?.data?.length > 0 && r.data.data.every((x: any) => x.status === 'COMPLETED'),
+    40000,
+    1500,
+  );
+  const rfTotal = (rf.data?.data ?? []).reduce((a: number, x: any) => a + Number(x.amount), 0);
+  check('B1: refund booking tercatat & terkirim ke promotor (escrow DP − biaya riil; biaya layanan tidak dikembalikan)', rf.data?.data?.length > 0 && rfTotal === fm.dp - 1_000_000 && rf.data.data.every((x: any) => x.status === 'COMPLETED'), [rfTotal, fm.dp, rf.data?.data?.map((x: any) => x.status)]);
+  const wal1 = Number((await until(() => call(ART, 'GET', `/v1/finance/wallets/${artistOrg}`), (r) => Number(r.data?.balances?.offair ?? 0) !== wal0, 15000, 1000)).data?.balances?.offair ?? 0);
+  check('B4/B6: biaya riil ke artis dipotong komisi & PPh (net < 1.000.000)', wal1 > wal0 && wal1 - wal0 < 1_000_000, [wal0, wal1]);
+  const pNotif = await until(() => call(P, 'GET', '/v1/notifications'), (r) => r.data?.data?.some((n: any) => n.title === 'Dana booking dikembalikan'), 15000, 1000);
+  check('B1: promotor menerima notifikasi refund booking', pNotif.data?.data?.some((n: any) => n.title === 'Dana booking dikembalikan'));
+  const reconB1 = await call(S, 'GET', '/v1/admin/finance/reconciliation');
+  check('ledger seimbang setelah force majeure & refund booking', reconB1.data?.balanced === true, reconB1.data && { d: reconB1.data.total_debit, c: reconB1.data.total_credit });
 }
 
 console.log(`\n${failed ? '\x1b[31m' : '\x1b[32m'}${passed} lulus, ${failed} gagal\x1b[0m\n`);

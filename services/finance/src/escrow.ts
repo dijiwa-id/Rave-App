@@ -1,7 +1,7 @@
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { LedgerAccounts, allocate, pct, ticketRefundAmount, withholdingTax, type PaymentPurpose } from '@rave/domain';
 import { badRequest, config, conflict, notFound, publish, settings, unauthorized, uuidv7, type Client } from '@rave/service-kit';
-import { C, D, payableAccount, post } from './ledger.js';
+import { C, D, creditBalance, payableAccount, post } from './ledger.js';
 
 export const ESCROW_BANK = LedgerAccounts.escrowBank('mitra-sandbox');
 
@@ -303,7 +303,7 @@ export async function processRefundEvent(c: Client, provider: string, ev: { even
 export async function releaseEscrow(
   c: Client,
   ref: string,
-  p: { fee: number; splits: { partyId: string; pct: number }[]; payeeType: 'individual' | 'company' },
+  p: { fee: number; splits: { partyId: string; pct: number }[]; payeeType: 'individual' | 'company'; taxPct?: number; commissionPct?: number },
   note = 'Pencairan escrow sesuai split',
 ) {
   const h = (await c.query(`SELECT * FROM escrow_holds WHERE reference_id=$1 FOR UPDATE`, [ref])).rows[0];
@@ -313,14 +313,15 @@ export async function releaseEscrow(
   await c.query(`UPDATE invoices SET status='EXPIRED' WHERE reference_id=$1 AND status='PENDING'`, [ref]);
   const amount = h.held - h.released - h.refunded;
   if (amount <= 0) return null;
-  const commission = Math.min(amount, pct(p.fee || amount, settings.num('commission.artist_commission_pct')));
+  // Komisi & PPh mengikuti kontrak yang ditandatangani bila tersedia (audit go-live B4); selain itu pengaturan/tarif bawaan.
+  const commission = Math.min(amount, pct(p.fee || amount, p.commissionPct ?? settings.num('commission.artist_commission_pct')));
   const net = amount - commission;
   const parts = allocate(net, p.splits).filter((x) => x.amount > 0);
   const lines = [D(LedgerAccounts.escrowBooking(ref), amount), C(LedgerAccounts.commissionOffair(), commission)];
   let taxTotal = 0;
   const out: { partyId: string; amount: number }[] = [];
   for (const x of parts) {
-    const tax = withholdingTax(x.amount, p.payeeType);
+    const tax = p.taxPct != null ? pct(x.amount, p.taxPct) : withholdingTax(x.amount, p.payeeType);
     taxTotal += tax;
     lines.push(C(payableAccount(x.partyId, 'offair'), x.amount - tax));
     out.push({ partyId: x.partyId, amount: x.amount - tax });
@@ -356,7 +357,15 @@ export async function releaseEventEscrow(c: Client, ref: string, note = 'Pencair
   return { amount };
 }
 
-export async function refundEscrow(c: Client, ref: string, toArtist: number, artistParty: string | null, reason: string) {
+export async function refundEscrow(
+  c: Client,
+  ref: string,
+  toArtist: number,
+  artistParty: string | null,
+  reason: string,
+  /** Syarat kontrak: dana hangus ke artis dipotong komisi & PPh dan dibagi sesuai split (audit go-live B4). */
+  terms?: { splits: { partyId: string; pct: number }[]; taxPct?: number; commissionPct?: number },
+) {
   const h = (await c.query(`SELECT * FROM escrow_holds WHERE reference_id=$1 FOR UPDATE`, [ref])).rows[0];
   // Tagihan yang belum dibayar tidak berlaku lagi.
   await c.query(`UPDATE invoices SET status='EXPIRED' WHERE reference_id=$1 AND status='PENDING'`, [ref]);
@@ -371,15 +380,76 @@ export async function refundEscrow(c: Client, ref: string, toArtist: number, art
   const refund = amount - forfeit;
   const party = artistParty ?? h.artist_org_id ?? h.artist_id;
   const lines = [D(LedgerAccounts.escrowBooking(ref), amount)];
-  // Refund dikembalikan ke rekening sumber promotor lewat mitra escrow (dana keluar dari escrow bank).
-  if (refund) lines.push(C(ESCROW_BANK, refund));
-  if (forfeit) lines.push(C(payableAccount(party, 'offair'), forfeit));
+  /*
+   * Refund ke promotor lewat mesin refund yang sama dengan tiket (audit go-live B1): porsi refund dicatat sebagai utang
+   * ke pembayar per invoice yang sudah dibayar (DP dulu, lalu pelunasan) + baris `refunds` REQUESTED -> job
+   * `refund-dispatch` mengirimnya ke penyedia tempat invoice dibayar; gagal -> antrean Finance (kirim ulang / manual).
+   * Kas escrow baru berkurang saat refund dikonfirmasi (`settleRefund`). Komisi platform tidak ikut dikembalikan.
+   */
+  if (refund) {
+    const paid = (
+      await c.query(
+        `SELECT i.* FROM invoices i WHERE i.reference_id=$1 AND i.status='PAID' AND i.purpose IN ('BOOKING_DP','BOOKING_SETTLEMENT')
+           AND NOT EXISTS (SELECT 1 FROM refunds r WHERE r.invoice_id = i.id) ORDER BY i.paid_at NULLS LAST, i.created_at`,
+        [ref],
+      )
+    ).rows;
+    let left = refund;
+    for (const inv of paid) {
+      const take = Math.min(left, Number(inv.escrow_amount));
+      if (take <= 0) continue;
+      lines.push(C(LedgerAccounts.refundPayable(inv.payer_user_id), take));
+      await c.query(
+        `INSERT INTO refunds (id, invoice_id, purpose, reference_id, payer_user_id, escrow_amount, fee_amount, amount, escrow_pct, reason, status, provider)
+         VALUES ($1,$2,$3,$4,$5,$6,0,$6,$7,$8,'REQUESTED',$9) ON CONFLICT (invoice_id) DO NOTHING`,
+        [uuidv7(), inv.id, inv.purpose, ref, inv.payer_user_id, take, Math.round((take * 10000) / Number(inv.escrow_amount)) / 100, reason, inv.provider ?? 'sandbox'],
+      );
+      left -= take;
+    }
+    // Dana escrow yang tidak tertelusur ke invoice (data lama) tetap keluar dari kas seperti perilaku sebelumnya.
+    if (left > 0) lines.push(C(ESCROW_BANK, left));
+  }
+  const forfeitLines: { partyId: string; amount: number }[] = [];
+  if (forfeit && terms?.splits?.length) {
+    // Sama dengan pencairan normal: komisi platform, lalu PPh per penerima sesuai kontrak.
+    const commission = Math.min(forfeit, pct(forfeit, terms.commissionPct ?? settings.num('commission.artist_commission_pct')));
+    if (commission) lines.push(C(LedgerAccounts.commissionOffair(), commission));
+    let taxTotal = 0;
+    for (const x of allocate(forfeit - commission, terms.splits).filter((x) => x.amount > 0)) {
+      const tax = terms.taxPct != null ? pct(x.amount, terms.taxPct) : 0;
+      taxTotal += tax;
+      lines.push(C(payableAccount(x.partyId, 'offair'), x.amount - tax));
+      forfeitLines.push({ partyId: x.partyId, amount: x.amount - tax });
+      await c.query(`INSERT INTO disbursements (id, reference_id, party_id, gross, tax, net, source) VALUES ($1,$2,$3,$4,$5,$6,'offair')`, [uuidv7(), ref, x.partyId, x.amount, tax, x.amount - tax]);
+    }
+    if (taxTotal) lines.push(C(LedgerAccounts.taxWithholding(), taxTotal));
+  } else if (forfeit) {
+    lines.push(C(payableAccount(party, 'offair'), forfeit));
+    forfeitLines.push({ partyId: party, amount: forfeit });
+  }
   await post(c, { key: `refund:${ref}`, kind: 'escrow.refund', referenceId: ref, description: reason, lines });
   await c.query(
     `UPDATE escrow_holds SET refunded = refunded + $2, released = released + $3, status=$4, frozen=false, release_at=null, updated_at=now() WHERE reference_id=$1`,
     [ref, refund, forfeit, forfeit ? 'PARTIAL_REFUND' : 'REFUNDED'],
   );
   await publish(c, 'finance.escrow.refunded', ref, { referenceId: ref, amount: refund, promotorOrgId: h.promotor_org_id, promotorUserId: h.promotor_user_id });
-  if (forfeit) await publish(c, 'finance.escrow.released', ref, { referenceId: ref, amount: forfeit, lines: [{ partyId: party, amount: forfeit }] });
+  if (forfeit) await publish(c, 'finance.escrow.released', ref, { referenceId: ref, amount: forfeit, lines: forfeitLines });
   return { refund, toArtist: forfeit };
+}
+
+/**
+ * Denda artis membatalkan (BRD §7.3): dipindah dari saldo wallet off-air artis ke wallet promotor sebanyak saldo yang
+ * tersedia; sisanya dicatat sebagai piutang ke artis (akun `asset:receivable:penalty:<artis>`) — promotor menerima
+ * sisanya setelah tertagih (tindak lanjut Finance). Idempoten per booking.
+ */
+export async function collectArtistPenalty(c: Client, p: { bookingId: string; artistParty: string | null; promotorOrgId: string; amount: number }) {
+  if (!p.artistParty || p.amount <= 0) return null;
+  const available = Math.max(0, await creditBalance(c, payableAccount(p.artistParty, 'offair')));
+  const collected = Math.min(available, p.amount);
+  const outstanding = p.amount - collected;
+  const lines = [];
+  if (collected) lines.push(D(payableAccount(p.artistParty, 'offair'), collected), C(payableAccount(p.promotorOrgId, 'offair'), collected));
+  if (outstanding) lines.push(D(`asset:receivable:penalty:${p.artistParty}`, outstanding), C(`liability:penalty_due:${p.promotorOrgId}`, outstanding));
+  await post(c, { key: `penalty:${p.bookingId}`, kind: 'booking.artist_penalty', referenceId: p.bookingId, description: `Denda pembatalan artis (tertagih ${collected}, piutang ${outstanding})`, lines });
+  return { collected, outstanding };
 }

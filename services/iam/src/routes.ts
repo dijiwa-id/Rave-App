@@ -421,7 +421,8 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       const { id } = req.params as { id: string };
       const b = z.object({ email: z.string().email(), role: z.enum(['ADMIN', 'FINANCE', 'MEMBER', 'VIEWER']) }).parse(req.body);
       const myRole = await dbOrgRole(pool, id, req.user!.sub);
-      if (!['OWNER', 'ADMIN'].includes(myRole ?? '') && !req.user!.roles.includes('admin')) throw forbidden('Hanya OWNER/ADMIN yang dapat mengundang anggota');
+      // Admin back office tidak menambah anggota org (mencegah menyusup ke wallet org — audit go-live A1).
+      if (!['OWNER', 'ADMIN'].includes(myRole ?? '')) throw forbidden('Hanya OWNER/ADMIN yang dapat mengundang anggota');
       const member = await db.tx(async (tx) => {
         const org = (await tx.query(`SELECT * FROM orgs WHERE id = $1`, [id])).rows[0];
         if (!org) throw notFound('Organisasi');
@@ -460,7 +461,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     authed.post('/v1/orgs/:id/manage-artist', async (req, reply) => {
       const { id } = req.params as { id: string };
       const b = z.object({ artist_org_id: z.string().uuid() }).parse(req.body);
-      const isAdmin = req.user!.roles.includes('admin');
+      const isAdmin = req.user!.roles.includes('superadmin'); // relasi manajemen↔artis memberi akses wallet: hanya Super Admin yang boleh melewati persetujuan
       const out = await db.tx(async (tx) => {
         const mgmt = (await tx.query(`SELECT * FROM orgs WHERE id = $1`, [id])).rows[0];
         const art = (await tx.query(`SELECT * FROM orgs WHERE id = $1`, [b.artist_org_id])).rows[0];

@@ -34,7 +34,7 @@ import { Hero, RaveBand } from './LandingHero';
 import { Movement, RoleStack, Spotlight, WaveFrame, WhyRave, type RoleCard } from './LandingScroll';
 import { BTN_PRIMARY, BTN_PRIMARY_SM, CARD_TITLE, Heading, Section } from './marketing';
 import { PublicFooter, PublicNav } from './PublicChrome';
-import { SponsorBanner } from '@/components/ads/SponsorBanner';
+import { SponsorBanner, useSponsorAvailable } from '@/components/ads/SponsorBanner';
 import { CmsBlock, useLanding, usePick } from '@/lib/landing';
 import type { LandingSectionId } from '@rave/domain/landing';
 import { localeTag, useDict } from '@/lib/i18n';
@@ -513,6 +513,7 @@ export default function Landing() {
   const { sections: on, order } = useLanding();
   const d = useDict('public');
   const names = useDict('cms').sectionNames;
+  const sponsorOn = useSponsorAvailable();
   const roles = useRoles();
   // Section di bawah hero & pita: urutan & visibilitas dari CMS (Editor Landing).
   const render: Record<LandingSectionId, () => ReactNode> = {
@@ -523,13 +524,14 @@ export default function Landing() {
     how: () => <HowItWorks />,
     events: () => (ticketing ? <UpcomingEvents /> : null),
     testimonial: () => <Testimonial />,
-    sponsor: () => (
+    sponsor: () =>
+      sponsorOn && (
       <section aria-label={d.sponsorAria} className="px-4">
         <div className="mx-auto max-w-[82.5rem]">
           <SponsorBanner />
         </div>
       </section>
-    ),
+      ),
     movement: () => <Movement />,
     pricing: () => <Pricing />,
     faq: () => <Faq />,

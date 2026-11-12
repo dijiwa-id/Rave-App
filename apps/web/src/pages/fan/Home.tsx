@@ -129,8 +129,9 @@ export default function Home() {
           ))}
         </Shelf>
 
-        {/* Slot sponsor display — tidak tampil untuk pelanggan Premium (bebas iklan). */}
-        {!user?.premium && sponsorOn && <SponsorBanner className="mb-10" />}
+        {/* Slot sponsor display — hanya pengguna masuk non-Premium (anonim & Premium tidak melihat iklan);
+            SponsorBanner sendiri menghormati `ads.enabled` dan tidak tampil tanpa kreatif dari Super Admin. */}
+        {user && !user.premium && sponsorOn && <SponsorBanner className="mb-10" />}
 
         {ticketing && (
         <section className="mb-10">

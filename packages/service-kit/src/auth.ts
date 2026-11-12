@@ -107,10 +107,14 @@ export async function requireAuth(req: FastifyRequest, _reply: FastifyReply) {
   if (!req.user) throw unauthorized();
 }
 
+/**
+ * Gerbang peran. Token service lolos; admin back office HANYA lolos bila 'admin' disebut eksplisit —
+ * admin tidak otomatis memegang peran pengguna (promotor/artis) di platform (audit go-live A1).
+ */
 export function requireRole(...roles: PlatformRole[]) {
   return async (req: FastifyRequest) => {
     if (!req.user) throw unauthorized();
-    if (req.user.roles.includes('admin') || req.user.roles.includes('service')) return;
+    if (req.user.roles.includes('service')) return;
     if (!roles.some((r) => req.user!.roles.includes(r))) throw forbidden(`Memerlukan peran: ${roles.join(', ')}`);
   };
 }
@@ -144,8 +148,13 @@ export function orgMembership(u: AuthUser | null, orgId: string, roles?: OrgRole
   return m;
 }
 
+/**
+ * Bertindak atas nama org (menulis, menarik dana, mengundang anggota): hanya anggota sungguhan dengan peran yang
+ * diminta, atau token service. Admin back office TIDAK lagi diperlakukan sebagai OWNER semua org (audit go-live A1) —
+ * tindakan admin lewat endpoint /v1/admin/* yang ber-izin, membaca lewat pemeriksaan izin terpisah.
+ */
 export function assertOrg(u: AuthUser | null, orgId: string, roles?: OrgRole[]): OrgClaim {
-  if (isAdmin(u)) return { id: orgId, type: 'ARTIST', role: 'OWNER' };
+  if (u?.roles.includes('service')) return { id: orgId, type: 'ARTIST', role: 'OWNER' };
   const m = orgMembership(u, orgId, roles);
   if (!m) throw forbidden('Bukan anggota organisasi ini');
   return m;

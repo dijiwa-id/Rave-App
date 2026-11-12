@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { LanguageSwitch } from '@/components/LanguageSwitch';
 import { Link, NavLink } from 'react-router-dom';
-import { AppleLogo, Facebook, GooglePlay, Instagram, XTwitter } from '@/components/fan/BrandIcons';
+import { AppleLogo, GooglePlay } from '@/components/fan/BrandIcons';
 import { RaveLogo } from '@/components/ui/RaveLogo';
 import { useAuth } from '@/stores/auth';
 import { cx } from '@/components/ui';
@@ -133,18 +133,7 @@ export function PublicFooter() {
           <div>
             <RaveLogo className="!h-12" />
             <p className="mt-5 max-w-xs text-[15px] leading-relaxed text-white/65">{f.tagline}</p>
-            <div className="mt-6 flex gap-3">
-              {[Instagram, XTwitter, Facebook].map((I, i) => (
-                <a
-                  key={i}
-                  href="#"
-                  aria-label={['Instagram', 'X', 'Facebook'][i]}
-                  className="grid size-10 place-items-center border-2 border-rave-paper/25 transition hover:-translate-y-0.5 hover:border-rave-ink hover:bg-rave-primary hover:text-rave-on-primary hover:shadow-[3px_3px_0_#0b0a0c]"
-                >
-                  <I className="size-5" />
-                </a>
-              ))}
-            </div>
+            {/* Ikon media sosial disembunyikan sampai akun resmi tersedia (tidak ada tautan palsu "#"). */}
           </div>
           <div className="grid grid-cols-2 gap-10 sm:grid-cols-3">
             {f.cols.map(({ title: h, links: labels }, ci) => (

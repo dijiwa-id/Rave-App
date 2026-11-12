@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { ADMIN_ROLES } from '@rave/domain/settings';
-import { audit, conflict, forbidden, nextCursor, notFound, pageParams, publish, requirePermission, requireRole, requireService, requireSuperAdmin, z, type ServiceContext } from '@rave/service-kit';
+import { audit, badRequest, conflict, forbidden, nextCursor, notFound, pageParams, publish, requirePermission, requireRole, requireService, requireSuperAdmin, z, type ServiceContext } from '@rave/service-kit';
 import { buildMe } from './core.js';
 import { kycOut } from './routes.js';
 
@@ -55,6 +55,9 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
         const k = (await tx.query(`SELECT * FROM kyc_submissions WHERE id = $1 FOR UPDATE`, [id])).rows[0];
         if (!k) throw notFound('Pengajuan KYC');
         if (k.status !== 'PENDING') throw conflict('Pengajuan sudah diputuskan');
+        // Empat mata: admin tidak boleh memutuskan KYC miliknya sendiri; penolakan wajib beralasan (REQ-ADM-07).
+        if (k.user_id === req.user!.sub) throw forbidden('Anda tidak dapat memutuskan pengajuan KYC milik sendiri');
+        if (!b.approve && (b.reason ?? '').trim().length < 5) throw badRequest('Alasan penolakan wajib diisi (min. 5 karakter)');
         const status = b.approve ? 'VERIFIED' : 'REJECTED';
         const r = (
           await tx.query(`UPDATE kyc_submissions SET status = $2, reason = $3, decided_by = $4, decided_at = now() WHERE id = $1 RETURNING *`, [

@@ -366,7 +366,7 @@ export async function artistRoutes(app: FastifyInstance, { db, log }: ServiceCon
   // ---------- Talent discovery (REQ-B2B-07) ----------
   // Filter genre/tanggal/budget di SQL (from_fee = logika visibleRateCard + filter format/kategori), lalu statistik
   // off-air & playback dimuat batch untuk ≤ DISCOVERY_MAX_CANDIDATES kandidat; diurutkan Audience Match lalu dipotong `limit`.
-  app.get('/v1/booking/discovery', { preHandler: requireRole('promotor') }, async (req) => {
+  app.get('/v1/booking/discovery', { preHandler: requireRole('promotor', 'admin') }, async (req) => {
     const q = z
       .object({
         city: z.string().optional(),

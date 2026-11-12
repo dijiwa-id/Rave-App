@@ -11,6 +11,23 @@ dan alur uang** yang bisa dikerjakan sekarang tanpa vendor, serta **klaim produk
 
 ---
 
+## Status Batch 1 (selesai 12 Nov 2026)
+| Item | Perbaikan |
+|---|---|
+| A1 | `assertOrg`/`requireRole` tidak lagi memberi admin hak OWNER/peran pengguna; baca data keuangan butuh `finance.view`, nonton/moderasi live butuh `live.moderate`; tambah anggota org & relasi manajemen tidak bisa lewat admin (kecuali Super Admin untuk relasi); batal event hanya Super Admin |
+| A2 | Master audio & rendisi Premium wajib URL bertanda tangan; hanya rendisi gratis (AAC 64/160) & gambar publik; sesi memberi URL bertanda tangan; pratinjau Studio lewat rute khusus |
+| B1 | Refund booking (pembatalan, putusan mediasi, force majeure) membuat baris `refunds` per invoice → `refund-dispatch` → penyedia/antrean Finance; notifikasi ke promotor |
+| B2 | Nomor rekening disimpan terenkripsi (rekening aktif & snapshot payout); produksi: payout menunggu transfer Finance (tampilkan rekening lengkap ber-audit → catat nomor referensi); dev tetap otomatis |
+| B3 | KYC terverifikasi wajib untuk menarik dana, membuat & menerbitkan event bertiket; admin tidak bisa memutus KYC sendiri; penolakan wajib beralasan |
+| B4 | Komisi, PPh, dan split penerima dibekukan dari kontrak saat aktif (`contracts.release_terms`) dan dipakai saat pencairan, putusan mediasi, dan dana hangus pembatalan |
+| B6 | Force majeure = klaim + bukti → sengketa (escrow beku) → putusan mediator dengan biaya riil; pembatalan manajemen saat AT_RISK → DP hangus ke artis; denda 25% artis ditagih dari wallet artis ke promotor (sisa jadi piutang) |
+| B7 | ISRC hanya dari kode registran resmi (`catalog.isrc_registrant_code`) atau input berformat ISO 3901 (tanpa wrap); UPC hanya input valid (check digit); audio eksternal ditolak |
+| C1 | Klaim "lossless gratis", unduhan, presale, normalisasi loudness, royalti tgl 15, PBJT, undangan split dikoreksi (ID & EN). **Super Admin perlu reset & terbitkan ulang konten Landing** bila pernah disimpan |
+| C3 | Banner sponsor hanya untuk pengguna login non-Premium, bila `ads.enabled`, tanpa kreatif bawaan |
+| C4 | Berita/investor/karier/pers demo diganti status kosong yang jujur; ikon sosial tanpa URL disembunyikan |
+
+Sisa terkait (masuk batch berikutnya): klaim "cair H+1 / split otomatis / escrow mitra berizin BI" di landing & company menunggu kepastian vendor; paket Pelajar/Duo di halaman Premium belum ada billing; persetujuan artis sebelum dicantumkan di event; nama pemilik rekening belum dicocokkan dengan KYC.
+
 ## A. P0 — wajib sebelum publik (dapat dikerjakan sekarang, tanpa vendor)
 
 ### Keamanan & akses

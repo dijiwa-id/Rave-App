@@ -319,7 +319,7 @@ const fan = {
     saveProfile: 'Simpan profil',
     audioQuality: 'Kualitas audio',
     streamingQuality: 'Kualitas streaming',
-    loudnessNote: 'Normalisasi loudness −14 LUFS aktif. Berlaku untuk lagu berikutnya.',
+    loudnessNote: 'Perubahan kualitas berlaku mulai lagu berikutnya.',
     notifications: 'Notifikasi',
     notifIntro: 'Notifikasi di aplikasi selalu tersimpan. Pilih kanal tambahan per kategori.',
     category: 'Kategori',

@@ -68,7 +68,7 @@ const company: Shape<typeof id> = {
       pass: 'Crew pass',
       access: 'All access · backstage',
       yourName: 'Your name here',
-      stickerTop: "We're hiring",
+      stickerTop: 'Hiring soon',
       stickerBottom: 'small team · big impact',
       teams: 'Teams',
     },
@@ -129,7 +129,7 @@ const company: Shape<typeof id> = {
       body: 'Every stream enriches an artist’s profile; every event sends listeners back to the music.',
     },
     products: [
-      { title: 'RAVE app', body: 'Free music streaming in lossless quality, with synced lyrics, playlists, podcasts, and audio fiction — on web and mobile.', meta: 'For listeners' },
+      { title: 'RAVE app', body: 'Free music streaming, synced lyrics, playlists, podcasts, and audio fiction on the web — Premium unlocks AAC 320 & Lossless (FLAC).', meta: 'For listeners' },
       { title: 'Artist Studio', body: 'Release music, set rights splits, track listeners by city, and manage your EPK, rate card, calendar, contracts, and payouts.', meta: 'For artists & management' },
       { title: 'Promotor Hub', body: 'Find artists through Audience Match, with structured negotiation, electronic contracts, escrow, QR tickets, and check-in.', meta: 'For promoters & event organizers' },
       { title: 'RAVE Live', body: 'Broadcast concerts and live sessions from OBS or the browser, with chat and ticket-based access.', meta: 'For artists & promoters' },
@@ -258,8 +258,8 @@ const company: Shape<typeof id> = {
     seeTeams: 'See teams',
     teamsHeading: {
       kicker: 'Teams',
-      title: 'Where you can contribute.',
-      body: 'We hire in stages, following the product roadmap. Don’t see the right role? We always read open applications.',
+      title: 'Openings will be announced.',
+      body: 'There are no open positions right now. The teams below are the areas we plan to hire for — official openings will be announced on this page. We still read open applications.',
     },
     teams: [
       {
@@ -373,7 +373,7 @@ const company: Shape<typeof id> = {
       body: 'No more scheduling spreadsheets, negotiating over DMs, or waiting weeks for manual transfers.',
     },
     features: [
-      { title: 'Releases & rights splits', body: 'Upload masters, set metadata, and split copyrights with collaborators. Each collaborator approves their own share.' },
+      { title: 'Releases & rights splits', body: 'Upload masters, set metadata, and record the copyright split with collaborators for every track.' },
       { title: 'City-level analytics', body: 'See which cities your listeners are growing in — data you can take straight to the negotiating table.' },
       { title: 'Dynamic EPK', body: 'An electronic press kit that stays up to date from streaming data, ready to share with promoters via a single link.' },
       { title: 'Rate card', body: 'Set fee ranges by event type and city, so incoming inquiries already match your expectations.' },
@@ -491,53 +491,9 @@ const company: Shape<typeof id> = {
     heroTitle: 'Infrastructure for Indonesia’s live music economy.',
     lead: 'Free music draws listeners; live shows and commerce pay. RAVE brings streaming, city-level audience data, booking, escrow, and ticketing together in one self-reinforcing loop.',
     requestDeck: 'Request investor materials',
-    whyHeading: { kicker: 'Why now', title: 'Indonesia is online, already listening, and willing to queue for a show.' },
-    stats: [
-      { value: '215.6M', label: 'Internet users in Indonesia, 78.19% penetration (APJII, 2023)' },
-      { value: '38%', label: 'Listen to on-demand music every week, vs. a 28% Southeast Asian average (PwC, 2023)' },
-      { value: '1.7M', label: 'People competing for tickets to a single stadium concert in Jakarta (November 2023)' },
-      { value: '5 cities', label: 'Launch markets: Jakarta, Bandung, Yogyakarta, Surabaya, Malang & Bali' },
-    ],
-    statsNote: 'Sources: APJII Internet Penetration Survey 2023; PwC Indonesia TMT Update 2023; media coverage of concert ticket sales, November 2023.',
-    edgeHeading: {
-      kicker: 'Our edge',
-      title: 'Others hold one piece. RAVE holds the whole loop.',
-      body: 'Global streaming platforms don’t handle booking; agencies and ticketing platforms don’t have listener data. We combine both.',
-    },
-    edge: [
-      { title: 'Data loop', body: 'Every stream enriches the EPK and Audience Match; every event drives listeners back to streaming.' },
-      { title: 'Trust layer', body: 'Escrow, electronic contracts, two-way ratings, and KYC — hard for streaming platforms or agencies to replicate.' },
-      { title: 'Workflow lock-in', body: 'Management runs day-to-day operations on RAVE: calendar, contracts, invoices, and fee splits.' },
-    ],
-    modelHeading: {
-      kicker: 'Business model',
-      title: 'Free music. Live shows that pay.',
-      body: 'Off-air and commerce revenue subsidizes the cost of free streaming, with user-centric royalties for rights holders.',
-    },
-    streams: [
-      { name: 'Off-air booking commission', body: 'Promoter service fees and commission on artist fees for every settled show.' },
-      { name: 'Ticketing', body: 'A per-ticket service fee for events sold through RAVE.' },
-      { name: 'RAVE Pro', body: 'A B2B subscription for management, labels, and promoters with lower commissions and advanced tools.' },
-      { name: 'Brand partnership', body: 'Campaign packages, event activations, and campus tours with artists.' },
-      { name: 'Premium', body: 'A listener subscription for exclusive podcasts & audio fiction, ad-free listening, and early ticket access.' },
-      { name: 'Advertising', body: 'Audio and display ads on the Free tier, with consent-based targeting.' },
-    ],
-    northStar: 'North star metric: the number of off-air shows settled through RAVE.',
-    roadmapHeading: {
-      kicker: 'Roadmap',
-      title: 'Five phases, each with its own success criteria.',
-      body: 'The next phase opens fully only once the previous phase’s criteria have been met.',
-    },
-    phases: [
-      { phase: 'Phase 0', title: 'Foundation & landing', body: 'Validation, brand, waitlist, legal, and vendor selection.' },
-      { phase: 'Phase 1', title: 'Streaming & Booking Lite', body: 'Listening app, Artist Studio, EPK, calendar, and inquiries.' },
-      { phase: 'Phase 2', title: 'Trust layer & ticketing', body: 'Escrow, electronic contracts, KYC, disputes, tickets, and RAVE Pro.' },
-      { phase: 'Phase 3', title: 'Premium & commerce', body: 'Podcasts, audio fiction, merchandise, ads, and recommendations.' },
-      { phase: 'Phase 4', title: 'Scale & ecosystem', body: 'Label portal, catalog distribution, data insights, and regional expansion.' },
-    ],
     band: {
       title: 'Interested in talking?',
-      body: 'Full materials — deck, financial model, and validation data — are shared with investors and strategic partners under a non-disclosure agreement.',
+      body: 'Reach us by email. Investor materials are shared on request with investors and strategic partners under a non-disclosure agreement.',
       button: 'Contact us',
     },
     disclaimer:
@@ -551,7 +507,7 @@ const company: Shape<typeof id> = {
     heroB: 'We’re here.',
     lead: 'Quick answers for listeners, artists, and promoters. Type your question or pick a topic.',
     searchLabel: 'Search help',
-    placeholder: 'Search: OTP, refund, royalties, lossless…',
+    placeholder: 'Search: OTP, refund, royalties, audio quality…',
     topics: {
       akun: {
         title: 'Account & sign-in',
@@ -564,10 +520,10 @@ const company: Shape<typeof id> = {
       },
       dengar: {
         title: 'Streaming & quality',
-        blurb: 'Lossless, lyrics, playlists, downloads.',
+        blurb: 'Audio quality, lyrics, playlists.',
         faqs: [
-          { q: 'Is the music really free?', a: 'Yes. Streaming, playlists, lyrics, and the best audio quality are free for all registered users. Premium is only for premium podcasts, audio fiction, and an ad-free experience.' },
-          { q: 'How do I change audio quality?', a: 'Go to Profile & Settings → Audio quality. Lossless is recommended when you’re on Wi-Fi.' },
+          { q: 'Is the music really free?', a: 'Yes. On-demand streaming (AAC up to 160 kbps), playlists, and lyrics are free for all registered users. Premium unlocks High quality (AAC 320) & Lossless (FLAC), no ads, and premium podcasts & audio fiction.' },
+          { q: 'How do I change audio quality?', a: 'Go to Profile & Settings → Audio quality. Free users can choose up to Normal (AAC 160); High (AAC 320) and Lossless (FLAC) are Premium-only — use Wi-Fi for Lossless.' },
           { q: 'Why are there ads?', a: 'Free listeners occasionally hear clearly labeled ads. Ads help pay artist royalties; Premium is ad-free.' },
         ],
       },
@@ -581,11 +537,10 @@ const company: Shape<typeof id> = {
       },
       tiket: {
         title: 'Tickets & events',
-        blurb: 'Ticket QR, presales, refunds.',
+        blurb: 'Ticket QR, refunds.',
         faqs: [
           { q: 'Where are my tickets?', a: 'Open the My Tickets menu. Show the rotating QR code in the app at the entrance — screenshots are not valid.' },
           { q: 'The event was canceled — how do refunds work?', a: 'If the organizer cancels the event, a full refund is processed automatically to your payment method.' },
-          { q: 'What is a loyal-fan presale?', a: 'Listeners who frequently play a particular artist get early access to buy tickets for that artist’s shows.' },
         ],
       },
       artis: {
@@ -593,7 +548,7 @@ const company: Shape<typeof id> = {
         blurb: 'Releases, royalties, EPK, payouts.',
         faqs: [
           { q: 'How do I release a song?', a: 'Sign in as an Artist and open Artist Studio → New release. Upload the master, fill in metadata & rights splits, then submit it for review.' },
-          { q: 'How are royalties calculated?', a: 'User-centric model: each listener’s subscription & ad revenue is shared among the artists they actually listen to. Statements are available monthly in Studio.' },
+          { q: 'How are royalties calculated?', a: 'User-centric model: each listener’s subscription & ad revenue is shared among the artists they actually listen to. Royalty reports in Studio are being prepared and will be announced when available.' },
           { q: 'When are gig fees paid out?', a: 'Booking funds are held in escrow and released D+1 after the show, split automatically across the team according to the split.' },
         ],
       },
@@ -635,7 +590,7 @@ const company: Shape<typeof id> = {
     contact: 'Contact the media team',
     profileHeading: { kicker: 'Short profile', title: 'About RAVE' },
     boilerplate:
-      'RAVE is an Indonesian ecosystem platform for indie and off-air music. RAVE connects free music streaming with real stages: city-level listener data helps promoters find the right artists, and bookings are then handled with electronic contracts, escrow, and automatic fee splits. Alongside its listening app, RAVE offers Artist Studio for musicians and management, Promotor Hub for promoters and event organizers, and tickets and live broadcasts for fans.',
+      'RAVE is an Indonesian ecosystem platform for indie and off-air music. RAVE connects free music streaming with real stages: city-level listener data helps promoters find the right artists, and bookings are then handled with electronic contracts and recorded payments. Alongside its listening app, RAVE offers Artist Studio for musicians and management, Promotor Hub for promoters and event organizers, and tickets and live broadcasts for fans.',
     copied: 'Copied',
     copyProfile: 'Copy profile',
     copyFailed: 'Couldn’t copy — please copy it manually from this page.',
@@ -644,7 +599,7 @@ const company: Shape<typeof id> = {
       { k: 'Category', v: 'Indie & off-air music platform (streaming, booking, ticketing, live)' },
       { k: 'Tagline', v: 'Listen free. Show up for the gig. Support directly.' },
       { k: 'Products', v: 'RAVE app · Artist Studio · Promotor Hub · RAVE Live' },
-      { k: 'Launch cities', v: 'Jakarta, Bandung, Yogyakarta, Surabaya, Malang & Bali' },
+      { k: 'Planned launch cities', v: 'Jakarta, Bandung, Yogyakarta, Surabaya, Malang & Bali' },
       { k: 'Name style', v: 'RAVE (all caps) in text; the official logo for visuals' },
     ],
     assetsHeading: {
@@ -670,6 +625,8 @@ const company: Shape<typeof id> = {
       after: ' with the subject “[Media]”. We aim to reply within one business day.',
     },
     sendEmail: 'Send email',
+    releasesHeading: { kicker: 'Press releases', title: 'No press releases yet.' },
+    releasesEmpty: 'Official press releases will be published on this page. For confirmation or questions, contact the media team.',
   },
 
   news: {
@@ -684,9 +641,9 @@ const company: Shape<typeof id> = {
     categories: { Rilis: 'Releases', Scene: 'Scene', Produk: 'Product', Event: 'Events', Wawancara: 'Interviews' },
     featured: 'Featured story',
     readStory: 'Read the story',
-    empty: 'No articles in this category yet.',
+    empty: 'No news releases yet. Official RAVE news will be published here.',
     ctaTitle: 'Scene news in your inbox.',
-    ctaBody: 'Join the waitlist for hand-picked releases, presales, and gig listings in your city.',
+    ctaBody: 'Join the waitlist for release news and gig listings in your city.',
     ctaButton: 'Join the waitlist',
     read: 'Read',
     readMin: (n) => `${n} min read`,
@@ -695,79 +652,8 @@ const company: Shape<typeof id> = {
     copyLink: 'Copy link',
     related: 'Read next',
     allNews: 'All news →',
-    articles: {
-      'gig-kecil-kota-besar': {
-        title: 'Small gigs, big cities: why 100-capacity venues are the heart of the indie scene',
-        excerpt: 'From the back rooms of cafés to collective-run garages — small venues are where bands first meet their most loyal fans.',
-        imageAlt: 'A crowd surfer at a packed DIY gig',
-        author: 'RAVE Editorial',
-        body: [
-          { p: 'Every band filling festivals today started out in a room that holds a hundred people. Small venues are laboratories: where new songs get tested, where the first fans learn the lyrics by heart, and where collectives learn to put on shows with pooled money.' },
-          { h: 'First stage, first data' },
-          { p: 'On RAVE, plays in the same city as a small venue are the most honest signal a promoter can get. Not follower counts, but how many people in that city are actually listening.' },
-          { quote: 'A packed hundred-person gig means more than a big stage that’s half empty.', by: 'Campus promoter, Bandung' },
-          { h: 'What small venues need' },
-          { p: 'Certainty. A safe deposit, a clear contract, and tickets that can’t be faked. That’s why bookings on RAVE use escrow and rotating QR tickets — so a collective’s energy goes into the show, not into admin.' },
-        ],
-      },
-      'senja-kolektif-hujan-di-dago': {
-        title: 'Senja Kolektif releases "Hujan di Dago" in lossless quality',
-        excerpt: 'The new single from Bandung was recorded live in a home studio and is available free to all listeners right away.',
-        imageAlt: 'A vocalist singing into a microphone',
-        author: 'RAVE Editorial',
-        body: [
-          { p: '"Hujan di Dago" was recorded in a single live session in a home studio, with minimal overdubs. The result sounds intimate — and it can now be heard in lossless quality, for free.' },
-          { p: 'Loyal listeners who often play Senja Kolektif also get early presale access for the band’s next city tour.' },
-        ],
-      },
-      'rave-live-siaran-bertiket': {
-        title: 'RAVE Live: broadcast concerts from OBS or straight from the browser',
-        excerpt: 'Artists and promoters can now open free or ticketed broadcasts, complete with live chat and viewer counts.',
-        imageAlt: 'A band performing on a brightly lit stage',
-        author: 'RAVE Product Team',
-        body: [
-          { p: 'RAVE Live lets you broadcast from the streaming setup you already use (RTMP/OBS) or straight from the browser, with nothing to install.' },
-          { h: 'Free or ticketed' },
-          { p: 'Ticketed broadcasts can only be watched by holders of a live ticket bought through the event page — a new way to grow your audience without a bigger venue.' },
-        ],
-      },
-      'panduan-escrow-promotor': {
-        title: 'Quick guide: how escrow protects a promoter’s deposit',
-        excerpt: 'Deposits are no longer sent straight to the artist. Here’s the flow, from contract signing to payout on D+1.',
-        imageAlt: 'A packed concert crowd under stage lights',
-        author: 'RAVE Product Team',
-        body: [
-          { p: 'Once the electronic contract is signed with an OTP, the promoter pays the deposit into a licensed partner’s escrow account. The funds are held until the performance is over.' },
-          { p: 'On D+1 after the show, the funds are released automatically and split across the artist’s whole team according to the split. If there’s a dispute, the funds are frozen during mediation.' },
-        ],
-      },
-      'nirmala-dari-kamar-ke-panggung': {
-        title: 'Nirmala: "These songs were born at 3 a.m. in my rented room"',
-        excerpt: 'On bedroom pop, recording on a secondhand laptop, and seeing city names on a listener dashboard for the first time.',
-        imageAlt: 'An audience enjoying a music performance',
-        author: 'RAVE Editorial',
-        body: [
-          { p: 'Nirmala recorded almost all of her songs in a rented room with a secondhand laptop and a single microphone. The music is quiet, but her listener base has grown fast in Jakarta and Yogya.' },
-          { quote: 'When I saw thousands of people in Yogya listening to these bedroom songs, I went looking for a venue there right away.', by: 'Nirmala' },
-        ],
-      },
-      'kalender-gig-november': {
-        title: 'November gig calendar: from Taman Budaya to the beaches of Bali',
-        excerpt: 'This month’s picks of showcases, school festivals, and sunset sessions — some with presales just for loyal fans.',
-        imageAlt: 'Concertgoers in Jakarta holding up their phones',
-        author: 'RAVE Editorial',
-        body: [
-          { p: 'November is packed: a showcase in Yogyakarta, a school festival in Surabaya, and a sunset session in Bali. Check the Events & Tickets page for the full schedule and presales.' },
-        ],
-      },
-      'kota-mati-gedung-kosong': {
-        title: 'Kota Mati returns with "Gedung Kosong", post-punk for the commute home',
-        excerpt: 'Cold guitars, heavy bass, and lyrics about a city that moves too fast — the new EP is out now.',
-        imageAlt: 'A musician’s shoes on a pub stage',
-        author: 'RAVE Editorial',
-        body: [{ p: 'Kota Mati’s new EP takes Jakarta post-punk into darker territory. Four songs, recorded over two days in a small studio in South Jakarta.' }],
-      },
-    },
+    // Belum ada rilis berita resmi. Artikel ditambahkan di sini (dan di news-data.ts) saat terbit.
+    articles: {},
   },
 
   terms: {
@@ -806,7 +692,7 @@ const company: Shape<typeof id> = {
       },
       premium: {
         title: 'Premium & payments',
-        p: 'Listening to music is always free. Premium unlocks exclusive podcasts & audio fiction, ad-free listening, downloads, and early ticket access. Prices and trial periods are shown before payment.',
+        p: 'Listening to music is always free (up to AAC 160). Premium unlocks High quality (AAC 320) & Lossless (FLAC), exclusive podcasts & audio fiction, and ad-free listening. Prices and trial periods are shown before payment.',
         items: [
           'Subscriptions renew automatically each month and can be canceled at any time; access remains active until the end of the period.',
           'Payments are processed by licensed payment gateway partners; RAVE does not store card data.',

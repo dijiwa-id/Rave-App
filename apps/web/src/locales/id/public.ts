@@ -37,7 +37,7 @@ const dict = {
     liveWatching: (n: string) => `Live · ${n} menonton`,
     liveStreaming: 'Live streaming',
     studioSessions: 'Sesi studio & konser',
-    losslessFree: 'Lossless FLAC · gratis',
+    losslessFree: 'AAC 160 · gratis',
   },
   band: {
     partnersAria: 'Partner musik RAVE',
@@ -45,10 +45,12 @@ const dict = {
   },
   statsAria: 'Statistik RAVE',
   sponsorAria: 'Sponsor',
+  /** Label promosi internal (house ad) di kartu iklan pemutar. */
+  houseAdLabel: 'Dari RAVE',
   why: {
     eyebrow: 'Kenapa memilih',
     items: [
-      { t: 'Lossless, gratis', b: 'Kualitas studio untuk semua pendengar — tanpa batas skip.' },
+      { t: 'Musik gratis', b: 'Streaming on-demand untuk semua pendengar — AAC 320 & Lossless di Premium.' },
       { t: 'Audience Match per kota', b: 'Promotor melihat di kota mana artis benar-benar didengar.' },
       { t: 'Dana aman di escrow', b: 'DP ditahan mitra berizin BI, cair H+1 setelah show.' },
       { t: 'Kontrak & e-sign OTP', b: 'SPK dibuat otomatis, ditandatangani berurutan, terverifikasi hash.' },
@@ -85,9 +87,9 @@ const dict = {
     fan: {
       alt: 'Penonton konser di depan panggung bercahaya',
       label: 'Untuk pendengar',
-      title: 'Semua gratis. Kualitas terbaik.',
+      title: 'Musik gratis. Premium untuk kualitas terbaik.',
       body: 'Tanpa batas skip, tanpa batas jam — dari indie kotamu hingga podcast dan cerita fiksi berseri.',
-      features: ['Lossless & Hi-Res gratis', 'Lirik sinkron & mode karaoke', 'Live streaming konser', 'Presale untuk fan setia'],
+      features: ['Streaming gratis AAC hingga 160 kbps', 'Lirik sinkron & mode karaoke', 'Live streaming konser', 'Info gig & tiket di kotamu'],
       cta: 'Mulai mendengarkan',
     },
     artist: {
@@ -114,7 +116,7 @@ const dict = {
     steps: [
       { t: 'Dengar', b: 'Fan streaming gratis. Setiap pemutaran ≥ 30 detik menjadi data permintaan pasar per kota.' },
       { t: 'Booking', b: 'Promotor menemukan artis lewat Audience Match, negosiasi terstruktur, lalu kontrak elektronik.' },
-      { t: 'Panggung', b: 'Fan mendapat tiket presale, artis tampil, dana cair H+1 setelah show — langsung terbagi ke tim.' },
+      { t: 'Panggung', b: 'Fan membeli tiket, artis tampil, dana cair H+1 setelah show — langsung terbagi ke tim.' },
     ],
     step: (n: number) => `Langkah ${n}`,
     escrowTitle: 'Alur dana rekening bersama (escrow)',
@@ -143,8 +145,8 @@ const dict = {
     free: 'Gratis',
     forever: 'selamanya',
     perMonth: '/bulan',
-    freeItems: ['Musik tanpa batas, on-demand', 'Lossless & Hi-Res (opt-in Wi-Fi)', 'Lirik sinkron & playlist', 'Info event & presale fan setia', 'Iklan sesekali'],
-    premiumItems: ['Semua fitur Gratis', 'Podcast premium & audio fiksi', 'Bebas iklan', 'Unduhan tanpa batas', 'Early access tiket'],
+    freeItems: ['Musik tanpa batas, on-demand', 'Kualitas hingga AAC 160 kbps', 'Lirik sinkron & playlist', 'Info event & tiket', 'Iklan sesekali'],
+    premiumItems: ['Semua fitur Gratis', 'AAC 320 & Lossless/Hi-Res (FLAC)', 'Podcast premium & audio fiksi', 'Bebas iklan'],
     startListening: 'Mulai mendengarkan',
     seePremium: 'Lihat paket Premium',
     stickerPick: 'Pilihan',
@@ -209,9 +211,9 @@ const dict = {
     copy: {
       fan: {
         kicker: 'Untuk pendengar',
-        title: 'Musik indie favoritmu, gratis & lossless.',
+        title: 'Musik indie favoritmu, gratis.',
         body: 'Dengarkan musisi independen Indonesia, simpan playlist, lalu temui mereka di panggung kotamu.',
-        perks: ['Streaming lossless gratis, tanpa batas skip', 'Nonton konser & sesi studio secara live', 'Presale tiket untuk fan setia'],
+        perks: ['Streaming gratis, tanpa batas skip', 'Nonton konser & sesi studio secara live', 'Beli tiket gig di kotamu'],
         cta: 'Siap dengar lagi?',
       },
       artist: {
@@ -340,10 +342,10 @@ const dict = {
   },
   premium: {
     perMonth: '/bulan',
-    benefits: ['Podcast & fiksi eksklusif', 'Bebas iklan', 'Unduhan tanpa batas', 'Presale lebih awal'],
+    benefits: ['Podcast & fiksi eksklusif', 'Bebas iklan', 'AAC 320 & Lossless'],
     heroTitle1: 'Musik tetap gratis.',
     heroTitle2: 'Premium untuk sisanya.',
-    heroLead: (price: string) => `Podcast & audio fiksi eksklusif, tanpa iklan, unduhan tanpa batas, dan akses tiket lebih awal — mulai Rp ${price} per bulan.`,
+    heroLead: (price: string) => `Kualitas Tinggi (AAC 320) & Lossless/Hi-Res (FLAC), podcast & audio fiksi eksklusif, dan tanpa iklan — mulai Rp ${price} per bulan.`,
     alreadyPremium: 'Kamu sudah pelanggan Premium',
     remindWhenOpen: 'Ingatkan saya saat dibuka',
     seePlans: 'Lihat paket',
@@ -352,32 +354,29 @@ const dict = {
     notIncluded: 'Tidak termasuk',
     compareKicker: 'Gratis vs Premium',
     compareTitle: 'Semua yang penting tetap gratis.',
-    compareBody: 'Premium melengkapi, bukan mengunci. Musik dan kualitas terbaiknya selalu terbuka untuk semua.',
+    compareBody: 'Premium melengkapi, bukan mengunci. Semua musik tetap bisa didengar gratis; Premium menambah kualitas audio tertinggi dan pengalaman bebas iklan.',
     feature: 'Fitur',
     free: 'Gratis',
     compare: [
       'Musik on-demand tanpa batas',
-      'Kualitas lossless & Hi-Res',
+      'Kualitas Normal (AAC 160)',
+      'Kualitas Tinggi (AAC 320) & Lossless/Hi-Res (FLAC)',
       'Lirik sinkron & playlist',
       'Live streaming konser',
       'Podcast & audio fiksi premium',
       'Bebas iklan',
-      'Unduhan offline',
-      'Akses tiket presale',
     ],
+    comingSoon: 'Segera hadir: unduhan offline di aplikasi ponsel.',
     cells: {
       selectedEpisodes: 'Episode pilihan',
-      unlimited: 'Tanpa batas',
-      loyalFans: 'Fan setia',
-      allSubscribers: 'Semua pelanggan',
     },
     plans: {
       individual: {
         name: 'Individu',
         who: '1 akun',
         allBenefits: 'Semua manfaat Premium',
-        downloads: (devices: number) => `Unduhan di ${devices} perangkat`,
-        earlyAccess: 'Early access tiket presale',
+        quality: 'AAC 320 & Lossless/Hi-Res (FLAC)',
+        downloadsSoon: 'Unduhan offline — segera hadir',
       },
       student: {
         name: 'Pelajar',
@@ -389,7 +388,7 @@ const dict = {
       duo: {
         name: 'Duo',
         who: '2 akun dalam satu rumah',
-        items: ['Semua manfaat Individu', 'Dua akun Premium terpisah', 'Playlist Duo Mix'],
+        items: ['Semua manfaat Individu', 'Dua akun Premium terpisah'],
       },
     },
     mostPopular: 'Paling populer',
@@ -409,7 +408,7 @@ const dict = {
     faqTitle: 'Seputar Premium',
     faq: {
       q1: 'Apakah saya harus berlangganan untuk mendengar musik?',
-      a1: 'Tidak. Semua musik di RAVE gratis selamanya, termasuk kualitas lossless, lirik sinkron, dan live streaming. Premium hanya menambah podcast & audio fiksi eksklusif, bebas iklan, unduhan, dan akses tiket lebih awal.',
+      a1: 'Tidak. Semua musik di RAVE bisa didengar gratis (AAC hingga 160 kbps, dengan iklan sesekali), termasuk lirik sinkron dan live streaming. Premium menambah kualitas Tinggi (AAC 320) & Lossless/Hi-Res (FLAC), bebas iklan, serta podcast & audio fiksi eksklusif.',
       q2: 'Kapan Premium bisa dibeli?',
       a2: (trial: string) => 'Langganan dibuka bertahap setelah closed beta. Daftar di waitlist dan kami kabari lebih dulu' + (trial ? ` — pelanggan pertama mendapat masa coba gratis ${trial}.` : '.'),
       q3: 'Apakah artis mendapat bagian dari Premium?',

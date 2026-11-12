@@ -13,6 +13,11 @@ export interface CancellationInput {
   fee?: Idr;
   /** Biaya riil yang sudah dikeluarkan artis (force majeure). */
   incurredCosts?: Idr;
+  /**
+   * Manajemen membatalkan karena pelunasan promotor terlambat (status AT_RISK, BRD §7.2): DP hangus ke artis sesuai
+   * kontrak, pelunasan yang sudah masuk (bila ada) dikembalikan, tanpa denda artis.
+   */
+  settlementLate?: boolean;
 }
 
 export interface CancellationOutcome {
@@ -25,6 +30,9 @@ export interface CancellationOutcome {
 
 export function computeCancellation(i: CancellationInput): CancellationOutcome {
   const paid = i.dpPaid + i.settlementPaid;
+  if (i.party === 'artist' && i.settlementLate) {
+    return { toArtist: i.dpPaid, refundToPromotor: i.settlementPaid, artistPenalty: 0, holdForReschedule: false, rule: 'SETTLEMENT_LATE' };
+  }
   if (i.party === 'artist') {
     const penalty = i.fee ? Math.floor((i.fee * (i.artistPenaltyPct ?? 25)) / 100) : 0;
     return { toArtist: 0, refundToPromotor: paid, artistPenalty: penalty, holdForReschedule: false, rule: 'ARTIST_ANYTIME' };

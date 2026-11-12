@@ -323,7 +323,7 @@ const fan: Shape<typeof id> = {
     saveProfile: 'Save profile',
     audioQuality: 'Audio quality',
     streamingQuality: 'Streaming quality',
-    loudnessNote: 'Loudness normalization at −14 LUFS is on. Applies from the next song.',
+    loudnessNote: 'Quality changes apply from the next song.',
     notifications: 'Notifications',
     notifIntro: 'In-app notifications are always kept. Choose extra channels per category.',
     category: 'Category',

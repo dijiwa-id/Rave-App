@@ -321,6 +321,10 @@ export interface Dispute {
   outcome: string | null;
   note: string | null;
   created_at: string;
+  kind?: 'GENERAL' | 'FORCE_MAJEURE';
+  evidence?: string | null;
+  claimed_costs?: number | null;
+  awarded_costs?: number | null;
 }
 export interface Booking extends BookingSummary {
   start_time: string;
@@ -401,6 +405,8 @@ export interface AdminPayoutRow {
   decided_by: string | null;
   decided_at: string | null;
   decision_note: string | null;
+  transfer_ref?: string | null;
+  account_stored?: boolean;
   created_at: string;
   completed_at: string | null;
 }

@@ -11,7 +11,7 @@ import {
 import { audit, conflict, forbidden, managedArtistIds, notFound, publish, unprocessable, type AuthUser, type Client, type Db } from '@rave/service-kit';
 import { commissionPolicy, isPromotorMember, type BookingRow } from './common.js';
 import { contractAudit } from './routes-contracts.js';
-import { loadBooking, managementOrgId, transition } from './repo.js';
+import { loadBooking, managementOrgId, transition, freezeReleaseTerms } from './repo.js';
 import { getProvider, type SignContext, type SignatureRequest } from './signature-provider.js';
 
 const PARTY_LABEL: Record<SignParty, string> = { promotor: 'Promotor', management: 'Manajemen', artist: 'Artis' };
@@ -101,6 +101,7 @@ export async function verifySignOtp(db: Db, req: FastifyRequest, contractId: str
 /** Semua pihak selesai: booking → SIGNED dan event ke finance (invoice DP & pelunasan). Dipakai juga alur lama (status SENT). */
 export async function activateBooking(c: Client, b: BookingRow, contractId: string, sha: string) {
   const nb = await transition(c, b, 'SIGNED', 'system', { note: `Ditandatangani semua pihak · sha256 ${sha.slice(0, 12)}…` });
+  await freezeReleaseTerms(c, nb, contractId);
   const inv = bookingInvoice(nb.agreed_fee!, nb.dp_pct, commissionPolicy());
   await publish(c, 'booking.contract.signed', nb.id, {
     bookingId: nb.id,

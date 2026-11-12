@@ -30,8 +30,9 @@ export default function News() {
             </h1>
             <p className="mt-5 max-w-xl text-lg text-[#cfc4d8]">{d.lead}</p>
           </div>
-          <p className="rave-stamp text-white/60">{d.count(NEWS.length)}</p>
+          {NEWS.length > 0 && <p className="rave-stamp text-white/60">{d.count(NEWS.length)}</p>}
         </div>
+        {NEWS.length > 0 && (
         <nav aria-label={d.navLabel} className="mx-auto mt-10 flex max-w-[82.5rem] flex-wrap gap-2">
           {[null, ...NEWS_CATEGORIES].map((c) => {
             const on = (c ?? null) === (cat ?? null);
@@ -51,6 +52,7 @@ export default function News() {
             );
           })}
         </nav>
+        )}
       </section>
 
       <section className="px-4 py-14">

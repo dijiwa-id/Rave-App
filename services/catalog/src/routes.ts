@@ -1,12 +1,13 @@
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { forbidden, isAdmin, managedArtistIds, notFound, reqLocale, verifyMediaSig, z, type AuthUser, type ServiceContext } from '@rave/service-kit';
+import { forbidden, isAdmin, isPublicMediaFile, managedArtistIds, notFound, reqLocale, verifyMediaSig, z, type AuthUser, type ServiceContext } from '@rave/service-kit';
 import { ARTIST_SUMMARY_COLS, EPISODE_COLS, RELEASE_SUMMARY_SELECT, SHOW_COLS, TRACK_SELECT, isUuid, releaseFull } from './queries.js';
 import { UPLOAD_DIR } from './storage.js';
 
 export function canManageArtist(u: AuthUser | null, artistId: string) {
-  return isAdmin(u) || managedArtistIds(u).includes(artistId);
+  // Admin back office tidak mengelola karya artis (audit go-live A1); moderasi lewat /v1/admin/* (qc.review).
+  return !!u?.roles.includes('service') || managedArtistIds(u).includes(artistId);
 }
 
 const media = {
@@ -15,9 +16,6 @@ const media = {
   show: (s: any) => ({ id: s.id, kind: 'show', title: s.title, subtitle: s.publisher, image_url: s.cover_url, href: `/app/show/${s.id}` }),
   episode: (e: any) => ({ id: e.id, kind: 'episode', title: e.title, subtitle: e.show_title, image_url: e.cover_url, href: `/app/episode/${e.id}` }),
 };
-
-/** Berkas rendisi khusus Premium (lihat audio.ts: <id>.high.m4a / <id>.lossless.flac). */
-const PREMIUM_RENDITION = /\.(high\.m4a|lossless\.flac)$/;
 
 const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg',
@@ -232,15 +230,16 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
   });
 
   // ---------- Media hasil upload (dev; produksi: CDN/object storage) ----------
-  // Rendisi khusus Premium (AAC 320 / FLAC) hanya dengan URL bertanda tangan dari playback (berlaku sementara).
+  // Tanpa tanda tangan hanya rendisi gratis (AAC 64/160) & gambar. Master asli (format apa pun) dan rendisi khusus Premium
+  // (AAC 320 / FLAC) hanya lewat URL bertanda tangan dari playback / pratinjau Studio (berlaku sementara).
   // Mendukung Range (206) agar seek di berkas lossless besar tidak mengunduh ulang dari awal.
   app.get('/v1/catalog/media/:file', async (req, reply) => {
     const { file } = req.params as { file: string };
     if (!/^[\w.-]+$/.test(file)) throw notFound('Media');
-    const premiumOnly = PREMIUM_RENDITION.test(file);
-    if (premiumOnly) {
+    const signed = !isPublicMediaFile(file);
+    if (signed) {
       const q = req.query as { exp?: string; sig?: string };
-      if (!verifyMediaSig(`/v1/catalog/media/${file}`, q.exp, q.sig)) throw forbidden('Tautan media khusus Premium tidak valid atau kedaluwarsa');
+      if (!verifyMediaSig(`/v1/catalog/media/${file}`, q.exp, q.sig)) throw forbidden('Tautan media tidak valid atau kedaluwarsa');
     }
     const p = join(UPLOAD_DIR, file);
     if (!existsSync(p)) throw notFound('Media');
@@ -249,7 +248,7 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
     reply.header('content-type', MIME[ext] ?? 'application/octet-stream');
     reply.header('accept-ranges', 'bytes');
     // Bertanda tangan → jangan disimpan cache bersama (URL berganti tiap sesi); lainnya immutable.
-    reply.header('cache-control', premiumOnly ? 'private, max-age=3600' : 'public, max-age=31536000, immutable');
+    reply.header('cache-control', signed ? 'private, max-age=3600' : 'public, max-age=31536000, immutable');
     const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
     if (range && (range[1] || range[2])) {
       let start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));

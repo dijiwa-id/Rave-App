@@ -6,7 +6,10 @@ import {
   badRequest,
   config,
   conflict,
+  encryptField,
+  decryptField,
   forbidden,
+  hasPermission,
   HttpError,
   idempotent,
   isAdmin,
@@ -26,6 +29,7 @@ import {
 } from '@rave/service-kit';
 import { createInvoice, invoiceView, processPgEvent, processRefundEvent, settleRefund, signPayload, verifySignature, type PgEvent } from './escrow.js';
 import { C, D, SOURCES, payableAccount, post, serial, walletBalances } from './ledger.js';
+import { AUTO_PAYOUT, completePayout } from './jobs.js';
 import { activePaymentProvider, mapMidtransStatus, paymentSettings, providerByName, ProviderError, testMidtrans, verifyMidtransSignature, type ProviderPaymentStatus } from './providers.js';
 
 /** Status penyedia → event PG internal (jalur pemrosesan yang sama dengan webhook sandbox). */
@@ -45,14 +49,17 @@ function safeFinishUrl(u: string | undefined): string | undefined {
 }
 
 /** Kolom payout yang aman ditampilkan ke pemilik wallet (tanpa id pemutus). */
-const PAYOUT_COLS = 'id, party_id, amount, status, approval_required, hold_until, decision_note, created_at, decided_at, completed_at';
+const PAYOUT_COLS = 'id, party_id, amount, status, approval_required, hold_until, decision_note, transfer_ref, created_at, decided_at, completed_at';
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 const orgIds = (u: AuthUser) => u.orgs.map((o) => o.id);
 
+/** Membaca data keuangan pihak lain: token service atau admin dengan izin finance.view (bukan sekadar admin). */
+const financeViewer = (u: AuthUser) => u.roles.includes('service') || hasPermission(u, 'finance.view');
+
 function canSeeHold(u: AuthUser, h: any): boolean {
-  if (isAdmin(u)) return true;
+  if (financeViewer(u)) return true;
   const ids = orgIds(u);
   return (
     (h.promotor_org_id && ids.includes(h.promotor_org_id)) ||
@@ -61,11 +68,12 @@ function canSeeHold(u: AuthUser, h: any): boolean {
     (h.artist_id && managedArtistIds(u).includes(h.artist_id))
   );
 }
+/** Membayar tagihan: hanya pembayar (atau anggota org pembayar). Admin tidak membayar atas nama pengguna. */
 function canPayInvoice(u: AuthUser, inv: any): boolean {
-  return isAdmin(u) || inv.payer_user_id === u.sub || (!!inv.payer_org_id && orgIds(u).includes(inv.payer_org_id));
+  return inv.payer_user_id === u.sub || (!!inv.payer_org_id && orgIds(u).includes(inv.payer_org_id));
 }
 function canSeeWallet(u: AuthUser, partyId: string): boolean {
-  return isAdmin(u) || u.sub === partyId || orgIds(u).includes(partyId);
+  return financeViewer(u) || u.sub === partyId || orgIds(u).includes(partyId);
 }
 
 function holdStatus(h: any): string {
@@ -184,7 +192,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
            AND ($2 OR i.payer_user_id = $3::uuid OR i.payer_org_id = ANY($4::uuid[])
                 OR h.promotor_org_id = ANY($4::uuid[]) OR h.artist_org_id = ANY($4::uuid[]) OR h.artist_id = ANY($5::uuid[]))
          ORDER BY i.created_at DESC LIMIT 200`,
-        [reference_id ?? null, isAdmin(u), isUuid(u.sub) ? u.sub : null, orgIds(u), managedArtistIds(u)],
+        [reference_id ?? null, financeViewer(u), isUuid(u.sub) ? u.sub : null, orgIds(u), managedArtistIds(u)],
       );
       return { data: rows.map(invoiceView), next_cursor: null };
     });
@@ -193,7 +201,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       const inv = await db.one(`SELECT * FROM invoices WHERE id=$1`, [(req.params as any).id]);
       if (!inv) throw notFound('Invoice');
       const h = await db.one(`SELECT * FROM escrow_holds WHERE reference_id=$1`, [inv.reference_id]);
-      if (!canPayInvoice(req.user!, inv) && !(h && canSeeHold(req.user!, h))) throw forbidden();
+      if (!canPayInvoice(req.user!, inv) && !financeViewer(req.user!) && !(h && canSeeHold(req.user!, h))) throw forbidden();
       return invoiceView(inv);
     });
 
@@ -322,6 +330,8 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         .parse(req.body);
       const u = req.user!;
       if (p.party_id !== u.sub) assertOrg(u, p.party_id, ['OWNER', 'FINANCE']);
+      // KYC terverifikasi wajib sebelum menarik dana (anti pencucian uang & pengambilalihan akun — audit go-live B3).
+      if (!u.kyc) throw forbidden('Verifikasi KYC wajib sebelum menarik dana. Ajukan di menu Tim & KYC.');
       const minAmount = settings.num('payout.min_amount_idr');
       if (p.amount < minAmount) throw badRequest(`Minimal penarikan ${rupiah(minAmount)}`);
       return idempotent(db, req, reply, 'payout', async (c) => {
@@ -350,11 +360,11 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         if (!prev || prev.number_hash !== hash) {
           const changed = !!prev; // pendaftaran rekening pertama tidak memicu masa tunggu
           const r = await c.query(
-            `INSERT INTO bank_accounts (party_id, bank, number_masked, number_hash, holder, verified_at, changed_at) VALUES ($1,$2,$3,$4,$5, now(), NULL)
-             ON CONFLICT (party_id) DO UPDATE SET bank=$2, number_masked=$3, number_hash=$4, holder=$5, verified_at=now(), updated_at=now(),
+            `INSERT INTO bank_accounts (party_id, bank, number_masked, number_hash, holder, verified_at, changed_at, number_enc) VALUES ($1,$2,$3,$4,$5, now(), NULL, $7)
+             ON CONFLICT (party_id) DO UPDATE SET bank=$2, number_masked=$3, number_hash=$4, holder=$5, verified_at=now(), updated_at=now(), number_enc=$7,
                changed_at = CASE WHEN $6 THEN now() ELSE bank_accounts.changed_at END
              RETURNING changed_at`,
-            [p.party_id, p.bank_account.bank, masked, hash, p.bank_account.holder, changed],
+            [p.party_id, p.bank_account.bank, masked, hash, p.bank_account.holder, changed, encryptField(p.bank_account.number)],
           );
           changedAt = r.rows[0]?.changed_at ? new Date(r.rows[0].changed_at) : null;
           await audit(c, { actorId: u.sub, action: changed ? 'bank_account.change' : 'bank_account.register', entity: 'party', entityId: p.party_id, data: { bank: p.bank_account.bank, number: masked }, ip: req.ip });
@@ -376,9 +386,9 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         lines.push(C('asset:payout_clearing', p.amount));
         await post(c, { key: `payout:${id}`, kind: 'payout.request', referenceId: id, description: `Penarikan ke ${p.bank_account.bank} ${masked}`, lines });
         const r = await c.query(
-          `INSERT INTO payouts (id, party_id, amount, bank_snapshot, requested_by, status, approval_required, hold_until) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+          `INSERT INTO payouts (id, party_id, amount, bank_snapshot, requested_by, status, approval_required, hold_until, bank_number_enc) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
            RETURNING ${PAYOUT_COLS}`,
-          [id, p.party_id, p.amount, JSON.stringify({ bank: p.bank_account.bank, number: masked, holder: p.bank_account.holder }), u.sub, approvalRequired ? 'PENDING_APPROVAL' : 'REQUESTED', approvalRequired, hold],
+          [id, p.party_id, p.amount, JSON.stringify({ bank: p.bank_account.bank, number: masked, holder: p.bank_account.holder }), u.sub, approvalRequired ? 'PENDING_APPROVAL' : 'REQUESTED', approvalRequired, hold, encryptField(p.bank_account.number)],
         );
         await audit(c, { actorId: u.sub, action: 'payout.request', entity: 'payout', entityId: id, data: { amount: p.amount, approval_required: approvalRequired, hold_until: hold }, ip: req.ip });
         return { status: 201, body: r.rows[0] };
@@ -411,9 +421,12 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         decided_by: p.decided_by,
         decided_at: p.decided_at,
         decision_note: p.decision_note,
+        transfer_ref: p.transfer_ref,
+        account_stored: !!p.bank_number_enc,
         created_at: p.created_at,
         completed_at: p.completed_at,
       })),
+      auto_complete: AUTO_PAYOUT,
       counts: Object.fromEntries(counts.map((c) => [c.status, c.n])),
       threshold_idr: settings.num('payout.approval_threshold_idr'),
       cooldown_hours: settings.num('payout.bank_change_cooldown_hours'),
@@ -442,6 +455,42 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       );
       await audit(c, { actorId: u.sub, action: 'payout.approve', entity: 'payout', entityId: id, data: { amount: Number(p.amount), note: b.note ?? null }, ip: req.ip });
       return r.rows[0];
+    });
+  });
+
+  /** Nomor rekening lengkap untuk transfer manual — hanya penyetuju payout, tercatat di audit (data sensitif). */
+  app.post('/v1/admin/finance/payouts/:id/reveal', { preHandler: requirePermission('finance.payout') }, async (req) => {
+    const { id } = req.params as { id: string };
+    if (!isUuid(id)) throw notFound('Payout');
+    const u = req.user!;
+    const p = await db.one(`SELECT * FROM payouts WHERE id=$1`, [id]);
+    if (!p) throw notFound('Payout');
+    assertNotRequester(u, p);
+    if (p.status !== 'REQUESTED') throw conflict(`Payout berstatus ${p.status}`);
+    if (!p.bank_number_enc) throw unprocessable('Nomor rekening lengkap tidak tersimpan (data lama). Tolak payout ini agar pemilik mengajukan ulang.');
+    await audit(db, { actorId: u.sub, action: 'payout.reveal_account', entity: 'payout', entityId: id, ip: req.ip });
+    return { bank: p.bank_snapshot.bank, holder: p.bank_snapshot.holder, number: decryptField(p.bank_number_enc), amount: Number(p.amount) };
+  });
+
+  /**
+   * Finance mencatat transfer yang sudah dilakukan (internet banking / disbursement) dengan nomor referensi →
+   * COMPLETED + jurnal kliring → kas + notifikasi. Empat mata: bukan pemohon. Masa tunggu rekening tetap berlaku.
+   */
+  app.post('/v1/admin/finance/payouts/:id/complete', { preHandler: requirePermission('finance.payout') }, async (req) => {
+    const { id } = req.params as { id: string };
+    if (!isUuid(id)) throw notFound('Payout');
+    const b = z.object({ transfer_ref: z.string().trim().min(4, 'Nomor referensi transfer minimal 4 karakter').max(120), note: z.string().trim().max(500).optional() }).parse(req.body);
+    const u = req.user!;
+    return serial(db, async (c) => {
+      const p = (await c.query(`SELECT * FROM payouts WHERE id=$1 FOR UPDATE`, [id])).rows[0];
+      if (!p) throw notFound('Payout');
+      assertNotRequester(u, p);
+      if (p.status !== 'REQUESTED') throw conflict(`Payout berstatus ${p.status}`);
+      if (p.hold_until && new Date(p.hold_until).getTime() > Date.now()) throw conflict('Payout masih dalam masa tunggu rekening baru');
+      await completePayout(c, p, { transferRef: b.transfer_ref, by: u.sub });
+      if (b.note) await c.query(`UPDATE payouts SET decision_note = coalesce(decision_note || ' · ', '') || $2 WHERE id=$1`, [id, b.note]);
+      await audit(c, { actorId: u.sub, action: 'payout.complete', entity: 'payout', entityId: id, data: { amount: Number(p.amount), transfer_ref: b.transfer_ref }, ip: req.ip });
+      return (await c.query(`SELECT ${PAYOUT_COLS} FROM payouts WHERE id=$1`, [id])).rows[0];
     });
   });
 
@@ -493,11 +542,13 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     manual_ref: r.manual_ref,
   });
   app.get('/v1/admin/finance/refunds', { preHandler: requirePermission('finance.view') }, async (req) => {
-    const q = z.object({ status: z.enum(['REQUESTED', 'DISPATCHING', 'PENDING', 'COMPLETED', 'FAILED']).optional(), reference_id: z.string().optional() }).parse(req.query);
+    const q = z.object({ status: z.enum(['REQUESTED', 'DISPATCHING', 'PENDING', 'COMPLETED', 'FAILED']).optional(), reference_id: z.string().optional(), kind: z.enum(['booking', 'ticket']).optional() }).parse(req.query);
     const where: string[] = [];
     const params: unknown[] = [];
     if (q.status) where.push(`status = $${params.push(q.status)}`);
     if (q.reference_id) where.push(`reference_id = $${params.push(q.reference_id)}`);
+    if (q.kind === 'booking') where.push(`purpose IN ('BOOKING_DP','BOOKING_SETTLEMENT')`);
+    if (q.kind === 'ticket') where.push(`purpose = 'TICKET_ORDER'`);
     const rows = await db.query(`SELECT * FROM refunds ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT 200`, params);
     return { data: rows.map(refundOut) };
   });

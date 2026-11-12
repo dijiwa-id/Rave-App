@@ -20,6 +20,10 @@ import {
   z,
   type Client,
   type ServiceContext,
+  isSuperAdmin,
+  hasPermission,
+  signMediaUrl,
+  MEDIA_PREFIX,
 } from '@rave/service-kit';
 import { isUuid, releaseFull } from './queries.js';
 import { canManageArtist } from './routes.js';
@@ -27,18 +31,32 @@ import { imageSize, UPLOAD_DIR, uploadsBytes, wavInfo } from './storage.js';
 import { ffmpegPath, initialTranscodeStatus, probeAudio } from './audio.js';
 import { AUDIO_UPLOAD_TYPES, type AudioMeta } from '@rave/domain/audio';
 import { publishArtist } from './artists.js';
+import { formatIsrc, ISRC_MAX_DESIGNATION, normalizeIsrc, normalizeRegistrant, normalizeUpc } from './codes.js';
 
 const trackInput = z.object({
   title: z.string().trim().min(1).max(200),
   duration_ms: z.number().int().min(0).max(4 * 3600_000).optional(),
+  // ISO 3901: CC-XXX-YY-NNNNN (atau 12 karakter tanpa tanda hubung) → disimpan dalam bentuk bertanda hubung.
   isrc: z
     .string()
     .trim()
-    .regex(/^[A-Z]{2}-?[A-Z0-9]{3}-?\d{2}-?\d{5}$/i, 'Format ISRC tidak valid')
+    .max(20)
+    .transform((v, ctx) => {
+      if (!v) return null;
+      const n = normalizeIsrc(v);
+      if (!n) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Format ISRC tidak valid (CC-XXX-YY-NNNNN, mis. ID-A1B-26-00001)' });
+      return n;
+    })
     .optional()
     .nullable(),
   explicit: z.boolean().optional(),
-  audio_url: z.string().max(1000).optional().nullable(),
+  // Hanya berkas yang diunggah lewat Studio (lolos validasi & transcoding) — URL eksternal ditolak (audit go-live B7).
+  audio_url: z
+    .string()
+    .max(1000)
+    .regex(/^\/v1\/catalog\/media\/[\w.-]+$/, 'Audio harus berupa file yang diunggah lewat Artist Studio')
+    .optional()
+    .nullable(),
 });
 
 const releaseInput = z.object({
@@ -50,6 +68,19 @@ const releaseInput = z.object({
   label: z.string().trim().max(120).optional().nullable(),
   cover_url: z.string().max(1000).optional().nullable(),
   explicit: z.boolean().optional(),
+  // UPC-A (12 digit) / EAN-13 (13 digit) dengan digit periksa valid; kosong = belum ada (tidak dibuat otomatis).
+  upc: z
+    .string()
+    .trim()
+    .max(20)
+    .transform((v, ctx) => {
+      if (!v) return null;
+      const n = normalizeUpc(v);
+      if (!n) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'UPC/EAN tidak valid (12 atau 13 digit dengan digit periksa yang benar)' });
+      return n;
+    })
+    .optional()
+    .nullable(),
   tracks: z.array(trackInput).max(40).default([]),
 });
 
@@ -137,11 +168,46 @@ async function receiveUpload(src: Readable, path: string, maxMb: number) {
   return { bytes: meter.bytes, head: meter.head() };
 }
 
-/** RAVE sebagai pendaftar ISRC bila artis tidak punya (REQ-STU-01). Format ID-GM1-YY-NNNNN. */
-async function generateIsrc(tx: Client) {
-  const yy = String(new Date().getFullYear()).slice(2);
-  const r = await tx.query(`SELECT nextval('isrc_seq') AS n`);
-  return `ID-GM1-${yy}-${String(r.rows[0].n).padStart(5, '0')}`;
+/**
+ * RAVE sebagai pendaftar ISRC bila artis tidak punya (REQ-STU-01) — hanya bila Super Admin mengisi kode pendaftar resmi
+ * (`catalog.isrc_registrant_code`). Kosong/tidak valid → null (tidak ada ISRC palsu; QC melihat "ISRC kosong").
+ * Nomor urut per pendaftar & tahun, tidak berputar ulang; kode yang sudah dipakai lagu lain dilewati.
+ */
+async function generateIsrc(tx: Client): Promise<string | null> {
+  const registrant = normalizeRegistrant(settings.get<string>('catalog.isrc_registrant_code'));
+  if (!registrant) return null;
+  const year = new Date().getFullYear();
+  for (;;) {
+    const r = await tx.query(
+      `INSERT INTO isrc_counters (registrant, year, last_n) VALUES ($1, $2, 1)
+       ON CONFLICT (registrant, year) DO UPDATE SET last_n = isrc_counters.last_n + 1, updated_at = now()
+       WHERE isrc_counters.last_n < ${ISRC_MAX_DESIGNATION}
+       RETURNING last_n`,
+      [registrant, year],
+    );
+    if (!r.rowCount) throw unprocessable(`Kuota ISRC ${registrant} tahun ${year} habis (${ISRC_MAX_DESIGNATION}). Hubungi admin RAVE.`);
+    const isrc = formatIsrc(registrant, year, r.rows[0].last_n);
+    const used = await tx.query(`SELECT 1 FROM tracks WHERE isrc = $1 LIMIT 1`, [isrc]);
+    if (!used.rowCount) return isrc;
+  }
+}
+
+/** Nama berkas di bucket uploads dari audio_url Studio (`/v1/catalog/media/<file>`), atau null. */
+const storedNameOf = (url: string | null | undefined) => (url && url.startsWith(MEDIA_PREFIX) ? url.slice(MEDIA_PREFIX.length) : null);
+
+/**
+ * Audio lagu wajib berkas yang diunggah sendiri lewat Studio (upload audio selesai & lolos validasi, bukan gagal transcoding).
+ * Mencegah URL eksternal yang melewati validasi/transcoding, dan memakai master milik pengguna lain.
+ */
+async function assertOwnAudioUpload(q: { query: (sql: string, params: unknown[]) => Promise<any> }, userId: string, url: string | null | undefined) {
+  if (url == null) return;
+  const name = storedNameOf(url);
+  const res = name
+    ? await q.query(`SELECT user_id, kind, completed_at, transcode_status FROM uploads WHERE stored_name = $1`, [name])
+    : null;
+  const u = res ? (Array.isArray(res) ? res[0] : res.rows[0]) : null;
+  if (!u || u.kind !== 'audio' || !u.completed_at || u.user_id !== userId) throw unprocessable('Audio harus berupa file master yang Anda unggah lewat Artist Studio');
+  if (u.transcode_status === 'failed') throw unprocessable('Pengolahan audio file ini gagal — unggah ulang file master');
 }
 
 /** Durasi lagu kosong (0) diisi dari metadata master yang terbaca server — browser tidak bisa membaca durasi AIFF/ALAC dll. */
@@ -156,9 +222,10 @@ async function syncAudioDurations(q: { query: (sql: string, params: unknown[]) =
   );
 }
 
-async function insertTracks(tx: Client, releaseId: string, artistId: string, tracks: z.infer<typeof trackInput>[], startNo = 1) {
+async function insertTracks(tx: Client, userId: string, releaseId: string, artistId: string, tracks: z.infer<typeof trackInput>[], startNo = 1) {
   let n = startNo;
   for (const t of tracks) {
+    await assertOwnAudioUpload(tx, userId, t.audio_url);
     await tx.query(
       `INSERT INTO tracks (id, release_id, artist_id, title, track_number, duration_ms, explicit, isrc, audio_url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [uuidv7(), releaseId, artistId, t.title, n++, t.duration_ms ?? 0, t.explicit ?? false, t.isrc ?? (await generateIsrc(tx)), t.audio_url ?? null],
@@ -258,9 +325,9 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
           await tx.query(
             `INSERT INTO releases (id, artist_id, title, type, release_date, genre, label, cover_url, explicit, upc)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-            [id, b.artist_id, b.title, b.type, b.release_date, b.genre, b.label ?? null, b.cover_url ?? null, b.explicit ?? false, `899${Date.now().toString().slice(-9)}`],
+            [id, b.artist_id, b.title, b.type, b.release_date, b.genre, b.label ?? null, b.cover_url ?? null, b.explicit ?? false, b.upc ?? null],
           );
-          await insertTracks(tx, id, b.artist_id, b.tracks);
+          await insertTracks(tx, req.user!.sub, id, b.artist_id, b.tracks);
           await audit(tx, { actorId: req.user!.sub, action: 'release.create', entity: 'release', entityId: id, ip: req.ip });
           const r = await releaseFull(tx, id);
           delete r.artist_id;
@@ -300,7 +367,7 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       const t = trackInput.parse(req.body);
       return db.tx(async (tx) => {
         const n = await tx.query(`SELECT coalesce(max(track_number), 0) + 1 AS n FROM tracks WHERE release_id = $1`, [id]);
-        await insertTracks(tx, id, r.artist_id, [t], n.rows[0].n);
+        await insertTracks(tx, req.user!.sub, id, r.artist_id, [t], n.rows[0].n);
         const out = await releaseFull(tx, id);
         delete out.artist_id;
         reply.status(201);
@@ -320,6 +387,7 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
         sets.push(`${k} = $${vals.length}`);
       }
       if (!sets.length) throw badRequest('Tidak ada perubahan');
+      if (b.audio_url && b.audio_url !== t.audio_url) await assertOwnAudioUpload(db, req.user!.sub, b.audio_url);
       vals.push(id);
       await db.query(`UPDATE tracks SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
       if ('audio_url' in b) await syncAudioDurations(db, t.release_id);
@@ -334,6 +402,31 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       if (!EDITABLE.includes(t.release_status)) throw conflict('Lagu pada rilis yang sudah diajukan tidak dapat dihapus');
       await db.query(`DELETE FROM tracks WHERE id = $1`, [id]);
       return { ok: true };
+    });
+
+    // Pratinjau audio lagu (termasuk rilis yang belum tayang) untuk artis pengelola atau reviewer QC (qc.review).
+    // Master tidak publik → URL bertanda tangan berumur pendek; tidak membuat sesi playback (tidak tercatat sebagai stream).
+    s.get('/v1/studio/tracks/:id/preview', async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isUuid(id)) throw notFound('Lagu');
+      const t = await db.one(
+        `SELECT t.artist_id, t.audio_url, u.audio_meta, coalesce(u.renditions, '{}'::jsonb) AS renditions
+           FROM tracks t LEFT JOIN uploads u ON t.audio_url LIKE '/v1/catalog/media/%' AND u.stored_name = split_part(t.audio_url, '/v1/catalog/media/', 2)
+          WHERE t.id = $1`,
+        [id],
+      );
+      if (!t) throw notFound('Lagu');
+      if (!canManageArtist(req.user, t.artist_id) && !hasPermission(req.user, 'qc.review')) throw forbidden('Anda tidak mengelola artis ini');
+      if (!t.audio_url) throw notFound('Audio');
+      const ttl = 3600;
+      const sign = (url: string) => (url.startsWith(MEDIA_PREFIX) ? signMediaUrl(url, ttl) : url);
+      // Rendisi standar diputar semua browser; master (AIFF/ALAC dll.) belum tentu — tetap disertakan untuk diperiksa.
+      const std = t.renditions?.normal?.url ?? t.renditions?.low?.url ?? null;
+      return {
+        url: sign(std ?? t.audio_url),
+        master_url: sign(t.audio_url),
+        expires_at: new Date(Date.now() + ttl * 1000).toISOString(),
+      };
     });
 
     // ---------- Upload (dev: simpan lokal; produksi: presigned URL ke bucket quarantine) ----------
@@ -364,6 +457,10 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       if ((await uploadsBytes(db)) + b.size > settings.num('storage.quota_uploads_gb') * 1024 ** 3) throw unprocessable('Kuota penyimpanan upload platform penuh. Hubungi admin RAVE.');
       const id = uuidv7();
       const ext = (b.filename.match(/\.[a-z0-9]{2,5}$/i)?.[0] ?? (b.kind === 'audio' ? '.wav' : '.jpg')).toLowerCase();
+      // Ekstensi menentukan apakah berkas publik (gambar/rendisi gratis) atau wajib URL bertanda tangan (master) —
+      // audio berekstensi gambar (atau sebaliknya) ditolak agar master tidak bisa disajikan tanpa tanda tangan.
+      if (b.kind === 'audio' && !AUDIO_UPLOAD_TYPES[ext]) throw unprocessable(`Ekstensi file audio ${ext} tidak didukung (didukung: ${Object.keys(AUDIO_UPLOAD_TYPES).join(', ')})`);
+      if (b.kind === 'artwork' && !['.jpg', '.jpeg', '.png'].includes(ext)) throw unprocessable('Gambar harus berekstensi .jpg, .jpeg, atau .png');
       const stored = `${id}${ext}`;
       await db.query(`INSERT INTO uploads (id, user_id, kind, filename, content_type, size, stored_name, purpose) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [
         id,
@@ -473,8 +570,9 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       const r = await loadRelease(req, id);
       if (!EDITABLE.includes(r.status)) throw conflict(`Rilis sudah berstatus ${r.status}`);
       const tracks = await db.query(
-        `SELECT t.id, t.title, t.audio_url, u.transcode_status, u.transcode_error
-           FROM tracks t LEFT JOIN uploads u ON u.stored_name = split_part(t.audio_url, '/v1/catalog/media/', 2)
+        `SELECT t.id, t.title, t.audio_url, t.isrc, u.id AS upload_id, u.kind AS upload_kind, u.completed_at AS upload_completed_at,
+                u.transcode_status, u.transcode_error
+           FROM tracks t LEFT JOIN uploads u ON t.audio_url LIKE '/v1/catalog/media/%' AND u.stored_name = split_part(t.audio_url, '/v1/catalog/media/', 2)
           WHERE t.release_id = $1 ORDER BY t.track_number`,
         [id],
       );
@@ -485,6 +583,9 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       if (!tracks.some((t) => t.audio_url)) errors.push({ path: 'tracks', message: 'Minimal satu lagu memiliki file audio' });
       for (const t of tracks) {
         if (!t.audio_url) errors.push({ path: `tracks.${t.id}.audio_url`, message: `"${t.title}" belum memiliki audio` });
+        // Hanya master yang diunggah & lolos validasi Studio — URL eksternal/berkas tak dikenal melewati validasi & transcoding.
+        else if (!t.upload_id || t.upload_kind !== 'audio' || !t.upload_completed_at)
+          errors.push({ path: `tracks.${t.id}.audio_url`, message: `"${t.title}": audio harus berupa file master yang diunggah lewat Artist Studio` });
         // Tanpa rendisi standar, master lossless tidak bisa diputar pengguna Gratis — unggah ulang bila transcoding gagal.
         if (t.transcode_status === 'failed') errors.push({ path: `tracks.${t.id}.audio_url`, message: `"${t.title}": pengolahan audio gagal (${String(t.transcode_error ?? '').slice(0, 120)}) — unggah ulang file master` });
         const sp = await splitsOf(db, t.id);
@@ -517,7 +618,7 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
     s.put('/v1/studio/tracks/:id/splits', async (req) => {
       const { id } = req.params as { id: string };
       const t = await loadTrack(req, id);
-      if (!EDITABLE.includes(t.release_status) && !isAdmin(req.user)) throw conflict('Split rilis yang sudah diajukan hanya dapat diubah lewat dukungan');
+      if (!EDITABLE.includes(t.release_status) && !isSuperAdmin(req.user)) throw conflict('Split rilis yang sudah diajukan hanya dapat diubah lewat dukungan');
       const b = z.object({ master: z.array(splitInput).min(1).max(20), publishing: z.array(splitInput).min(1).max(20) }).parse(req.body);
       for (const [type, list] of [
         ['MASTER', b.master],
@@ -552,7 +653,7 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       const sp = await db.one(`SELECT rs.*, t.artist_id FROM rights_shares rs JOIN tracks t ON t.id = rs.track_id WHERE rs.id = $1`, [splitId]);
       if (!sp) throw notFound('Split');
       const mine = sp.email && sp.email.toLowerCase() === req.user!.email?.toLowerCase();
-      if (!mine && !isAdmin(req.user) && !(canManageArtist(req.user, sp.artist_id) && !sp.email)) throw forbidden('Hanya pihak yang diundang dapat menyetujui split ini');
+      if (!mine && !(canManageArtist(req.user, sp.artist_id) && !sp.email)) throw forbidden('Hanya pihak yang diundang dapat menyetujui split ini');
       const out = await db.one(
         `UPDATE rights_shares SET approved_at = coalesce(approved_at, now()) WHERE id = $1 RETURNING id, type, party_name, email, pct, approved_at`,
         [splitId],

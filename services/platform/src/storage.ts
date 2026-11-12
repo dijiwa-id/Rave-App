@@ -17,6 +17,7 @@ import {
   z,
   type Db,
   type ServiceContext,
+  signProtectedMediaUrl,
 } from '@rave/service-kit';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -119,7 +120,8 @@ async function scanBucket(bucket: BucketName): Promise<StoredFile[]> {
             size: st.size,
             content_type: contentType(key),
             modified_at: st.mtime.toISOString(),
-            url: bucket === 'uploads' ? `/v1/catalog/media/${key}` : bucket === 'branding' ? `/v1/platform/branding/${key}` : null,
+            // Master audio dilindungi (wajib tanda tangan) — tautan unduhan Super Admin diberi tanda tangan 1 jam.
+            url: bucket === 'uploads' ? signProtectedMediaUrl(`/v1/catalog/media/${key}`, 3600) : bucket === 'branding' ? `/v1/platform/branding/${key}` : null,
             referenced: null,
           };
         } catch {

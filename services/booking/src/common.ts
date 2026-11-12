@@ -60,8 +60,9 @@ export interface BookingRow {
   updated_at: string;
 }
 
+/** Mengelola artis = anggota org artis/manajemen yang mengelolanya. Admin back office tidak (audit go-live A1). */
 export function canManageArtist(u: AuthUser | null, artistId: string): boolean {
-  return isAdmin(u) || managedArtistIds(u).includes(artistId);
+  return !!u?.roles.includes('service') || managedArtistIds(u).includes(artistId);
 }
 export function assertManageArtist(u: AuthUser | null, artistId: string) {
   if (!canManageArtist(u, artistId)) throw forbidden('Anda tidak mengelola artis ini');

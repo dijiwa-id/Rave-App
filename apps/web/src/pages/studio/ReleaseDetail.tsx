@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Pencil, Plus, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, Pencil, Play, Plus, Trash2, Upload } from 'lucide-react';
 import { api, ApiError, fmt } from '@/lib/api';
 import type { Release, Split, Track, TrackAudio } from '@/lib/types';
 import { Badge, Button, Card, Field, Input, PageHeader, Select, toast } from '@/components/ui';
@@ -28,6 +28,44 @@ function AudioBadge({ audio }: { audio: TrackAudio | null | undefined }) {
       {PROCESSING.includes(audio.transcode_status) && <Badge tone="amber">{t.processing}</Badge>}
       {audio.transcode_status === 'failed' && <Badge tone="red">{t.failed}</Badge>}
     </span>
+  );
+}
+
+/**
+ * Pratinjau audio lagu milik artis (termasuk rilis yang belum tayang). Master tidak publik → server memberi URL bertanda
+ * tangan berumur pendek (GET /v1/studio/tracks/:id/preview); tidak tercatat sebagai stream.
+ */
+function TrackPreview({ trackId }: { trackId: string }) {
+  const t = useDict('b2b').studio.release;
+  const [src, setSrc] = useState<{ url: string; master_url: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (src)
+    return (
+      <span className="inline-flex flex-wrap items-center gap-2">
+        <audio controls autoPlay src={src.url} className="h-8 max-w-64" aria-label={t.preview} />
+        <a href={src.master_url} className="text-xs font-bold underline" target="_blank" rel="noreferrer">
+          {t.previewMaster}
+        </a>
+      </span>
+    );
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          setSrc(await api<{ url: string; master_url: string }>(`/v1/studio/tracks/${trackId}/preview`));
+        } catch (e) {
+          toast.error(e);
+        } finally {
+          setBusy(false);
+        }
+      }}
+      className="inline-flex items-center gap-1 text-xs font-bold text-b2b-muted hover:text-b2b-ink disabled:opacity-50"
+    >
+      <Play className="size-3.5" /> {t.preview}
+    </button>
   );
 }
 
@@ -64,14 +102,14 @@ function UploadButton({ kind, label, onUploaded }: { kind: 'audio' | 'artwork'; 
 /** Ubah metadata rilis DRAFT/REJECTED (PATCH /v1/studio/releases/:id — status kembali DRAFT). */
 function ReleaseMetaEditor({ r, onDone }: { r: Release; onDone: () => void }) {
   const qc = useQueryClient();
-  const [f, setF] = useState({ title: r.title, type: r.type, release_date: r.release_date, genre: r.genre ?? GENRES[0], label: r.label ?? '', explicit: r.explicit, cover_url: r.cover_url ?? '' });
+  const [f, setF] = useState({ title: r.title, type: r.type, release_date: r.release_date, genre: r.genre ?? GENRES[0], label: r.label ?? '', upc: r.upc ?? '', explicit: r.explicit, cover_url: r.cover_url ?? '' });
   const [busy, setBusy] = useState(false);
   const t = useDict('b2b').studio.release;
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     try {
-      await api(`/v1/studio/releases/${r.id}`, { method: 'PATCH', body: { ...f, label: f.label || null, cover_url: f.cover_url || null } });
+      await api(`/v1/studio/releases/${r.id}`, { method: 'PATCH', body: { ...f, label: f.label || null, upc: f.upc.trim() || null, cover_url: f.cover_url || null } });
       qc.invalidateQueries({ queryKey: ['studio-releases'] });
       toast.success(t.metaSaved);
       onDone();
@@ -109,6 +147,9 @@ function ReleaseMetaEditor({ r, onDone }: { r: Release; onDone: () => void }) {
           </Field>
           <Field label={t.labelOptional}>
             <Input value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
+          </Field>
+          <Field label={t.upc} hint={t.upcHint}>
+            <Input value={f.upc} inputMode="numeric" maxLength={20} onChange={(e) => setF({ ...f, upc: e.target.value })} />
           </Field>
           <label className="flex items-center gap-2 text-sm font-bold">
             <input type="checkbox" checked={f.explicit} onChange={(e) => setF({ ...f, explicit: e.target.checked })} /> {t.explicitContent}
@@ -157,7 +198,7 @@ function TrackEditor({ track, onDone }: { track: Track; onDone: () => void }) {
         <Input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} />
       </Field>
       <Field label={t.isrc} hint={t.isrcHint}>
-        <Input value={f.isrc} placeholder="ID-GM1-26-00001" onChange={(e) => setF({ ...f, isrc: e.target.value })} />
+        <Input value={f.isrc} placeholder={t.isrcPlaceholder} onChange={(e) => setF({ ...f, isrc: e.target.value })} />
       </Field>
       <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
         <label className="flex items-center gap-2 text-sm font-bold">
@@ -300,6 +341,8 @@ function TrackSplits({ track, editable }: { track: Track; editable: boolean }) {
           {track.track_number}. {track.title} <span className="ml-2 text-xs font-normal text-b2b-muted">{fmt.duration(track.duration_ms)}</span>
         </p>
         <AudioBadge audio={track.audio} />
+        {track.isrc ? <span className="font-mono text-xs text-b2b-muted">{track.isrc}</span> : <Badge tone="amber">{t.isrcEmpty}</Badge>}
+        <TrackPreview trackId={track.id} />
         <div className="flex items-center gap-2">
           {q.data && <Badge tone={q.data.fully_approved ? 'green' : 'amber'}>{q.data.fully_approved ? t.splitApproved : t.splitPending}</Badge>}
           {editable && !editTrack && (

@@ -35,17 +35,21 @@ export interface DomainEvents {
     // aditif (finance butuh untuk invoice & otorisasi escrow)
     artistOrgId?: string | null; promotorUserId?: string; eventDate?: string; settlementDaysBefore?: number; eventName?: string;
   };
-  'booking.completed': { bookingId: string; artistId: string; fee: number; splits: { partyId: string; pct: number }[]; payeeType: 'individual' | 'company' };
+  // taxPct/commissionPct: dari kontrak yang ditandatangani (aditif; event lama tanpa nilai ini memakai tarif bawaan).
+  'booking.completed': { bookingId: string; artistId: string; fee: number; splits: { partyId: string; pct: number }[]; payeeType: 'individual' | 'company'; taxPct?: number; commissionPct?: number };
   'booking.cancelled': {
     bookingId: string; party: 'promotor' | 'artist' | 'force_majeure'; daysBeforeEvent: number;
     // aditif: hasil computeCancellation (§7.3) agar finance mengeksekusi tanpa menghitung ulang
     toArtist?: number; refundToPromotor?: number; artistPenalty?: number; holdForReschedule?: boolean;
     artistId?: string; artistOrgId?: string | null; promotorOrgId?: string;
+    // aditif: syarat kontrak agar dana yang hangus ke artis dipotong komisi & PPh dan dibagi sesuai split (audit B4/B6)
+    taxPct?: number; commissionPct?: number; splits?: { partyId: string; pct: number }[];
   };
   'booking.dispute.opened': { bookingId: string; disputeId: string; byParty: string };
   'booking.dispute.resolved': {
     bookingId: string; disputeId: string; outcome: 'RELEASE_TO_ARTIST' | 'REFUND_PROMOTOR';
     fee: number; splits: { partyId: string; pct: number }[]; payeeType: 'individual' | 'company'; promotorOrgId: string;
+    taxPct?: number; commissionPct?: number;
     artistId?: string; // aditif (notifikasi hasil mediasi ke sisi artis)
   };
 

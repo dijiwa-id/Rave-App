@@ -1,5 +1,5 @@
 import type { Consumers, ServiceContext } from '@rave/service-kit';
-import { createInvoice, refundEscrow, refundTicketOrder, releaseEscrow } from './escrow.js';
+import { collectArtistPenalty, createInvoice, refundEscrow, refundTicketOrder, releaseEscrow } from './escrow.js';
 import { disputeWindowMs } from './jobs.js';
 
 const endOfDayWib = (date: string) => new Date(`${date}T23:59:59+07:00`);
@@ -48,7 +48,7 @@ export function consumers({ log }: ServiceContext): Consumers {
       await tx.query(`UPDATE escrow_holds SET release_at = now() + make_interval(secs => $2), release_payload=$3, updated_at=now() WHERE reference_id=$1`, [
         p.bookingId,
         disputeWindowMs() / 1000,
-        JSON.stringify({ fee: p.fee, splits: p.splits, payeeType: p.payeeType }),
+        JSON.stringify({ fee: p.fee, splits: p.splits, payeeType: p.payeeType, taxPct: p.taxPct, commissionPct: p.commissionPct }),
       ]);
     },
 
@@ -76,7 +76,10 @@ export function consumers({ log }: ServiceContext): Consumers {
         await tx.query(`UPDATE invoices SET status='EXPIRED' WHERE reference_id=$1 AND status='PENDING'`, [p.bookingId]);
         return;
       }
-      await refundEscrow(tx, p.bookingId, p.toArtist ?? 0, p.artistOrgId ?? null, `Pembatalan (${p.party}, H-${p.daysBeforeEvent})`);
+      const reason = p.party === 'force_majeure' ? 'Force majeure (putusan mediasi)' : `Pembatalan (${p.party}, H-${p.daysBeforeEvent})`;
+      await refundEscrow(tx, p.bookingId, p.toArtist ?? 0, p.artistOrgId ?? null, reason, p.splits?.length ? { splits: p.splits, taxPct: p.taxPct, commissionPct: p.commissionPct } : undefined);
+      // Denda artis membatalkan (§7.3): ditagih dari saldo wallet artis ke wallet promotor; sisa → piutang (tindak lanjut Finance).
+      if ((p.artistPenalty ?? 0) > 0 && p.promotorOrgId) await collectArtistPenalty(tx, { bookingId: p.bookingId, artistParty: p.artistOrgId ?? p.artistId ?? null, promotorOrgId: p.promotorOrgId, amount: p.artistPenalty! });
     },
 
     // Dana dibekukan selama sengketa (REQ-B2B-12)
@@ -86,7 +89,7 @@ export function consumers({ log }: ServiceContext): Consumers {
     'booking.dispute.resolved': async (e, tx) => {
       const p = e.payload;
       if (p.outcome === 'RELEASE_TO_ARTIST') {
-        await releaseEscrow(tx, p.bookingId, { fee: p.fee, splits: p.splits, payeeType: p.payeeType }, 'Pencairan berdasarkan keputusan mediasi');
+        await releaseEscrow(tx, p.bookingId, { fee: p.fee, splits: p.splits, payeeType: p.payeeType, taxPct: p.taxPct, commissionPct: p.commissionPct }, 'Pencairan berdasarkan keputusan mediasi');
       } else {
         await refundEscrow(tx, p.bookingId, 0, null, 'Refund berdasarkan keputusan mediasi');
       }

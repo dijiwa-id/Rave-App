@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { motion, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform, type MotionValue } from 'motion/react';
-import { ArrowRight, BadgeCheck, Check, ChevronDown, Download, Lock, Minus, Podcast, Sparkles, Ticket, VolumeX } from 'lucide-react';
+import { ArrowRight, AudioLines, BadgeCheck, Check, ChevronDown, Lock, Minus, Podcast, Sparkles, VolumeX } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Show } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
@@ -17,8 +17,9 @@ import { Vinyl } from './Vinyl';
 import { PublicFooter, PublicNav } from './PublicChrome';
 
 /**
- * Halaman RAVE Premium. Prinsip produk (BRD): musik selalu gratis — Premium hanya untuk podcast & audio fiksi
- * premium, bebas iklan, unduhan tanpa batas, dan akses tiket lebih awal. Billing langganan dibuka pada fase
+ * Halaman RAVE Premium. Prinsip produk (BRD + D-03): musik selalu gratis (AAC hingga 160) — Premium membuka AAC 320 &
+ * Lossless/Hi-Res FLAC, bebas iklan, serta podcast & audio fiksi premium. Unduhan offline belum ada (ditandai "segera
+ * hadir"); tidak ada janji akses tiket lebih awal. Billing langganan dibuka pada fase
  * berikutnya (REQ-PAY-03), jadi CTA mengarah ke waitlist, bukan checkout palsu.
  *
  * Interaksi scroll mengikuti landing (LandingScroll.tsx): RAVE glass, kartu 3D yang tegak saat di-scroll, kartu
@@ -35,19 +36,19 @@ type CellKey = keyof PublicDict['premium']['cells'];
 const COMPARE_CELLS: { free: boolean | CellKey; premium: boolean | CellKey }[] = [
   { free: true, premium: true },
   { free: true, premium: true },
+  // Keputusan D-03: AAC 320 & Lossless/Hi-Res FLAC khusus Premium (ditegakkan server, packages/domain/src/audio.ts).
+  { free: false, premium: true },
   { free: true, premium: true },
   { free: true, premium: true },
   { free: 'selectedEpisodes', premium: true },
   { free: false, premium: true },
-  { free: false, premium: 'unlimited' },
-  { free: 'loyalFans', premium: 'allSubscribers' },
 ];
 
 type Pricing = ReturnType<typeof usePricing>;
 
 // Harga, masa coba, verifikasi pelajar, dan jumlah perangkat dari Super Admin (`subscription.*`).
 const plans = (t: Pricing, d: PublicDict['premium']['plans']) => [
-  { name: d.individual.name, price: t.individual, who: d.individual.who, items: [d.individual.allBenefits, d.individual.downloads(t.devices), d.individual.earlyAccess], popular: true },
+  { name: d.individual.name, price: t.individual, who: d.individual.who, items: [d.individual.allBenefits, d.individual.quality, d.individual.downloadsSoon], popular: true },
   { name: d.student.name, price: t.student, who: d.student.who, items: [d.student.allBenefits, d.student.verification, d.student.renewed(t.studentMonths)], popular: false },
   { name: d.duo.name, price: t.duo, who: d.duo.who, items: [...d.duo.items], popular: false },
 ];
@@ -62,7 +63,7 @@ const faqs = (t: Pricing, f: PublicDict['premium']['faq']): [string, string][] =
   [f.q5, f.a5(t.studentMonths)],
 ];
 
-const BENEFIT_ICONS = [Podcast, VolumeX, Download, Ticket];
+const BENEFIT_ICONS = [Podcast, VolumeX, AudioLines];
 
 // =============================================================================================
 // Hero — Aurora seperti home, konten memudar saat di-scroll, kartu keanggotaan 3D yang tegak
@@ -252,6 +253,7 @@ function Compare() {
           </tbody>
         </table>
       </div>
+      <p className="mx-auto mt-4 max-w-4xl text-center text-sm text-white/55">{d.comingSoon}</p>
     </Section>
   );
 }

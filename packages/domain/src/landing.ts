@@ -16,7 +16,7 @@ export const LANDING_SECTIONS = [
   { id: 'how', label: 'Cara kerja', hint: 'Alur dengar → booking → panggung.' },
   { id: 'events', label: 'Event mendatang', hint: 'Diambil otomatis dari modul tiket.' },
   { id: 'testimonial', label: 'Testimoni', hint: 'Kutipan dari scene.' },
-  { id: 'sponsor', label: 'Banner sponsor', hint: 'Slot iklan display berlabel “Iklan”.' },
+  { id: 'sponsor', label: 'Banner sponsor', hint: 'Slot iklan display berlabel “Iklan” — tampil hanya bila kreatif diisi & penayangan iklan aktif.' },
   { id: 'movement', label: 'Gerakan', hint: 'Kolase ajakan bergabung.' },
   { id: 'pricing', label: 'Harga', hint: 'Paket Gratis & Premium (harga dari pengaturan langganan).' },
   { id: 'faq', label: 'FAQ', hint: 'Pertanyaan umum.' },
@@ -83,8 +83,8 @@ export const LANDING_DEFAULT: LandingContent = {
     prefix: l('ke', 'to'),
     words: [l('panggung.', 'stages.'), l('kotamu.', 'your city.'), l('gigs.', 'gigs.'), l('festival.', 'festivals.')],
     lead: l(
-      'Dengarkan rilisan musisi independen Indonesia gratis dalam kualitas lossless, temukan scene di kotamu, lalu datang dan dukung mereka langsung di panggung.',
-      "Stream releases from Indonesia's independent musicians for free in lossless quality, discover your city's scene, then show up and support them live.",
+      'Dengarkan rilisan musisi independen Indonesia secara gratis, temukan scene di kotamu, lalu datang dan dukung mereka langsung di panggung.',
+      "Stream releases from Indonesia's independent musicians for free, discover your city's scene, then show up and support them live.",
     ),
     cta_primary: l('Mulai mendengarkan', 'Start listening'),
     cta_primary_href: '/app',
@@ -95,7 +95,7 @@ export const LANDING_DEFAULT: LandingContent = {
     l('Musik DIY', 'DIY music'),
     l('Indie kamar', 'Bedroom indie'),
     l('Gigs kotamu', 'Gigs in your city'),
-    l('Lossless gratis', 'Free lossless'),
+    l('Streaming gratis', 'Free streaming'),
     l('Noise & tape', 'Noise & tape'),
     l('Dukung langsung', 'Support directly'),
   ],
@@ -117,15 +117,15 @@ export const LANDING_DEFAULT: LandingContent = {
     {
       q: l('Apakah musik benar-benar gratis?', 'Is the music really free?'),
       a: l(
-        'Ya. Streaming, playlist, lirik, kualitas audio terbaik, dan pemutaran tanpa batas gratis untuk semua pengguna terdaftar. Premium hanya untuk podcast premium, audio fiksi, dan pengalaman bebas iklan.',
-        'Yes. Streaming, playlists, lyrics, the best audio quality and unlimited playback are free for every registered user. Premium is only for premium podcasts, audio fiction and an ad-free experience.',
+        'Ya. Streaming on-demand (AAC hingga 160 kbps), playlist, dan lirik gratis untuk semua pengguna terdaftar, dengan iklan sesekali. Premium membuka kualitas Tinggi (AAC 320) dan Lossless/Hi-Res (FLAC), bebas iklan, serta podcast & audio fiksi premium.',
+        'Yes. On-demand streaming (AAC up to 160 kbps), playlists and lyrics are free for every registered user, with occasional ads. Premium unlocks High quality (AAC 320) and Lossless/Hi-Res (FLAC), no ads, and premium podcasts & audio fiction.',
       ),
     },
     {
       q: l('Bagaimana royalti streaming dihitung?', 'How are streaming royalties calculated?'),
       a: l(
-        'RAVE memakai model user-centric (hybrid): pendapatan dari seorang pendengar hanya dibagi ke artis yang ia dengarkan. Hanya pemutaran ≥30 detik yang lolos deteksi fraud yang dihitung. Statement bulanan terbit paling lambat tanggal 15 bulan berikutnya, rinci per lagu dan pemegang hak.',
-        "RAVE uses a user-centric (hybrid) model: a listener's revenue is shared only among the artists they actually listen to. Only plays of 30 seconds or more that pass fraud detection count. Monthly statements are issued by the 15th of the following month, itemised per track and rights holder.",
+        'RAVE memakai model user-centric (hybrid): pendapatan dari seorang pendengar hanya dibagi ke artis yang ia dengarkan. Hanya pemutaran ≥30 detik yang lolos deteksi fraud yang dihitung. Laporan royalti untuk artis sedang disiapkan dan akan tersedia di Artist Studio.',
+        "RAVE uses a user-centric (hybrid) model: a listener's revenue is shared only among the artists they actually listen to. Only plays of 30 seconds or more that pass fraud detection count. Royalty reports for artists are being prepared and will be available in Artist Studio.",
       ),
     },
     {
@@ -150,17 +150,8 @@ export const LANDING_DEFAULT: LandingContent = {
       ),
     },
   ],
-  sponsor: {
-    advertiser: 'BRAP Fibrecase',
-    handle: '@brap_fibrecase',
-    headline: l('Hardcase fiberglass pertama di Indonesia', "Indonesia's first fiberglass hardcase"),
-    body: l(
-      'Lindungi gitarmu dari bagasi, jalanan, sampai panggung — keras di luar, ringan dibawa.',
-      'Protect your guitar from the luggage hold to the road to the stage — tough outside, light to carry.',
-    ),
-    cta: l('Lihat koleksi', 'See the collection'),
-    href: 'https://www.instagram.com/brap_fibrecase/',
-  },
+  // Kosong = tidak ada banner sponsor sampai Super Admin mengisi kreatif di Editor Landing (tanpa kreatif bawaan).
+  sponsor: { advertiser: '', handle: '', headline: l('', ''), body: l('', ''), cta: l('', ''), href: '' },
 };
 
 /** Pilih teks sesuai bahasa; jatuh ke Bahasa Indonesia bila terjemahan kosong. */
@@ -191,6 +182,20 @@ function list<T>(v: unknown, path: string, lim: { min: number; max: number }, ea
   if (v.length < lim.min) throw new Error(`${path}: minimal ${lim.min} item`);
   if (v.length > lim.max) throw new Error(`${path}: maksimal ${lim.max} item`);
   return v.map(each);
+}
+
+/** Sponsor opsional: pengiklan kosong = tidak ada banner (semua field lain diabaikan & dikosongkan). */
+function coerceSponsor(sp: Record<string, unknown>): LandingContent['sponsor'] {
+  const advertiser = str(sp.advertiser, 'Sponsor · pengiklan', 60, false);
+  if (!advertiser) return { advertiser: '', handle: '', headline: { id: '', en: '' }, body: { id: '', en: '' }, cta: { id: '', en: '' }, href: '' };
+  return {
+    advertiser,
+    handle: str(sp.handle, 'Sponsor · akun', 60, false),
+    headline: l10n(sp.headline, 'Sponsor · judul', 70),
+    body: l10n(sp.body, 'Sponsor · deskripsi', 160),
+    cta: l10n(sp.cta, 'Sponsor · tombol', 24),
+    href: href(sp.href, 'Sponsor · tautan'),
+  };
 }
 
 /** Validasi & normalisasi konten landing. Melempar Error berbahasa Indonesia (path field disertakan). */
@@ -246,13 +251,6 @@ export function coerceLanding(value: unknown): LandingContent {
       const o = (x ?? {}) as Record<string, unknown>;
       return { q: l10n(o.q, `FAQ #${i + 1} · pertanyaan`, 140), a: l10n(o.a, `FAQ #${i + 1} · jawaban`, 800) };
     }),
-    sponsor: {
-      advertiser: str(sp.advertiser, 'Sponsor · pengiklan', 60),
-      handle: str(sp.handle, 'Sponsor · akun', 60, false),
-      headline: l10n(sp.headline, 'Sponsor · judul', 70),
-      body: l10n(sp.body, 'Sponsor · deskripsi', 160),
-      cta: l10n(sp.cta, 'Sponsor · tombol', 24),
-      href: href(sp.href, 'Sponsor · tautan'),
-    },
+    sponsor: coerceSponsor(sp),
   };
 }

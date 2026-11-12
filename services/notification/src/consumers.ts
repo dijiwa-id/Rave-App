@@ -181,6 +181,15 @@ export function consumers(_ctx: ServiceContext): Consumers {
     },
     'finance.refund.completed': async (e, tx) => {
       const p = e.payload;
+      if (p.purpose === 'BOOKING_DP' || p.purpose === 'BOOKING_SETTLEMENT') {
+        await notifyUsers(tx, [p.payerUserId], e.id, {
+          category: 'payment',
+          title: 'Dana booking dikembalikan',
+          body: `${rupiah(p.amount)} dikembalikan ke metode pembayaran asal (${p.reason}).`,
+          link: '/promotor/bookings',
+        });
+        return;
+      }
       if (p.purpose !== 'TICKET_ORDER') return;
       const why = TICKET_REFUND_REASON_LABEL[p.reason as TicketRefundReason] ?? 'Refund tiket';
       await notifyUsers(tx, [p.payerUserId], e.id, {

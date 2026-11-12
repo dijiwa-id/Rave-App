@@ -38,7 +38,7 @@ const dict: Shape<typeof id> = {
     liveWatching: (n) => `Live · ${n} watching`,
     liveStreaming: 'Live streaming',
     studioSessions: 'Studio sessions & concerts',
-    losslessFree: 'Lossless FLAC · free',
+    losslessFree: 'AAC 160 · free',
   },
   band: {
     partnersAria: 'RAVE music partners',
@@ -46,10 +46,12 @@ const dict: Shape<typeof id> = {
   },
   statsAria: 'RAVE stats',
   sponsorAria: 'Sponsor',
+  /** Label promosi internal (house ad) di kartu iklan pemutar. */
+  houseAdLabel: 'From RAVE',
   why: {
     eyebrow: 'Why choose',
     items: [
-      { t: 'Lossless, free', b: 'Studio quality for every listener — unlimited skips.' },
+      { t: 'Free music', b: 'On-demand streaming for every listener — AAC 320 & Lossless on Premium.' },
       { t: 'Audience Match by city', b: 'Promoters see which cities actually listen to an artist.' },
       { t: 'Funds safe in escrow', b: 'Deposits held by a BI-licensed partner, paid out D+1 after the show.' },
       { t: 'Contracts & OTP e-sign', b: 'Work orders generated automatically, signed in sequence, hash-verified.' },
@@ -86,9 +88,9 @@ const dict: Shape<typeof id> = {
     fan: {
       alt: 'Concert crowd in front of a glowing stage',
       label: 'For listeners',
-      title: 'All free. Best quality.',
+      title: 'Free music. Premium for the best quality.',
       body: 'Unlimited skips, unlimited hours — from your local indie scene to podcasts and serialized fiction.',
-      features: ['Free Lossless & Hi-Res', 'Synced lyrics & karaoke mode', 'Live-streamed concerts', 'Presales for loyal fans'],
+      features: ['Free streaming in AAC up to 160 kbps', 'Synced lyrics & karaoke mode', 'Live-streamed concerts', 'Gig news & tickets in your city'],
       cta: 'Start listening',
     },
     artist: {
@@ -115,7 +117,7 @@ const dict: Shape<typeof id> = {
     steps: [
       { t: 'Listen', b: 'Fans stream for free. Every play of 30 seconds or more becomes market-demand data by city.' },
       { t: 'Book', b: 'Promoters find artists through Audience Match, negotiate in a structured flow, then sign an e-contract.' },
-      { t: 'Play', b: 'Fans get presale tickets, the artist performs, funds are paid out D+1 after the show — split straight to the team.' },
+      { t: 'Play', b: 'Fans buy tickets, the artist performs, funds are paid out D+1 after the show — split straight to the team.' },
     ],
     step: (n) => `Step ${n}`,
     escrowTitle: 'Escrow fund flow',
@@ -144,8 +146,8 @@ const dict: Shape<typeof id> = {
     free: 'Free',
     forever: 'forever',
     perMonth: '/month',
-    freeItems: ['Unlimited on-demand music', 'Lossless & Hi-Res (Wi-Fi opt-in)', 'Synced lyrics & playlists', 'Event news & loyal-fan presales', 'Occasional ads'],
-    premiumItems: ['Everything in Free', 'Premium podcasts & audio fiction', 'Ad-free', 'Unlimited downloads', 'Early ticket access'],
+    freeItems: ['Unlimited on-demand music', 'Quality up to AAC 160 kbps', 'Synced lyrics & playlists', 'Event news & tickets', 'Occasional ads'],
+    premiumItems: ['Everything in Free', 'AAC 320 & Lossless/Hi-Res (FLAC)', 'Premium podcasts & audio fiction', 'Ad-free'],
     startListening: 'Start listening',
     seePremium: 'See Premium plans',
     stickerPick: 'Scene',
@@ -210,9 +212,9 @@ const dict: Shape<typeof id> = {
     copy: {
       fan: {
         kicker: 'For listeners',
-        title: 'Your favorite indie music, free & lossless.',
+        title: 'Your favorite indie music, free.',
         body: "Listen to Indonesia's independent musicians, save playlists, then catch them live in your city.",
-        perks: ['Free lossless streaming, unlimited skips', 'Watch concerts & studio sessions live', 'Ticket presales for loyal fans'],
+        perks: ['Free streaming, unlimited skips', 'Watch concerts & studio sessions live', 'Buy tickets to gigs in your city'],
         cta: 'Ready to listen again?',
       },
       artist: {
@@ -341,10 +343,10 @@ const dict: Shape<typeof id> = {
   },
   premium: {
     perMonth: '/month',
-    benefits: ['Exclusive podcasts & fiction', 'Ad-free', 'Unlimited downloads', 'Early presale access'],
+    benefits: ['Exclusive podcasts & fiction', 'Ad-free', 'AAC 320 & Lossless'],
     heroTitle1: 'Music stays free.',
     heroTitle2: 'Premium for the rest.',
-    heroLead: (price) => `Exclusive podcasts & audio fiction, no ads, unlimited downloads and early ticket access — from Rp ${price} a month.`,
+    heroLead: (price) => `High quality (AAC 320) & Lossless/Hi-Res (FLAC), exclusive podcasts & audio fiction, and no ads — from Rp ${price} a month.`,
     alreadyPremium: "You're already a Premium subscriber",
     remindWhenOpen: 'Remind me when it opens',
     seePlans: 'See plans',
@@ -353,32 +355,29 @@ const dict: Shape<typeof id> = {
     notIncluded: 'Not included',
     compareKicker: 'Free vs Premium',
     compareTitle: 'Everything that matters stays free.',
-    compareBody: 'Premium adds on, it never locks away. Music at its best quality is always open to everyone.',
+    compareBody: 'Premium adds on, it never locks away. All music stays free to stream; Premium adds the highest audio quality and an ad-free experience.',
     feature: 'Feature',
     free: 'Free',
     compare: [
       'Unlimited on-demand music',
-      'Lossless & Hi-Res quality',
+      'Normal quality (AAC 160)',
+      'High quality (AAC 320) & Lossless/Hi-Res (FLAC)',
       'Synced lyrics & playlists',
       'Live-streamed concerts',
       'Premium podcasts & audio fiction',
       'Ad-free',
-      'Offline downloads',
-      'Presale ticket access',
     ],
+    comingSoon: 'Coming soon: offline downloads in the mobile app.',
     cells: {
       selectedEpisodes: 'Selected episodes',
-      unlimited: 'Unlimited',
-      loyalFans: 'Loyal fans',
-      allSubscribers: 'All subscribers',
     },
     plans: {
       individual: {
         name: 'Individual',
         who: '1 account',
         allBenefits: 'All Premium benefits',
-        downloads: (devices) => `Downloads on ${devices} ${devices === 1 ? 'device' : 'devices'}`,
-        earlyAccess: 'Early access to ticket presales',
+        quality: 'AAC 320 & Lossless/Hi-Res (FLAC)',
+        downloadsSoon: 'Offline downloads — coming soon',
       },
       student: {
         name: 'Student',
@@ -390,7 +389,7 @@ const dict: Shape<typeof id> = {
       duo: {
         name: 'Duo',
         who: '2 accounts in one household',
-        items: ['All Individual benefits', 'Two separate Premium accounts', 'Duo Mix playlist'],
+        items: ['All Individual benefits', 'Two separate Premium accounts'],
       },
     },
     mostPopular: 'Most popular',
@@ -410,7 +409,7 @@ const dict: Shape<typeof id> = {
     faqTitle: 'About Premium',
     faq: {
       q1: 'Do I need to subscribe to listen to music?',
-      a1: 'No. All music on RAVE is free forever, including lossless quality, synced lyrics and live streaming. Premium only adds exclusive podcasts & audio fiction, no ads, downloads and early ticket access.',
+      a1: 'No. All music on RAVE is free to stream (AAC up to 160 kbps, with occasional ads), including synced lyrics and live streaming. Premium adds High quality (AAC 320) & Lossless/Hi-Res (FLAC), no ads, and exclusive podcasts & audio fiction.',
       q2: 'When can I buy Premium?',
       a2: (trial) => "Subscriptions open gradually after the closed beta. Join the waitlist and we'll tell you first" + (trial ? ` — early subscribers get a ${trial} free trial.` : '.'),
       q3: 'Do artists get a share of Premium?',

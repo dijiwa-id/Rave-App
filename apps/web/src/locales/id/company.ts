@@ -66,7 +66,7 @@ const company = {
       pass: 'Crew pass',
       access: 'All access · backstage',
       yourName: 'Namamu di sini',
-      stickerTop: 'Kami merekrut',
+      stickerTop: 'Segera merekrut',
       stickerBottom: 'tim kecil · dampak besar',
       teams: 'Bidang',
     },
@@ -127,7 +127,7 @@ const company = {
       body: 'Setiap stream memperkaya profil artis; setiap event mendorong pendengar kembali ke musiknya.',
     },
     products: [
-      { title: 'Aplikasi RAVE', body: 'Streaming musik gratis dengan kualitas lossless, lirik sinkron, playlist, podcast, dan audio fiksi — di web dan ponsel.', meta: 'Untuk pendengar' },
+      { title: 'Aplikasi RAVE', body: 'Streaming musik gratis, lirik sinkron, playlist, podcast, dan audio fiksi di web — Premium membuka AAC 320 & Lossless (FLAC).', meta: 'Untuk pendengar' },
       { title: 'Artist Studio', body: 'Rilis karya, atur split hak, pantau pendengar per kota, kelola EPK, rate card, kalender, kontrak, dan pencairan dana.', meta: 'Untuk artis & manajemen' },
       { title: 'Promotor Hub', body: 'Temukan artis lewat Audience Match, negosiasi terstruktur, kontrak elektronik, rekening bersama, tiket QR, dan check-in.', meta: 'Untuk promotor & EO' },
       { title: 'RAVE Live', body: 'Siarkan konser dan sesi langsung dari OBS atau browser, dengan chat dan akses berbasis tiket.', meta: 'Untuk artis & promotor' },
@@ -256,8 +256,8 @@ const company = {
     seeTeams: 'Lihat bidang',
     teamsHeading: {
       kicker: 'Bidang',
-      title: 'Tempat kamu bisa berkontribusi.',
-      body: 'Kami merekrut bertahap mengikuti roadmap produk. Belum melihat peran yang pas? Lamaran terbuka selalu kami baca.',
+      title: 'Lowongan akan diumumkan.',
+      body: 'Saat ini belum ada lowongan terbuka. Bidang di bawah adalah area yang kami rencanakan — lowongan resmi akan diumumkan di halaman ini. Lamaran terbuka tetap kami baca.',
     },
     teams: [
       {
@@ -371,7 +371,7 @@ const company = {
       body: 'Tidak perlu lagi spreadsheet jadwal, DM negosiasi, dan transfer manual yang ditunggu berminggu-minggu.',
     },
     features: [
-      { title: 'Rilis & split hak', body: 'Unggah master, atur metadata, dan bagi hak cipta ke kolaborator. Setiap kolaborator menyetujui bagiannya sendiri.' },
+      { title: 'Rilis & split hak', body: 'Unggah master, atur metadata, dan catat pembagian hak cipta dengan kolaborator untuk setiap lagu.' },
       { title: 'Analitik per kota', body: 'Lihat di kota mana pendengarmu tumbuh — data yang langsung bisa kamu bawa ke meja negosiasi.' },
       { title: 'EPK dinamis', body: 'Electronic press kit yang selalu mutakhir dari data streaming, siap dibagikan ke promotor lewat satu tautan.' },
       { title: 'Rate card', body: 'Tentukan kisaran fee per jenis acara dan kota, agar inquiry yang masuk sudah sesuai harapanmu.' },
@@ -489,53 +489,9 @@ const company = {
     heroTitle: 'Infrastruktur untuk ekonomi musik live Indonesia.',
     lead: 'Musik gratis menarik pendengar; panggung dan commerce membayar. RAVE menyatukan streaming, data audiens per kota, booking, rekening bersama, dan tiket dalam satu lingkaran yang memperkuat dirinya sendiri.',
     requestDeck: 'Minta materi investor',
-    whyHeading: { kicker: 'Mengapa sekarang', title: 'Indonesia sudah online, sudah mendengar, dan rela antre demi panggung.' },
-    stats: [
-      { value: '215,6 jt', label: 'Pengguna internet Indonesia, penetrasi 78,19% (APJII, 2023)' },
-      { value: '38%', label: 'Mendengar musik on-demand tiap minggu, vs rata-rata Asia Tenggara 28% (PwC, 2023)' },
-      { value: '1,7 jt', label: 'Orang berebut tiket satu konser stadion di Jakarta (November 2023)' },
-      { value: '5 kota', label: 'Pasar peluncuran: Jakarta, Bandung, Yogyakarta, Surabaya, Malang & Bali' },
-    ],
-    statsNote: 'Sumber: APJII Survei Penetrasi Internet 2023; PwC Indonesia TMT Update 2023; pemberitaan media atas penjualan tiket konser November 2023.',
-    edgeHeading: {
-      kicker: 'Keunggulan',
-      title: 'Pemain lain memegang satu potong. RAVE memegang lingkarannya.',
-      body: 'Platform streaming global tidak mengurus booking; agensi dan platform tiket tidak punya data pendengar. Kami menggabungkan keduanya.',
-    },
-    edge: [
-      { title: 'Data loop', body: 'Setiap stream memperkaya EPK dan Audience Match; setiap event mendorong pendengar kembali ke streaming.' },
-      { title: 'Trust layer', body: 'Rekening bersama, kontrak elektronik, rating dua arah, dan KYC — sulit ditiru platform streaming maupun agensi.' },
-      { title: 'Workflow lock-in', body: 'Manajemen menjalankan operasional harian di RAVE: kalender, kontrak, invoice, dan pembagian fee.' },
-    ],
-    modelHeading: {
-      kicker: 'Model bisnis',
-      title: 'Musik gratis. Panggung yang membayar.',
-      body: 'Pendapatan off-air dan commerce menyubsidi biaya streaming gratis, dengan royalti user-centric bagi pemegang hak.',
-    },
-    streams: [
-      { name: 'Komisi booking off-air', body: 'Service fee promotor dan komisi dari fee artis atas setiap show yang settled.' },
-      { name: 'Ticketing', body: 'Biaya layanan per tiket untuk event yang dijual lewat RAVE.' },
-      { name: 'RAVE Pro', body: 'Langganan B2B untuk manajemen, label, dan promotor dengan komisi lebih rendah dan alat kerja lanjutan.' },
-      { name: 'Brand partnership', body: 'Paket kampanye, aktivasi event, dan tur kampus bersama artis.' },
-      { name: 'Premium', body: 'Langganan pendengar untuk podcast & audio fiksi eksklusif, bebas iklan, dan akses tiket lebih awal.' },
-      { name: 'Iklan', body: 'Iklan audio dan display untuk tier Gratis, dengan penargetan berbasis persetujuan.' },
-    ],
-    northStar: 'North star metric: jumlah show off-air yang settled melalui RAVE.',
-    roadmapHeading: {
-      kicker: 'Roadmap',
-      title: 'Lima fase, masing-masing dengan kriteria keberhasilan.',
-      body: 'Fase berikutnya dibuka penuh hanya setelah kriteria fase sebelumnya terpenuhi.',
-    },
-    phases: [
-      { phase: 'Fase 0', title: 'Fondasi & landing', body: 'Validasi, merek, waitlist, legal, dan pemilihan vendor.' },
-      { phase: 'Fase 1', title: 'Streaming & Booking Lite', body: 'Aplikasi dengar, Artist Studio, EPK, kalender, dan inquiry.' },
-      { phase: 'Fase 2', title: 'Trust layer & ticketing', body: 'Rekening bersama, kontrak elektronik, KYC, sengketa, tiket, dan RAVE Pro.' },
-      { phase: 'Fase 3', title: 'Premium & commerce', body: 'Podcast, audio fiksi, merchandise, iklan, dan rekomendasi.' },
-      { phase: 'Fase 4', title: 'Skala & ekosistem', body: 'Portal label, distribusi katalog, data insight, dan ekspansi regional.' },
-    ],
     band: {
       title: 'Tertarik berdiskusi?',
-      body: 'Materi lengkap — deck, model keuangan, dan data validasi — kami bagikan kepada investor dan mitra strategis setelah perjanjian kerahasiaan.',
+      body: 'Hubungi kami lewat email. Materi investor dibagikan berdasarkan permintaan kepada investor dan mitra strategis setelah perjanjian kerahasiaan.',
       button: 'Hubungi kami',
     },
     disclaimer:
@@ -549,7 +505,7 @@ const company = {
     heroB: 'Kami di sini.',
     lead: 'Jawaban cepat untuk pendengar, artis, dan promotor. Ketik pertanyaanmu atau pilih topik.',
     searchLabel: 'Cari bantuan',
-    placeholder: 'Cari: OTP, refund, royalti, lossless…',
+    placeholder: 'Cari: OTP, refund, royalti, kualitas audio…',
     topics: {
       akun: {
         title: 'Akun & masuk',
@@ -562,10 +518,10 @@ const company = {
       },
       dengar: {
         title: 'Streaming & kualitas',
-        blurb: 'Lossless, lirik, playlist, unduhan.',
+        blurb: 'Kualitas audio, lirik, playlist.',
         faqs: [
-          { q: 'Apakah musik benar-benar gratis?', a: 'Ya. Streaming, playlist, lirik, dan kualitas audio terbaik gratis untuk semua pengguna terdaftar. Premium hanya untuk podcast premium, audio fiksi, dan pengalaman bebas iklan.' },
-          { q: 'Cara mengubah kualitas audio?', a: 'Buka Profil & Pengaturan → Kualitas audio. Lossless disarankan saat terhubung Wi-Fi.' },
+          { q: 'Apakah musik benar-benar gratis?', a: 'Ya. Streaming on-demand (AAC hingga 160 kbps), playlist, dan lirik gratis untuk semua pengguna terdaftar. Premium membuka kualitas Tinggi (AAC 320) & Lossless (FLAC), bebas iklan, serta podcast & audio fiksi premium.' },
+          { q: 'Cara mengubah kualitas audio?', a: 'Buka Profil & Pengaturan → Kualitas audio. Pengguna Gratis bisa memilih hingga Normal (AAC 160); Tinggi (AAC 320) dan Lossless (FLAC) khusus Premium — gunakan Wi-Fi untuk Lossless.' },
           { q: 'Kenapa ada iklan?', a: 'Pendengar Gratis sesekali mendengar iklan berlabel jelas. Iklan membantu membayar royalti artis; Premium bebas iklan.' },
         ],
       },
@@ -579,11 +535,10 @@ const company = {
       },
       tiket: {
         title: 'Tiket & event',
-        blurb: 'QR tiket, presale, refund.',
+        blurb: 'QR tiket, refund.',
         faqs: [
           { q: 'Di mana tiket saya?', a: 'Buka menu Tiket Saya. Tunjukkan QR berputar di aplikasi saat masuk — tangkapan layar tidak berlaku.' },
           { q: 'Event dibatalkan, bagaimana refund?', a: 'Bila penyelenggara membatalkan event, refund penuh diproses otomatis ke metode pembayaranmu.' },
-          { q: 'Apa itu presale fan setia?', a: 'Pendengar yang sering memutar artis tertentu mendapat akses beli tiket lebih awal untuk show artis itu.' },
         ],
       },
       artis: {
@@ -591,7 +546,7 @@ const company = {
         blurb: 'Rilis, royalti, EPK, pencairan.',
         faqs: [
           { q: 'Bagaimana merilis lagu?', a: 'Masuk sebagai Artis, buka Artist Studio → Rilis baru. Unggah master, isi metadata & split hak, lalu ajukan untuk ditinjau.' },
-          { q: 'Bagaimana royalti dihitung?', a: 'Model user-centric: langganan & iklan tiap pendengar dibagi ke artis yang benar-benar ia dengarkan. Statement tersedia bulanan di Studio.' },
+          { q: 'Bagaimana royalti dihitung?', a: 'Model user-centric: langganan & iklan tiap pendengar dibagi ke artis yang benar-benar ia dengarkan. Laporan royalti di Studio sedang disiapkan dan akan diumumkan saat tersedia.' },
           { q: 'Kapan fee manggung cair?', a: 'Dana booking ditahan di rekening bersama dan cair H+1 setelah show selesai, terbagi otomatis ke tim sesuai split.' },
         ],
       },
@@ -633,7 +588,7 @@ const company = {
     contact: 'Hubungi tim media',
     profileHeading: { kicker: 'Profil singkat', title: 'Tentang RAVE' },
     boilerplate:
-      'RAVE adalah platform ekosistem musik indie dan off-air asal Indonesia. RAVE menghubungkan streaming musik gratis dengan panggung nyata: data pendengar per kota membantu promotor menemukan artis yang tepat, lalu booking diproses dengan kontrak elektronik, rekening bersama, dan pembagian fee otomatis. Selain aplikasi dengar, RAVE menyediakan Artist Studio untuk musisi dan manajemen, Promotor Hub untuk promotor dan EO, serta tiket dan siaran langsung untuk fan.',
+      'RAVE adalah platform ekosistem musik indie dan off-air asal Indonesia. RAVE menghubungkan streaming musik gratis dengan panggung nyata: data pendengar per kota membantu promotor menemukan artis yang tepat, lalu booking diproses dengan kontrak elektronik dan pembayaran yang tercatat. Selain aplikasi dengar, RAVE menyediakan Artist Studio untuk musisi dan manajemen, Promotor Hub untuk promotor dan EO, serta tiket dan siaran langsung untuk fan.',
     copied: 'Tersalin',
     copyProfile: 'Salin profil',
     copyFailed: 'Gagal menyalin — salin manual dari halaman ini.',
@@ -642,7 +597,7 @@ const company = {
       { k: 'Kategori', v: 'Platform musik indie & off-air (streaming, booking, tiket, live)' },
       { k: 'Tagline', v: 'Dengar gratis. Datang ke panggungnya. Dukung langsung.' },
       { k: 'Produk', v: 'Aplikasi RAVE · Artist Studio · Promotor Hub · RAVE Live' },
-      { k: 'Kota peluncuran', v: 'Jakarta, Bandung, Yogyakarta, Surabaya, Malang & Bali' },
+      { k: 'Rencana kota peluncuran', v: 'Jakarta, Bandung, Yogyakarta, Surabaya, Malang & Bali' },
       { k: 'Penulisan nama', v: 'RAVE (huruf kapital) dalam teks; logo resmi untuk visual' },
     ],
     assetsHeading: {
@@ -668,6 +623,8 @@ const company = {
       after: ' dengan subjek “[Media]”. Kami berusaha membalas dalam satu hari kerja.',
     },
     sendEmail: 'Kirim email',
+    releasesHeading: { kicker: 'Rilis pers', title: 'Belum ada rilis pers.' },
+    releasesEmpty: 'Rilis pers resmi akan dipublikasikan di halaman ini. Untuk konfirmasi atau pertanyaan, hubungi tim media.',
   },
 
   news: {
@@ -682,9 +639,9 @@ const company = {
     categories: { Rilis: 'Rilis', Scene: 'Scene', Produk: 'Produk', Event: 'Event', Wawancara: 'Wawancara' },
     featured: 'Cerita utama',
     readStory: 'Baca cerita',
-    empty: 'Belum ada artikel di kategori ini.',
+    empty: 'Belum ada rilis berita. Kabar resmi RAVE akan dipublikasikan di sini.',
     ctaTitle: 'Kabar scene ke inbox.',
-    ctaBody: 'Gabung waitlist untuk rilis pilihan, presale, dan jadwal gig di kotamu.',
+    ctaBody: 'Gabung waitlist untuk kabar rilis dan jadwal gig di kotamu.',
     ctaButton: 'Gabung waitlist',
     read: 'Baca',
     readMin: (n: number) => `${n} mnt baca`,
@@ -693,79 +650,8 @@ const company = {
     copyLink: 'Salin tautan',
     related: 'Baca juga',
     allNews: 'Semua berita →',
-    articles: {
-      'gig-kecil-kota-besar': {
-        title: 'Gig kecil, kota besar: kenapa venue 100 orang jadi jantung scene indie',
-        excerpt: 'Dari ruang belakang kafe sampai garasi kolektif — venue kecil adalah tempat band pertama kali bertemu penonton setianya.',
-        imageAlt: 'Penonton crowd surfing di gig DIY yang padat',
-        author: 'Redaksi RAVE',
-        body: [
-          { p: 'Setiap band yang hari ini memenuhi festival pernah memulai di ruangan yang muat seratus orang. Venue kecil adalah laboratorium: tempat lagu baru diuji, tempat penonton pertama menghafal lirik, dan tempat kolektif belajar menyelenggarakan acara dengan modal patungan.' },
-          { h: 'Panggung pertama, data pertama' },
-          { p: 'Di RAVE, pemutaran di kota yang sama dengan sebuah venue kecil menjadi sinyal paling jujur bagi promotor. Bukan jumlah followers, tetapi berapa orang di kota itu yang benar-benar mendengarkan.' },
-          { quote: 'Gig seratus orang yang penuh lebih berarti daripada panggung besar yang setengah kosong.', by: 'Promotor kampus, Bandung' },
-          { h: 'Yang dibutuhkan venue kecil' },
-          { p: 'Kepastian. DP yang aman, kontrak yang jelas, dan tiket yang tidak bisa dipalsukan. Itu sebabnya booking di RAVE memakai rekening bersama dan tiket QR berputar — supaya energi kolektif habis untuk acaranya, bukan untuk urusan administrasi.' },
-        ],
-      },
-      'senja-kolektif-hujan-di-dago': {
-        title: 'Senja Kolektif merilis "Hujan di Dago" dalam kualitas lossless',
-        excerpt: 'Single baru dari Bandung ini direkam live di studio rumahan dan langsung tersedia gratis untuk semua pendengar.',
-        imageAlt: 'Vokalis bernyanyi di depan mikrofon',
-        author: 'Redaksi RAVE',
-        body: [
-          { p: '"Hujan di Dago" direkam dalam satu sesi live di studio rumahan, tanpa banyak overdub. Hasilnya terdengar dekat — dan kini bisa didengar dalam kualitas lossless, gratis.' },
-          { p: 'Pendengar setia yang sering memutar Senja Kolektif juga mendapat akses presale lebih awal untuk tur kota berikutnya.' },
-        ],
-      },
-      'rave-live-siaran-bertiket': {
-        title: 'RAVE Live: siarkan konser dari OBS atau langsung dari browser',
-        excerpt: 'Artis dan promotor kini bisa membuka siaran gratis atau bertiket, lengkap dengan live chat dan hitungan penonton.',
-        imageAlt: 'Band tampil di panggung bercahaya',
-        author: 'Tim Produk RAVE',
-        body: [
-          { p: 'RAVE Live memungkinkan siaran dari perangkat streaming yang sudah biasa dipakai (RTMP/OBS) atau langsung dari browser tanpa instalasi.' },
-          { h: 'Gratis atau bertiket' },
-          { p: 'Siaran bertiket hanya bisa ditonton pemegang tiket live yang dibeli lewat halaman event — cara baru memperluas penonton tanpa memperbesar venue.' },
-        ],
-      },
-      'panduan-escrow-promotor': {
-        title: 'Panduan singkat: bagaimana rekening bersama melindungi DP promotor',
-        excerpt: 'DP tidak lagi dikirim langsung ke artis. Begini alurnya dari kontrak ditandatangani sampai dana cair H+1.',
-        imageAlt: 'Penonton memadati konser dengan lampu panggung',
-        author: 'Tim Produk RAVE',
-        body: [
-          { p: 'Setelah kontrak elektronik ditandatangani dengan OTP, promotor membayar DP ke rekening bersama mitra berizin. Dana ditahan sampai pertunjukan selesai.' },
-          { p: 'H+1 setelah show, dana cair otomatis dan terbagi ke seluruh tim artis sesuai split. Bila ada sengketa, dana dibekukan selama mediasi.' },
-        ],
-      },
-      'nirmala-dari-kamar-ke-panggung': {
-        title: 'Nirmala: "Lagu-lagu ini lahir jam tiga pagi di kamar kos"',
-        excerpt: 'Ngobrol soal bedroom pop, merekam dengan laptop bekas, dan pertama kali melihat nama kota di dashboard pendengar.',
-        imageAlt: 'Penonton menikmati pertunjukan musik',
-        author: 'Redaksi RAVE',
-        body: [
-          { p: 'Nirmala merekam hampir semua lagunya di kamar kos dengan laptop bekas dan satu mikrofon. Musiknya tenang, tapi pendengarnya tumbuh cepat di Jakarta dan Yogya.' },
-          { quote: 'Waktu lihat ada ribuan orang di Yogya yang dengar lagu kamar ini, aku langsung cari venue di sana.', by: 'Nirmala' },
-        ],
-      },
-      'kalender-gig-november': {
-        title: 'Kalender gig November: dari Taman Budaya sampai pantai Bali',
-        excerpt: 'Showcase, pensi, dan sunset session pilihan bulan ini — sebagian dengan presale khusus fan setia.',
-        imageAlt: 'Penonton konser di Jakarta mengangkat ponsel',
-        author: 'Redaksi RAVE',
-        body: [
-          { p: 'November penuh: showcase di Yogyakarta, pensi di Surabaya, dan sunset session di Bali. Cek halaman Event & Tiket untuk jadwal lengkap dan presale.' },
-        ],
-      },
-      'kota-mati-gedung-kosong': {
-        title: 'Kota Mati kembali dengan "Gedung Kosong", post-punk untuk jam pulang kantor',
-        excerpt: 'Gitar dingin, bas tebal, dan lirik tentang kota yang terlalu cepat — EP baru sudah bisa diputar.',
-        imageAlt: 'Sepatu musisi di panggung pub',
-        author: 'Redaksi RAVE',
-        body: [{ p: 'EP baru Kota Mati membawa post-punk Jakarta ke wilayah yang lebih gelap. Empat lagu, direkam dalam dua hari di studio kecil Jakarta Selatan.' }],
-      },
-    },
+    // Belum ada rilis berita resmi. Artikel ditambahkan di sini (dan di news-data.ts) saat terbit.
+    articles: {},
   },
 
   terms: {
@@ -804,7 +690,7 @@ const company = {
       },
       premium: {
         title: 'Premium & pembayaran',
-        p: 'Mendengar musik selalu gratis. Premium membuka podcast & audio fiksi eksklusif, bebas iklan, unduhan, dan akses tiket lebih awal. Harga dan masa coba ditampilkan sebelum pembayaran.',
+        p: 'Mendengar musik selalu gratis (hingga AAC 160). Premium membuka kualitas Tinggi (AAC 320) & Lossless (FLAC), podcast & audio fiksi eksklusif, dan bebas iklan. Harga dan masa coba ditampilkan sebelum pembayaran.',
         items: [
           'Langganan diperpanjang otomatis per bulan dan dapat dibatalkan kapan saja; akses tetap aktif sampai akhir periode.',
           'Pembayaran diproses mitra payment gateway berizin; RAVE tidak menyimpan data kartu.',

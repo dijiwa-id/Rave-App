@@ -23,6 +23,7 @@ import {
   type AuthUser,
   type Db,
   type ServiceContext,
+  hasPermission,
 } from '@rave/service-kit';
 import { keyHash, ME, newStreamKey, type LiveManager } from './manager.js';
 import { RTMP_PUBLIC_URL, streamDir } from './media.js';
@@ -118,7 +119,8 @@ export async function routes(app: FastifyInstance, ctx: ServiceContext, mgr: Liv
     liteCache.set(id, { at: Date.now(), r });
     return r;
   }
-  const isMember = (u: AuthUser | null, orgId: string) => isAdmin(u) || !!u?.orgs.some((o) => o.id === orgId);
+  // Anggota org penyiar, atau admin moderator (izin live.moderate) — bukan sembarang admin (audit go-live A1).
+  const isMember = (u: AuthUser | null, orgId: string) => !!u?.roles.includes('service') || hasPermission(u, 'live.moderate') || !!u?.orgs.some((o) => o.id === orgId);
 
   /** Kesehatan dihitung di replika pemilik (transcoder & antrean potongan ada di memorinya); cadangan: perkiraan lokal. */
   async function healthFor(r: any) {
@@ -297,7 +299,7 @@ export async function routes(app: FastifyInstance, ctx: ServiceContext, mgr: Liv
       event = await callService<any>(name, 'ticketing', `/v1/ticketing/events/${b.event_id}`).catch(() => null);
       if (!event) throw badRequest('Event tidak ditemukan');
       const performs = artistId && (event.artists ?? []).some((a: any) => (a.id ?? a) === artistId);
-      if (event.org_id !== b.org_id && !performs && !isAdmin(u)) throw forbidden('Event bukan milik organisasi ini');
+      if (event.org_id !== b.org_id && !performs) throw forbidden('Event bukan milik organisasi ini');
     }
     if (b.access === 'TICKET' && !event) throw badRequest('Siaran bertiket wajib terkait event');
     return { org, artist, event };
