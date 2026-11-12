@@ -18,6 +18,8 @@ export interface DomainEvents {
   'catalog.release.cover_submitted': { releaseId: string; artistId: string; title: string };
   'catalog.release.cover_curated': { releaseId: string; artistId: string; title: string; action: 'replaced' | 'change_requested'; reason: string };
   'catalog.release.cover_reviewed': { releaseId: string; artistId: string; title: string; approved: boolean; reason: string | null };
+  'catalog.release.changes_submitted': { releaseId: string; artistId: string; title: string };
+  'catalog.release.changes_reviewed': { releaseId: string; artistId: string; title: string; approved: boolean; reason: string | null };
   // Undangan persetujuan split hak (REQ-STU-02): dikirim ke email pihak yang diundang.
   'catalog.split.invited': { splitId: string; trackId: string; trackTitle: string; artistName: string; email: string; type: 'MASTER' | 'PUBLISHING'; pct: number; invitedBy: string };
   'catalog.artist.upserted': { artistId: string; name: string; slug: string; city: string | null; genres: string[]; orgId: string | null; imageUrl: string | null };

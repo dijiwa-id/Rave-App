@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Play } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { ArtistSummary, Paged, PlaylistSummary, ReleaseSummary, Show, Track } from '@/lib/types';
@@ -83,19 +83,22 @@ function ArtistsTab({ ids }: { ids: string[] }) {
 }
 
 function AlbumsTab({ ids }: { ids: string[] }) {
-  const qs = useQueries({ queries: ids.slice(0, 30).map((id) => ({ queryKey: ['release', id], queryFn: () => api<ReleaseSummary>(`/v1/catalog/releases/${id}`) })) });
+  // Satu request batch (sebelumnya satu request per album, dan album setelah urutan ke-30 tidak tampil).
+  const list = ids.slice(0, 200);
+  const q = useQuery({
+    queryKey: ['releases-batch', list.join(',')],
+    queryFn: () => api<{ data: ReleaseSummary[] }>('/v1/catalog/releases', { query: { ids: list.join(',') } }),
+    enabled: list.length > 0,
+  });
   const play = usePlayMedia();
   const d = useDict('fan');
   if (!ids.length) return <EmptyState title={d.library.noAlbums} body={d.library.noAlbumsBody} />;
+  if (!q.data) return <>{list.slice(0, 12).map((id) => <CardSkeleton key={id} />)}</>;
   return (
     <>
-      {qs.map((q, i) =>
-        q.data ? (
-          <MediaCard key={ids[i]} title={q.data.title} subtitle={q.data.artist.name} image={q.data.cover_url} href={`/app/album/${q.data.id}`} onPlay={() => play({ id: q.data!.id, kind: 'release' })} />
-        ) : (
-          <CardSkeleton key={ids[i]} />
-        ),
-      )}
+      {q.data.data.map((r) => (
+        <MediaCard key={r.id} title={r.title} subtitle={r.artist.name} image={r.cover_url} href={`/app/album/${r.id}`} onPlay={() => play({ id: r.id, kind: 'release' })} />
+      ))}
     </>
   );
 }

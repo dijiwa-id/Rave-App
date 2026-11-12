@@ -12,8 +12,6 @@ import { dict, useDict } from '@/lib/i18n';
 /** Tooltip kontrol terkunci selama iklan (fungsi agar mengikuti bahasa aktif). */
 export const adLock = () => dict('common').player.adLock;
 // aria-disabled (bukan disabled) agar tooltip tetap muncul; aksi sudah no-op di store selama jeda iklan.
-export const LOCKED_CLS = 'cursor-not-allowed opacity-40';
-
 /** iOS tidak mengizinkan JS mengatur volume media — kontrol volume disembunyikan di sana (pakai tombol fisik). */
 export const VOLUME_CONTROLLABLE = typeof navigator === 'undefined' || !(/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 

@@ -180,7 +180,7 @@ export function PublicFooter() {
           </div>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <LanguageSwitch variant="text" />
-            <span>© 2026 RAVE · Rastek ID</span>
+            <span>© 2026 RAVE · dijiwa.id</span>
             <span className="text-rave-primary-text">RV-2026 · DIY or die</span>
           </div>
         </div>

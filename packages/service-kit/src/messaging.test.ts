@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { brandedEmail, DeliveryError, messagingStatus, sendEmail, sendWhatsApp, setMessagingLogger } from './messaging.js';
+import { brandedEmail, DeliveryError, messagingStatus, sendEmail, sendEmailWith, sendWhatsApp, setMessagingLogger } from './messaging.js';
 import { invalidateIntegration, setIntegrationLoader } from './integrations.js';
 
 const KEYS = ['EMAIL_PROVIDER', 'EMAIL_FROM', 'RESEND_API_KEY', 'MAILGUN_API_KEY', 'MAILGUN_DOMAIN', 'POSTMARK_SERVER_TOKEN', 'EMAIL_WEBHOOK_URL', 'WHATSAPP_PROVIDER', 'WA_PHONE_NUMBER_ID', 'WA_ACCESS_TOKEN', 'WHATSAPP_WEBHOOK_URL'];
@@ -102,5 +102,15 @@ describe('messaging', () => {
     expect(m.html).toContain('&lt;b&gt;Hai&lt;/b&gt;');
     expect(m.html).toContain('a &amp; b');
     expect(m.text).toContain('123456');
+  });
+});
+
+describe('adapter email log', () => {
+  it('tidak mencatat subjek/isi (kode OTP tidak boleh masuk log)', async () => {
+    const logged: string[] = [];
+    setMessagingLogger({ info: (o, m) => logged.push(JSON.stringify(o) + m), warn: (o, m) => logged.push(JSON.stringify(o) + m) });
+    await sendEmailWith({ provider: 'log', get: () => undefined }, { to: 'user@example.com', subject: '482913 adalah kode masuk RAVE', text: 'kode 482913', html: '<b>482913</b>', tag: 'otp' });
+    expect(logged.length).toBe(1);
+    expect(logged.join('')).not.toContain('482913');
   });
 });

@@ -131,7 +131,8 @@ export async function sendEmailWith(s: { provider: string; get: (k: string) => s
   const from = env('EMAIL_FROM') ?? 'RAVE <no-reply@rave.local>';
   switch (p) {
     case 'log':
-      logger.info({ channel: 'email', to: mask(m.to), subject: m.subject, tag: m.tag }, 'email (adapter log — tidak dikirim)');
+      // Subjek & isi TIDAK dicatat: subjek OTP memuat kodenya ("123456 adalah kode masuk RAVE") — log produksi tidak boleh berisi kode.
+      logger.info({ channel: 'email', to: mask(m.to), tag: m.tag }, 'email (adapter log — tidak dikirim)');
       return { provider: 'log' };
     case 'resend': {
       const r = await http('https://api.resend.com/emails', {

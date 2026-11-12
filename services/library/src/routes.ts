@@ -91,9 +91,9 @@ export async function routes(app: FastifyInstance, { db, log }: ServiceContext) 
           `${PLAYLIST_SELECT} WHERE p.owner_id = $1 OR p.id IN (SELECT playlist_id FROM playlist_collaborators WHERE user_id = $2) ORDER BY p.updated_at DESC`,
           [u, u],
         ),
-        db.query(`SELECT artist_id FROM follows WHERE user_id = $1 ORDER BY created_at DESC`, [u]),
-        db.query(`SELECT release_id FROM saved_releases WHERE user_id = $1 ORDER BY created_at DESC`, [u]),
-        db.query(`SELECT track_id FROM (SELECT DISTINCT ON (track_id) track_id, played_at FROM listening_history WHERE user_id = $1 ORDER BY track_id, played_at DESC) h ORDER BY played_at DESC LIMIT 20`, [u]),
+        db.query(`SELECT artist_id FROM follows WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500`, [u]),
+        db.query(`SELECT release_id FROM saved_releases WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500`, [u]),
+        db.query(`SELECT track_id FROM (SELECT DISTINCT ON (track_id) track_id, played_at FROM (SELECT track_id, played_at FROM listening_history WHERE user_id = $1 ORDER BY played_at DESC LIMIT 500) lh ORDER BY track_id, played_at DESC) h ORDER BY played_at DESC LIMIT 20`, [u]),
       ]);
       return {
         liked_count: liked?.n ?? 0,

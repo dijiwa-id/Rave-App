@@ -13,6 +13,25 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 - Kesiapan go-live: `npm run prod:preflight`, validasi secret saat boot, CORS terbatas di produksi, docs/GO-LIVE.md.
 
 ### Ditambahkan
+- **Edit rilis di Artist Studio**: rilis IN_REVIEW dapat ditarik kembali menjadi draf untuk diedit; rilis
+  LIVE/SCHEDULED dapat diajukan perubahannya (judul, genre, label, eksplisit, tanggal rilis terjadwal, judul &
+  eksplisit lagu) — ditinjau di antrean QC baru, data lama tetap tayang sampai disetujui, artis dinotifikasi.
+  Migrasi catalog `010_release_changes_lyrics`.
+- **Pengaturan lirik**: artis mengelola lirik tiap lagu (teks biasa atau LRC tersinkron, impor .lrc/.txt, alat
+  sinkron ketuk-waktu memakai pratinjau audio, bahasa), validasi stempel waktu & durasi, tercatat di audit log.
+
+### Diperbaiki (audit basecode 2026-11-12)
+- Adapter email `log` tidak lagi mencatat subjek — kode OTP login & tanda tangan kontrak tidak masuk log produksi.
+- Daftar rilis Studio & antrean QC dimuat batch (2 query, bukan 3+ per rilis) dengan batas; status QC divalidasi.
+- Index baru: `tracks.isrc`, `lower(tracks.title)`, rilis per artis, kolaborator playlist per pengguna
+  (migrasi catalog `011_perf_indexes`, library `004_perf_indexes`).
+- Library: ringkasan dibatasi (riwayat dengar 500 terbaru, follow/simpanan 500); tab Album memakai endpoint batch
+  baru `GET /v1/catalog/releases?ids=` (sebelumnya 1 request per album, maks. 30).
+- Halaman artis: lagu populer & diskografi dimuat paralel, diskografi dibatasi 100.
+- Dihapus: dependency `ogl`, `@hugeicons/*` (diganti lucide), export yang tidak dipakai, build lama `apps/web/dist`;
+  dokumen yang masih menyebut stack Docker dev diperbarui.
+
+### Ditambahkan (sebelumnya)
 - **Profil artis (Artist Studio)** didesain ulang: pratinjau publik langsung, kartu kelengkapan profil, bar simpan
   dengan peringatan perubahan belum tersimpan, cek ukuran foto/banner. **Tautan sosial & streaming** (Instagram,
   TikTok, YouTube, Spotify, Apple Music, dll., https + host sesuai platform, maks. 8) tampil di halaman artis.

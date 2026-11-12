@@ -155,8 +155,10 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
       [idOrSlug],
     );
     if (!a) throw notFound('Artis');
-    a.top_tracks = await db.query(`${TRACK_SELECT} WHERE ${LIVE} AND t.artist_id = $1 ORDER BY t.play_count DESC, t.track_number LIMIT 10`, [a.id]);
-    a.releases = await db.query(`${RELEASE_SUMMARY_SELECT} WHERE ${LIVE} AND r.artist_id = $1 ORDER BY r.release_date DESC`, [a.id]);
+    [a.top_tracks, a.releases] = await Promise.all([
+      db.query(`${TRACK_SELECT} WHERE ${LIVE} AND t.artist_id = $1 ORDER BY t.play_count DESC, t.track_number LIMIT 10`, [a.id]),
+      db.query(`${RELEASE_SUMMARY_SELECT} WHERE ${LIVE} AND r.artist_id = $1 ORDER BY r.release_date DESC LIMIT 100`, [a.id]),
+    ]);
     return a;
   });
 
@@ -168,6 +170,16 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
     if (!r || (r.status !== 'LIVE' && !canManageArtist(req.user, r.artist_id))) throw notFound('Rilis');
     delete r.artist_id;
     return r;
+  });
+
+  /** Ringkasan banyak rilis LIVE sekaligus (?ids=a,b,…; maks. 200, urutan dipertahankan) — dipakai tab Album Library. */
+  app.get('/v1/catalog/releases', async (req) => {
+    const { ids } = req.query as { ids?: string };
+    const list = [...new Set((ids ?? '').split(',').filter(isUuid))].slice(0, 200);
+    if (!list.length) return { data: [] };
+    const rows = await db.query(`${RELEASE_SUMMARY_SELECT} WHERE ${LIVE} AND r.id = ANY($1)`, [list]);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return { data: list.map((i) => byId.get(i)).filter(Boolean) };
   });
 
   app.get('/v1/catalog/tracks', async (req) => {

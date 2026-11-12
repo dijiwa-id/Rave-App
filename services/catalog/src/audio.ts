@@ -177,9 +177,3 @@ export const transcodeJob: Job = {
   },
 };
 
-/** Nama berkas rendisi milik satu upload (untuk deteksi file yatim di panel Storage). */
-export function renditionFiles(renditions: Renditions | null | undefined): string[] {
-  return Object.values(renditions ?? {})
-    .map((r) => r?.url?.split('/v1/catalog/media/')[1])
-    .filter((x): x is string => !!x);
-}

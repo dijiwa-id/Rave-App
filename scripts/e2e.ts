@@ -211,6 +211,71 @@ console.log('\n▶ Master multi-format & rendisi (Artist Studio)');
     const notifC = await until(() => call(AT, 'GET', '/v1/notifications'), (r) => r.data?.data?.some((n: any) => n.title === 'Sampul rilis diperbarui'), 15000, 1000);
     check('artis dinotifikasi hasil tinjauan sampul', notifC.data?.data?.some((n: any) => n.title === 'Sampul rilis diperbarui'));
     (globalThis as any).__e2eCoverRelease = rel.data?.id;
+    // Lirik dari Studio: LRC tersinkron / teks biasa, validasi, tampil di API publik, tidak bisa untuk lagu artis lain.
+    {
+      const lrc = '[ti:E2E]\n[00:00.50] Baris pertama\n[00:01.80] Baris kedua';
+      const putL = await call(AT, 'PUT', `/v1/studio/tracks/${trackId}/lyrics`, { mode: 'synced', text: lrc, language: 'id' });
+      const pubL = await call(null, 'GET', `/v1/catalog/tracks/${trackId}/lyrics`);
+      check('lirik: LRC tersinkron disimpan & tampil di API publik', putL.status === 200 && pubL.data?.synced === true && pubL.data?.lines?.[1]?.time_ms === 1800, [putL.status, putL.data?.detail, pubL.data?.lines]);
+      const badL = await call(AT, 'PUT', `/v1/studio/tracks/${trackId}/lyrics`, { mode: 'synced', text: '[00:00.50] ok\ntanpa waktu' });
+      const longL = await call(AT, 'PUT', `/v1/studio/tracks/${trackId}/lyrics`, { mode: 'synced', text: '[59:00.00] melebihi durasi' });
+      check('lirik: baris tanpa stempel waktu / melebihi durasi lagu ditolak (422)', badL.status === 422 && badL.data?.line === 2 && longL.status === 422, [badL.status, badL.data?.line, longL.status]);
+      const plainL = await call(AT, 'PUT', `/v1/studio/tracks/${trackId}/lyrics`, { mode: 'plain', text: 'Bait satu\n\n\nBait dua' });
+      const getL = await call(AT, 'GET', `/v1/studio/tracks/${trackId}/lyrics`);
+      check('lirik: teks biasa disimpan (tidak tersinkron)', plainL.status === 200 && getL.data?.lyrics?.synced === false && getL.data?.lyrics?.text === 'Bait satu\n\nBait dua', getL.data);
+      const outsider = await login(SEED.emails.promotor);
+      const foreign = await call(outsider.access_token, 'PUT', `/v1/studio/tracks/${trackId}/lyrics`, { mode: 'plain', text: 'x' });
+      check('lirik: pengguna yang bukan pengelola artis tidak bisa mengubah (403/404)', [403, 404].includes(foreign.status), foreign.status);
+    }
+    // Edit rilis LIVE: pengajuan perubahan → QC → tayang; tanggal rilis LIVE terkunci; data lama tetap tayang.
+    {
+      const relId = rel.data?.id;
+      const before = await call(null, 'GET', `/v1/catalog/releases/${relId}`);
+      const dateLive = await call(AT, 'PUT', `/v1/studio/releases/${relId}/changes`, { release_date: '2099-01-01' });
+      check('edit rilis: tanggal rilis yang sudah tayang ditolak (422)', dateLive.status === 422, [dateLive.status, dateLive.data?.detail]);
+      const noop = await call(AT, 'PUT', `/v1/studio/releases/${relId}/changes`, { title: before.data?.title });
+      check('edit rilis: pengajuan tanpa perubahan ditolak (400)', noop.status === 400, noop.status);
+      const newTitle = `${before.data?.title} (Remaster)`;
+      const ch = await call(AT, 'PUT', `/v1/studio/releases/${relId}/changes`, { title: newTitle, tracks: [{ id: trackId, title: 'E2E Split Track (Edit)' }], note: 'uji e2e' });
+      const pubMid = await call(null, 'GET', `/v1/catalog/releases/${relId}`);
+      check(
+        'edit rilis: perubahan diajukan, data lama tetap tayang',
+        ch.status === 200 && ch.data?.pending_changes?.release?.title === newTitle && pubMid.data?.title === before.data?.title && !('pending_changes' in (pubMid.data ?? {})),
+        [ch.status, ch.data?.detail, pubMid.data?.title],
+      );
+      const queue = await call(admin.access_token, 'GET', '/v1/admin/qc/changes');
+      check('edit rilis: antrean QC memuat pengajuan', queue.data?.data?.some((c: any) => c.id === relId && c.changes?.release?.title === newTitle), queue.data?.data?.length);
+      const noReason = await call(admin.access_token, 'POST', `/v1/admin/qc/changes/${relId}/decision`, { approve: false });
+      const ok3 = await call(admin.access_token, 'POST', `/v1/admin/qc/changes/${relId}/decision`, { approve: true });
+      const after = await call(null, 'GET', `/v1/catalog/releases/${relId}`);
+      check(
+        'edit rilis: QC menyetujui → judul rilis & lagu baru tayang (tolak tanpa alasan = 400)',
+        noReason.status === 400 && ok3.status === 200 && after.data?.title === newTitle && after.data?.tracks?.[0]?.title === 'E2E Split Track (Edit)',
+        [noReason.status, ok3.status, after.data?.title, after.data?.tracks?.[0]?.title],
+      );
+      const notifE = await until(() => call(AT, 'GET', '/v1/notifications'), (r) => r.data?.data?.some((n: any) => n.title === 'Perubahan rilis diterapkan'), 15000, 1000);
+      check('edit rilis: artis dinotifikasi hasil tinjauan', notifE.data?.data?.some((n: any) => n.title === 'Perubahan rilis diterapkan'));
+      const draftEdit = await call(AT, 'PUT', `/v1/studio/releases/${relId}/changes`, {});
+      check('edit rilis: pengajuan kosong ditolak', [400, 422].includes(draftEdit.status), draftEdit.status);
+    }
+    // Tarik rilis dari tinjauan (IN_REVIEW → DRAFT) agar bisa diedit.
+    {
+      const r2 = await call(AT, 'POST', '/v1/studio/releases', {
+        artist_id: SEED.artists[0].id, title: `E2E Withdraw ${Date.now()}`, type: 'SINGLE', genre: 'pop', release_date: '2026-01-01', cover_url: artUp.public_url,
+        tracks: [{ title: 'E2E Withdraw Track', audio_url: up.public_url, duration_ms: 3000 }],
+      });
+      const t2 = r2.data?.tracks?.[0]?.id;
+      await call(AT, 'PUT', `/v1/studio/tracks/${t2}/splits`, { master: [{ party_name: 'Senja Kolektif', pct: 100 }], publishing: [{ party_name: 'Senja Kolektif', pct: 100 }] });
+      const sub3 = await call(AT, 'POST', `/v1/studio/releases/${r2.data?.id}/submit`, {});
+      const wd = await call(AT, 'POST', `/v1/studio/releases/${r2.data?.id}/withdraw`, {});
+      const wd2 = await call(AT, 'POST', `/v1/studio/releases/${r2.data?.id}/withdraw`, {});
+      const edit = await call(AT, 'PATCH', `/v1/studio/releases/${r2.data?.id}`, { title: 'E2E Withdraw (diedit)' });
+      check(
+        'tarik dari tinjauan → DRAFT & bisa diedit; tarik dua kali ditolak (409)',
+        sub3.data?.status === 'IN_REVIEW' && wd.status === 200 && wd.data?.status === 'DRAFT' && wd2.status === 409 && edit.status === 200 && edit.data?.title === 'E2E Withdraw (diedit)',
+        [sub3.status, sub3.data?.status ?? sub3.data?.errors, wd.status, wd.data?.status, wd2.status, edit.status],
+      );
+    }
     // Profil artis (Artist Studio): foto/banner hanya unggahan Studio; tautan sosial divalidasi & tampil di API publik.
     {
       const aid = SEED.artists[0].id;

@@ -25,13 +25,14 @@ import {
   signMediaUrl,
   MEDIA_PREFIX,
 } from '@rave/service-kit';
-import { isUuid, releaseFull } from './queries.js';
+import { isUuid, releaseFull, releasesFull } from './queries.js';
 import { canManageArtist } from './routes.js';
 import { imageSize, UPLOAD_DIR, uploadsBytes, wavInfo } from './storage.js';
 import { ffmpegPath, initialTranscodeStatus, probeAudio } from './audio.js';
 import { AUDIO_UPLOAD_TYPES, type AudioMeta } from '@rave/domain/audio';
 import { publishArtist } from './artists.js';
 import { normalizeArtistLinks } from './artist-links.js';
+import { lyricsToText, parseLyrics } from './lyrics.js';
 import { formatIsrc, ISRC_MAX_DESIGNATION, normalizeIsrc, normalizeRegistrant, normalizeUpc } from './codes.js';
 
 const trackInput = z.object({
@@ -88,6 +89,23 @@ const releaseInput = z.object({
 const splitInput = z.object({ party_name: z.string().trim().min(1).max(120), email: z.string().email().optional().nullable(), pct: z.number().positive().max(100) });
 
 const EDITABLE = ['DRAFT', 'REJECTED'];
+/** Rilis yang sudah lolos QC: perubahan metadata lewat pengajuan yang ditinjau QC. */
+const PUBLISHED = ['SCHEDULED', 'LIVE'];
+const todayWib = () => new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
+
+/** Bidang yang boleh diubah setelah rilis lolos QC (UPC, ISRC, audio & tipe rilis terkunci demi distribusi/royalti). */
+const releaseChangeInput = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  genre: z.string().trim().min(1).max(60).optional(),
+  label: z.string().trim().max(120).nullable().optional(),
+  explicit: z.boolean().optional(),
+  release_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  tracks: z
+    .array(z.object({ id: z.string().uuid(), title: z.string().trim().min(1).max(200).optional(), explicit: z.boolean().optional() }))
+    .max(40)
+    .optional(),
+  note: z.string().trim().max(500).optional(),
+});
 
 /**
  * Validasi master audio. Dengan ffmpeg: semua format yang dikenali (WAV, FLAC, AIFF, ALAC/AAC-M4A, MP3, OGG, Opus).
@@ -214,10 +232,15 @@ async function assertOwnAudioUpload(q: { query: (sql: string, params: unknown[])
 /** Info pengajuan sampul (khusus Studio/back office — tidak ditampilkan di API publik). */
 export async function withCoverReview(q: { query: (sql: string, params: unknown[]) => Promise<any> }, out: any) {
   if (!out) return out;
-  const res = await q.query(`SELECT pending_cover_url, pending_cover_at, cover_review_note FROM releases WHERE id = $1`, [out.id]);
+  const res = await q.query(
+    `SELECT pending_cover_url, pending_cover_at, cover_review_note, pending_changes, pending_changes_at, changes_review_note FROM releases WHERE id = $1`,
+    [out.id],
+  );
   const r = Array.isArray(res) ? res[0] : res.rows[0];
   out.pending_cover = r?.pending_cover_url ? { url: r.pending_cover_url, submitted_at: r.pending_cover_at } : null;
   out.cover_review_note = r?.cover_review_note ?? null;
+  out.pending_changes = r?.pending_changes ? { ...r.pending_changes, submitted_at: r.pending_changes_at } : null;
+  out.changes_review_note = r?.changes_review_note ?? null;
   return out;
 }
 
@@ -301,13 +324,20 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
     s.get('/v1/studio/artists/:artistId/releases', async (req) => {
       const { artistId } = req.params as { artistId: string };
       assertArtist(req, artistId);
-      const ids = await db.query(`SELECT id FROM releases WHERE artist_id = $1 ORDER BY created_at DESC`, [artistId]);
-      const data = [];
-      for (const { id } of ids) {
-        const r = await releaseFull(db, id);
-        delete r.artist_id;
-        data.push(await withCoverReview(db, r));
-      }
+      // Batch (2 query) — sebelumnya 3+ query per rilis secara berurutan.
+      const ids = await db.query(`SELECT id FROM releases WHERE artist_id = $1 ORDER BY created_at DESC LIMIT 500`, [artistId]);
+      const list = await releasesFull(
+        db,
+        ids.map((x: { id: string }) => x.id),
+        'r.pending_cover_url, r.pending_cover_at, r.cover_review_note, r.pending_changes, r.pending_changes_at, r.changes_review_note',
+      );
+      const data = list.map(({ artist_id: _a, pending_cover_url, pending_cover_at, cover_review_note, pending_changes, pending_changes_at, changes_review_note, ...r }) => ({
+        ...r,
+        pending_cover: pending_cover_url ? { url: pending_cover_url, submitted_at: pending_cover_at } : null,
+        cover_review_note: cover_review_note ?? null,
+        pending_changes: pending_changes ? { ...pending_changes, submitted_at: pending_changes_at } : null,
+        changes_review_note: changes_review_note ?? null,
+      }));
       return { data };
     });
 
@@ -443,6 +473,119 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       const out = await releaseFull(db, id);
       delete out.artist_id;
       return withCoverReview(db, out);
+    });
+
+    /** Tarik rilis dari antrean QC (IN_REVIEW → DRAFT) agar bisa diedit lalu diajukan ulang. */
+    s.post('/v1/studio/releases/:id/withdraw', async (req) => {
+      const { id } = req.params as { id: string };
+      await loadRelease(req, id);
+      return db.tx(async (tx) => {
+        const u = await tx.query(`UPDATE releases SET status = 'DRAFT', updated_at = now() WHERE id = $1 AND status = 'IN_REVIEW' RETURNING id`, [id]);
+        if (!u.rowCount) throw conflict('Hanya rilis yang sedang ditinjau (IN_REVIEW) yang dapat ditarik');
+        await audit(tx, { actorId: req.user!.sub, action: 'release.withdraw', entity: 'release', entityId: id, ip: req.ip });
+        const out = await releaseFull(tx, id);
+        delete out.artist_id;
+        return withCoverReview(tx, out);
+      });
+    });
+
+    /**
+     * Ajukan perubahan metadata rilis yang sudah lolos QC (SCHEDULED/LIVE): judul, genre, label, konten eksplisit,
+     * tanggal rilis (hanya SCHEDULED, tidak boleh mundur ke masa lalu), judul & eksplisit tiap lagu. Hanya bidang
+     * yang benar-benar berubah disimpan; mengajukan lagi menggantikan pengajuan sebelumnya. Data lama tetap tayang.
+     */
+    s.put('/v1/studio/releases/:id/changes', async (req) => {
+      const { id } = req.params as { id: string };
+      const r = await loadRelease(req, id);
+      if (!PUBLISHED.includes(r.status)) throw conflict(EDITABLE.includes(r.status) ? 'Rilis draf diubah langsung (PATCH), bukan lewat pengajuan' : `Rilis berstatus ${r.status} tidak dapat diubah`);
+      const b = releaseChangeInput.parse(req.body);
+      const rel: Record<string, unknown> = {};
+      const cur = (await db.query(`SELECT title, genre, label, explicit, to_char(release_date,'YYYY-MM-DD') AS release_date FROM releases WHERE id = $1`, [id]))[0];
+      for (const k of ['title', 'genre', 'label', 'explicit'] as const) if (b[k] !== undefined && b[k] !== cur[k]) rel[k] = b[k];
+      if (b.release_date !== undefined && b.release_date !== cur.release_date) {
+        if (r.status !== 'SCHEDULED') throw unprocessable('Tanggal rilis yang sudah tayang tidak dapat diubah');
+        if (b.release_date <= todayWib()) throw unprocessable('Tanggal rilis baru harus setelah hari ini');
+        rel.release_date = b.release_date;
+      }
+      const tracks: Record<string, Record<string, unknown>> = {};
+      if (b.tracks?.length) {
+        const cur = await db.query(`SELECT id, title, explicit FROM tracks WHERE release_id = $1`, [id]);
+        const byId = new Map(cur.map((t: any) => [t.id, t]));
+        for (const t of b.tracks) {
+          const c: any = byId.get(t.id);
+          if (!c) throw unprocessable('Lagu tidak termasuk dalam rilis ini', { field: `tracks.${t.id}` });
+          const d: Record<string, unknown> = {};
+          if (t.title !== undefined && t.title !== c.title) d.title = t.title;
+          if (t.explicit !== undefined && t.explicit !== c.explicit) d.explicit = t.explicit;
+          if (Object.keys(d).length) tracks[t.id] = d;
+        }
+      }
+      if (!Object.keys(rel).length && !Object.keys(tracks).length) throw badRequest('Tidak ada perubahan');
+      const changes = { release: rel, tracks, note: b.note ?? null };
+      return db.tx(async (tx) => {
+        await tx.query(
+          `UPDATE releases SET pending_changes = $2, pending_changes_at = now(), pending_changes_by = $3, changes_review_note = NULL, updated_at = now() WHERE id = $1`,
+          [id, JSON.stringify(changes), req.user!.sub],
+        );
+        await publish(tx, 'catalog.release.changes_submitted', id, { releaseId: id, artistId: r.artist_id, title: r.title });
+        await audit(tx, { actorId: req.user!.sub, action: 'release.changes_submit', entity: 'release', entityId: id, data: changes, ip: req.ip });
+        const out = await releaseFull(tx, id);
+        delete out.artist_id;
+        return withCoverReview(tx, out);
+      });
+    });
+
+    /** Batalkan pengajuan perubahan yang belum ditinjau. */
+    s.delete('/v1/studio/releases/:id/changes', async (req) => {
+      const { id } = req.params as { id: string };
+      const r = await loadRelease(req, id);
+      if (!r.pending_changes) throw conflict('Tidak ada pengajuan perubahan yang menunggu');
+      await db.query(`UPDATE releases SET pending_changes = NULL, pending_changes_at = NULL, pending_changes_by = NULL, updated_at = now() WHERE id = $1`, [id]);
+      await audit(db, { actorId: req.user!.sub, action: 'release.changes_withdraw', entity: 'release', entityId: id, ip: req.ip });
+      const out = await releaseFull(db, id);
+      delete out.artist_id;
+      return withCoverReview(db, out);
+    });
+
+    // ---- Lirik (teks biasa / LRC tersinkron) — dikelola artis langsung, semua status kecuali diturunkan ----
+    s.get('/v1/studio/tracks/:id/lyrics', async (req) => {
+      const { id } = req.params as { id: string };
+      await loadTrack(req, id);
+      const l = await db.one(`SELECT synced, lines, language, updated_at FROM lyrics WHERE track_id = $1`, [id]);
+      if (!l) return { lyrics: null };
+      return { lyrics: { synced: l.synced, language: l.language, updated_at: l.updated_at, line_count: l.lines.length, text: lyricsToText(l.synced, l.lines) } };
+    });
+
+    s.put('/v1/studio/tracks/:id/lyrics', async (req) => {
+      const { id } = req.params as { id: string };
+      const t = await loadTrack(req, id);
+      if (t.release_status === 'TAKEN_DOWN') throw conflict('Lirik lagu pada rilis yang diturunkan tidak dapat diubah');
+      const b = z
+        .object({ mode: z.enum(['plain', 'synced']), text: z.string().max(25_000), language: z.string().trim().regex(/^[a-z]{2,3}$/).nullable().optional() })
+        .parse(req.body);
+      const p = parseLyrics(b.mode, b.text);
+      if (!p.ok) throw unprocessable(p.error, { field: 'text', line: p.line });
+      if (p.synced && t.duration_ms > 0 && p.lines[p.lines.length - 1]!.time_ms > t.duration_ms + 5000)
+        throw unprocessable('Stempel waktu terakhir melebihi durasi lagu — periksa sinkronisasi', { field: 'text' });
+      await db.tx(async (tx) => {
+        await tx.query(
+          `INSERT INTO lyrics (track_id, synced, lines, plain, language, updated_at, updated_by) VALUES ($1,$2,$3,$4,$5, now(), $6)
+           ON CONFLICT (track_id) DO UPDATE SET synced = $2, lines = $3, plain = $4, language = $5, updated_at = now(), updated_by = $6`,
+          [id, p.synced, JSON.stringify(p.lines), p.plain, b.language ?? null, req.user!.sub],
+        );
+        await audit(tx, { actorId: req.user!.sub, action: 'track.lyrics_update', entity: 'track', entityId: id, data: { synced: p.synced, lines: p.lines.length }, ip: req.ip });
+      });
+      return { lyrics: { synced: p.synced, language: b.language ?? null, line_count: p.lines.length, text: lyricsToText(p.synced, p.lines) } };
+    });
+
+    s.delete('/v1/studio/tracks/:id/lyrics', async (req) => {
+      const { id } = req.params as { id: string };
+      const t = await loadTrack(req, id);
+      if (t.release_status === 'TAKEN_DOWN') throw conflict('Lirik lagu pada rilis yang diturunkan tidak dapat diubah');
+      const d = await db.query(`DELETE FROM lyrics WHERE track_id = $1 RETURNING track_id`, [id]);
+      if (!d.length) throw notFound('Lirik');
+      await audit(db, { actorId: req.user!.sub, action: 'track.lyrics_delete', entity: 'track', entityId: id, ip: req.ip });
+      return { ok: true };
     });
 
     // Aditif: kelola lagu dalam rilis.

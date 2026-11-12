@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Pencil, Play, Plus, Trash2, Upload } from 'lucide-react';
+import { ArrowLeft, FileText, Pencil, Play, Plus, Trash2, Undo2, Upload } from 'lucide-react';
 import { api, ApiError, fmt } from '@/lib/api';
 import type { Release, Split, Track, TrackAudio } from '@/lib/types';
 import { Badge, Button, Card, Field, Input, PageHeader, Select, toast } from '@/components/ui';
@@ -9,8 +9,10 @@ import { GENRES, QueryState, useCurrentArtist } from '@/components/b2b/common';
 import { ReleaseStatusBadge } from './Releases';
 import { AUDIO_ACCEPT, audioDuration, SharesEditor, uploadFile } from './NewRelease';
 import { useDict } from '@/lib/i18n';
+import { ChangeRequestEditor, LyricsEditor, PendingChanges } from '@/components/studio/release-edit';
 
 const EDITABLE: Release['status'][] = ['DRAFT', 'REJECTED'];
+const PUBLISHED: Release['status'][] = ['SCHEDULED', 'LIVE'];
 const PROCESSING: TrackAudio['transcode_status'][] = ['pending', 'processing'];
 
 /** Format master & status pengolahan (rendisi streaming) satu lagu. */
@@ -332,9 +334,11 @@ function AddTrack({ releaseId }: { releaseId: string }) {
 
 type SplitsRes = { master: Split[]; publishing: Split[]; fully_approved: boolean };
 
-function TrackSplits({ track, editable }: { track: Track; editable: boolean }) {
+function TrackSplits({ track, editable, lyricsEditable }: { track: Track; editable: boolean; lyricsEditable: boolean }) {
   const qc = useQueryClient();
   const [editTrack, setEditTrack] = useState(false);
+  const [lyricsOpen, setLyricsOpen] = useState(false);
+  const tl = useDict('b2b').studio.release.lyrics;
   const t = useDict('b2b').studio.release;
   async function removeTrack() {
     if (!confirm(t.confirmRemoveTrack(track.title))) return;
@@ -402,6 +406,15 @@ function TrackSplits({ track, editable }: { track: Track; editable: boolean }) {
         <AudioBadge audio={track.audio} />
         {track.isrc ? <span className="font-mono text-xs text-b2b-muted">{track.isrc}</span> : <Badge tone="amber">{t.isrcEmpty}</Badge>}
         <TrackPreview trackId={track.id} />
+        {lyricsEditable && (
+          <button
+            type="button"
+            onClick={() => setLyricsOpen(true)}
+            className={`inline-flex items-center gap-1 text-xs font-bold ${track.has_lyrics ? 'text-emerald-600 hover:text-emerald-700' : 'text-b2b-muted hover:text-b2b-ink'}`}
+          >
+            <FileText className="size-3.5" /> {track.has_lyrics ? tl.has : tl.button}
+          </button>
+        )}
         <div className="flex items-center gap-2">
           {q.data && <Badge tone={q.data.fully_approved ? 'green' : 'amber'}>{q.data.fully_approved ? t.splitApproved : t.splitPending}</Badge>}
           {editable && !editTrack && (
@@ -417,6 +430,7 @@ function TrackSplits({ track, editable }: { track: Track; editable: boolean }) {
         </div>
       </div>
       {editTrack && <TrackEditor track={track} onDone={() => setEditTrack(false)} />}
+      {lyricsEditable && <LyricsEditor track={track} open={lyricsOpen} onClose={() => setLyricsOpen(false)} />}
       {edit ? (
         <div className="mt-4 space-y-4">
           <SharesEditor title="Master" shares={edit.master} onChange={(m) => setEdit({ ...edit, master: m })} />
@@ -469,6 +483,7 @@ export default function ReleaseDetail() {
   const r = q.data?.data.find((x) => x.id === id);
   const [busy, setBusy] = useState(false);
   const [editMeta, setEditMeta] = useState(false);
+  const [requestChanges, setRequestChanges] = useState(false);
   const [errors, setErrors] = useState<{ path: string; message: string }[]>([]);
   const t = useDict('b2b').studio.release;
   async function submit() {
@@ -480,6 +495,19 @@ export default function ReleaseDetail() {
       qc.invalidateQueries({ queryKey: ['studio-releases'] });
     } catch (e) {
       if (e instanceof ApiError && e.problem.errors) setErrors(e.problem.errors);
+      toast.error(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function withdraw() {
+    if (!confirm(t.withdrawConfirm)) return;
+    setBusy(true);
+    try {
+      await api(`/v1/studio/releases/${id}/withdraw`, { body: {} });
+      toast.success(t.withdrawn);
+      qc.invalidateQueries({ queryKey: ['studio-releases'] });
+    } catch (e) {
       toast.error(e);
     } finally {
       setBusy(false);
@@ -517,7 +545,20 @@ export default function ReleaseDetail() {
                   </Button>
                 </div>
               )}
+              {r.status === 'IN_REVIEW' && (
+                <Button variant="outline-ink" loading={busy} icon={<Undo2 className="size-4" />} onClick={withdraw}>
+                  {t.withdraw}
+                </Button>
+              )}
+              {PUBLISHED.includes(r.status) && !requestChanges && (
+                <Button variant="outline-ink" icon={<Pencil className="size-4" />} onClick={() => setRequestChanges(true)}>
+                  {t.requestChanges}
+                </Button>
+              )}
             </div>
+            {r.status === 'IN_REVIEW' && <p className="mb-6 border-l-4 border-b2b-line bg-b2b-card px-3 py-2 text-sm text-b2b-muted">{t.inReviewHint}</p>}
+            {PUBLISHED.includes(r.status) && !requestChanges && <PendingChanges r={r} />}
+            {requestChanges && <ChangeRequestEditor key={r.pending_changes?.submitted_at ?? 'new'} r={r} onDone={() => setRequestChanges(false)} />}
             {r.qc_reason && (
               <Card className="mb-6 border-red-200 bg-red-50">
                 <p className="text-xs font-bold tracking-wide text-red-700 uppercase">{r.status === 'REJECTED' ? t.rejectedByQc : r.status === 'TAKEN_DOWN' ? t.takenDown : t.qcNote}</p>
@@ -539,7 +580,7 @@ export default function ReleaseDetail() {
             <Card title={t.tracksSplits}>
               <div className="space-y-3">
                 {r.tracks.map((tr) => (
-                  <TrackSplits key={tr.id} track={tr} editable={EDITABLE.includes(r.status)} />
+                  <TrackSplits key={tr.id} track={tr} editable={EDITABLE.includes(r.status)} lyricsEditable={r.status !== 'TAKEN_DOWN'} />
                 ))}
                 {!r.tracks.length && <p className="text-sm text-b2b-muted">{t.noTracks}</p>}
                 {EDITABLE.includes(r.status) && <AddTrack releaseId={r.id} />}

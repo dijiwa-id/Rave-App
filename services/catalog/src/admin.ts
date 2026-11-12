@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { audit, badRequest, conflict, requireSuperAdmin, forbidden, notFound, publish, requirePermission, unauthorized, z, type Client, type Job, type ServiceContext } from '@rave/service-kit';
-import { isUuid, releaseFull } from './queries.js';
+import { isUuid, releaseFull, releasesFull } from './queries.js';
 import { open as fsOpen } from 'node:fs/promises';
 import { join } from 'node:path';
 import { imageSize, UPLOAD_DIR } from './storage.js';
@@ -63,11 +63,18 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
     s.addHook('preHandler', requirePermission('qc.review'));
 
     s.get('/v1/admin/qc/releases', async (req) => {
-      const { status = 'IN_REVIEW' } = req.query as { status?: string };
-      const ids = await db.query(`SELECT id FROM releases WHERE status = $1 ORDER BY submitted_at NULLS LAST, created_at`, [status]);
+      const { status } = z
+        .object({ status: z.enum(['DRAFT', 'IN_REVIEW', 'SCHEDULED', 'LIVE', 'REJECTED', 'TAKEN_DOWN']).default('IN_REVIEW') })
+        .parse(req.query);
+      // Dibatasi 100 & dimuat batch: status LIVE bisa berisi seluruh katalog.
+      const ids = await db.query(`SELECT id FROM releases WHERE status = $1 ORDER BY submitted_at NULLS LAST, created_at LIMIT 100`, [status]);
+      const full = await releasesFull(
+        db,
+        ids.map((x: { id: string }) => x.id),
+      );
       const data = [];
-      for (const { id } of ids) {
-        const r = await releaseFull(db, id);
+      for (const r of full) {
+        const id = r.id;
         // Sinyal untuk reviewer: duplikasi judul/ISRC di katalog (pengganti fingerprint audio di MVP).
         r.qc_signals = await db.query(
           `SELECT t.title, t.isrc, x.release_id AS duplicate_release_id, x.title AS duplicate_title
@@ -181,6 +188,64 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
           await tx.query(`UPDATE releases SET pending_cover_url = NULL, pending_cover_at = NULL, pending_cover_by = NULL, cover_review_note = $2, updated_at = now() WHERE id = $1`, [id, b.reason]);
         await publish(tx, 'catalog.release.cover_reviewed', id, { releaseId: id, artistId: r.artist_id, title: r.title, approved: b.approve, reason: b.approve ? null : b.reason! });
         await audit(tx, { actorId: req.user!.sub, action: b.approve ? 'qc.cover_approve' : 'qc.cover_reject', entity: 'release', entityId: id, data: b, ip: req.ip });
+        return { id, approved: b.approve };
+      });
+    });
+
+    // ---- Pengajuan perubahan metadata rilis yang sudah lolos QC (Artist Studio) ----
+    s.get('/v1/admin/qc/changes', async () => {
+      const rows = await db.query(
+        `SELECT r.id, r.title, r.status, r.genre, r.label, r.explicit, to_char(r.release_date,'YYYY-MM-DD') AS release_date,
+                r.cover_url, r.pending_changes, r.pending_changes_at, a.name AS artist_name,
+                (SELECT coalesce(json_agg(json_build_object('id', t.id, 'title', t.title, 'explicit', t.explicit, 'track_number', t.track_number) ORDER BY t.track_number), '[]')
+                   FROM tracks t WHERE t.release_id = r.id) AS tracks
+           FROM releases r JOIN artists a ON a.id = r.artist_id WHERE r.pending_changes IS NOT NULL ORDER BY r.pending_changes_at`,
+      );
+      return {
+        data: rows.map((r: any) => ({
+          id: r.id,
+          title: r.title,
+          status: r.status,
+          artist_name: r.artist_name,
+          cover_url: r.cover_url,
+          submitted_at: r.pending_changes_at,
+          current: { title: r.title, genre: r.genre, label: r.label, explicit: r.explicit, release_date: r.release_date, tracks: r.tracks },
+          changes: r.pending_changes,
+        })),
+      };
+    });
+
+    s.post('/v1/admin/qc/changes/:id/decision', async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isUuid(id)) throw notFound('Rilis');
+      const b = z.object({ approve: z.boolean(), reason: z.string().trim().max(1000).optional() }).parse(req.body);
+      if (!b.approve && (b.reason ?? '').length < 5) throw badRequest('Alasan penolakan perubahan wajib diisi (min. 5 karakter)');
+      return db.tx(async (tx) => {
+        const r = (await tx.query(`SELECT id, title, status, artist_id, pending_changes FROM releases WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+        if (!r) throw notFound('Rilis');
+        if (!r.pending_changes) throw conflict('Tidak ada pengajuan perubahan untuk rilis ini');
+        const ch = r.pending_changes as { release: Record<string, unknown>; tracks: Record<string, Record<string, unknown>> };
+        if (b.approve) {
+          if (!['LIVE', 'SCHEDULED'].includes(r.status)) throw conflict(`Rilis berstatus ${r.status} — pengajuan tidak dapat diterapkan`);
+          // Kunci kolom dibatasi daftar putih — pengajuan disimpan oleh server, tetapi tetap divalidasi ulang di sini.
+          const REL = ['title', 'genre', 'label', 'explicit', 'release_date'];
+          const TRK = ['title', 'explicit'];
+          const rel = Object.entries(ch.release ?? {}).filter(([k]) => REL.includes(k));
+          if (rel.some(([k]) => k === 'release_date') && r.status !== 'SCHEDULED') throw conflict('Rilis sudah tayang — tanggal rilis tidak dapat diubah');
+          if (rel.length)
+            await tx.query(`UPDATE releases SET ${rel.map(([k], i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() WHERE id = $1`, [id, ...rel.map(([, v]) => v)]);
+          for (const [trackId, d] of Object.entries(ch.tracks ?? {})) {
+            const f = Object.entries(d).filter(([k]) => TRK.includes(k));
+            if (f.length && isUuid(trackId))
+              await tx.query(`UPDATE tracks SET ${f.map(([k], i) => `${k} = $${i + 3}`).join(', ')} WHERE id = $1 AND release_id = $2`, [trackId, id, ...f.map(([, v]) => v)]);
+          }
+          await tx.query(`UPDATE releases SET pending_changes = NULL, pending_changes_at = NULL, pending_changes_by = NULL, changes_review_note = NULL WHERE id = $1`, [id]);
+        } else {
+          await tx.query(`UPDATE releases SET pending_changes = NULL, pending_changes_at = NULL, pending_changes_by = NULL, changes_review_note = $2, updated_at = now() WHERE id = $1`, [id, b.reason]);
+        }
+        const title = (ch.release?.title as string | undefined) && b.approve ? (ch.release.title as string) : r.title;
+        await publish(tx, 'catalog.release.changes_reviewed', id, { releaseId: id, artistId: r.artist_id, title, approved: b.approve, reason: b.approve ? null : b.reason! });
+        await audit(tx, { actorId: req.user!.sub, action: b.approve ? 'qc.changes_approve' : 'qc.changes_reject', entity: 'release', entityId: id, data: { ...b, changes: ch }, ip: req.ip });
         return { id, approved: b.approve };
       });
     });

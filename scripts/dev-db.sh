@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Menjalankan cluster PostgreSQL lokal milik user (tanpa Docker/sudo) untuk development.
 # Data disimpan di $HOME/.rave/pgdata karena filesystem NTFS (/mnt/*) tidak didukung Postgres.
-# Jika Docker tersedia, gunakan `docker compose up postgres` sebagai gantinya.
+# Production memakai container Postgres di docker-compose.prod.yml (stack Docker dev sudah dihapus 2026-11-12).
 set -euo pipefail
 
 PGBIN="${PGBIN:-$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -1)}"

@@ -74,7 +74,7 @@ Kalender dijaga **exclusion constraint** PostgreSQL (`btree_gist`) sehingga dua 
 |---|---|---|---|
 | Next.js (SSR/ISR) untuk web | React + Vite SPA | Permintaan stack "React"; satu app untuk semua permukaan | Pindahkan `pages/public` (landing, `/a/:slug`, `/e/:slug`) ke Next.js App Router untuk SEO (REQ-WEB-03); fan app & dasbor tetap SPA. |
 | NestJS | Fastify + Zod via `service-kit` | Lebih ringan per microservice; TDD sendiri menyebut adapter Fastify & Zod | Dapat dibungkus NestJS per service bila tim membutuhkan DI/decorator. |
-| Kafka/Redpanda | Driver `pg` (bus.events + LISTEN/NOTIFY) default lokal; driver `kafka` tersedia (`BUS_DRIVER=kafka`) | Tanpa Docker di mesin dev | `docker compose up` menyalakan Redpanda; set `BUS_DRIVER=kafka`. |
+| Kafka/Redpanda | Driver `pg` (bus.events + LISTEN/NOTIFY) default lokal; driver `kafka` tersedia (`BUS_DRIVER=kafka`) | Tanpa Docker di mesin dev | Redpanda tersedia di `docker-compose.prod.yml` (profil produksi); set `BUS_DRIVER=kafka`. |
 | Temporal (saga) | State machine di DB + job berkala + event | Infrastruktur minimal | Pindahkan transisi berbasis waktu (hold, H-7, H+1) ke workflow Temporal; aturan domain tetap di `packages/domain`. |
 | MongoDB (katalog) | PostgreSQL JSONB | Keputusan terbuka D-06 — satu DB relasional untuk MVP | – |
 | ClickHouse | Tabel agregat harian di schema `playback` | Volume demo | Event `playback.*` ke Kafka → ClickHouse materialized views. |

@@ -169,6 +169,15 @@ export function consumers(ctx: ServiceContext): Consumers {
         link: '/studio/releases',
       });
     },
+    'catalog.release.changes_reviewed': async (e, tx) => {
+      const p = e.payload;
+      await notifyUsers(tx, await artistRecipients(tx, p.artistId), e.id, {
+        category: 'release',
+        title: p.approved ? 'Perubahan rilis diterapkan' : 'Perubahan rilis ditolak',
+        body: p.approved ? `Perubahan pada "${p.title}" sudah tayang.` : `Perubahan pada "${p.title}" tidak disetujui: ${p.reason}. Data lama tetap tayang.`,
+        link: `/studio/releases/${p.releaseId}`,
+      });
+    },
     'catalog.split.invited': async (e) => {
       const p = e.payload;
       const url = `${(process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').replace(/\/$/, '')}/studio`;

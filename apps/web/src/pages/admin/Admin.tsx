@@ -198,6 +198,105 @@ function CoverQueue() {
   );
 }
 
+type ChangeRow = {
+  id: string;
+  title: string;
+  status: string;
+  artist_name: string;
+  cover_url: string | null;
+  submitted_at: string;
+  current: { title: string; genre: string | null; label: string | null; explicit: boolean; release_date: string; tracks: { id: string; title: string; explicit: boolean; track_number: number }[] };
+  changes: { release: Record<string, unknown>; tracks: Record<string, Record<string, unknown>>; note: string | null };
+};
+
+/** Antrean pengajuan perubahan metadata rilis LIVE/SCHEDULED: tampilkan beda lama → baru, setujui / tolak beralasan. */
+function ChangesQueue() {
+  const d = useDict('admin');
+  const t = d.qc;
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['qc-changes'], queryFn: () => api<{ data: ChangeRow[] }>('/v1/admin/qc/changes') });
+  const [rejecting, setRejecting] = useState<string | null>(null);
+  const [why, setWhy] = useState('');
+  const show = (v: unknown) => (typeof v === 'boolean' ? (v ? t.yes : t.no) : v == null || v === '' ? '—' : String(v));
+  async function decide(id: string, approve: boolean) {
+    try {
+      await api(`/v1/admin/qc/changes/${id}/decision`, { body: approve ? { approve } : { approve, reason: why } });
+      toast.success(approve ? t.changesApproved : t.changesRejectedToast);
+      setRejecting(null);
+      setWhy('');
+      qc.invalidateQueries({ queryKey: ['qc-changes'] });
+      qc.invalidateQueries({ queryKey: ['qc'] });
+    } catch (e) {
+      toast.error(e);
+    }
+  }
+  if (!q.data?.data.length) return null;
+  return (
+    <Card title={t.changesQueue(q.data.data.length)} className="mb-6">
+      <ul className="divide-y divide-b2b-line">
+        {q.data.data.map((c) => {
+          const cur = c.current as unknown as Record<string, unknown>;
+          return (
+            <li key={c.id} className="flex flex-wrap gap-4 py-3">
+              {c.cover_url ? <img src={c.cover_url} alt="" className="size-16 object-cover" /> : <div className="size-16 bg-b2b-bg" />}
+              <div className="min-w-0 flex-1">
+                <p className="font-bold">{c.title}</p>
+                <p className="text-xs text-b2b-muted">
+                  {c.artist_name} · {c.status} · {fmt.dateTime(c.submitted_at)}
+                </p>
+                <dl className="mt-2 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
+                  {Object.entries(c.changes.release ?? {}).map(([k, v]) => (
+                    <div key={k} className="contents">
+                      <dt className="font-semibold text-b2b-muted">{t.changesFields[k] ?? k}</dt>
+                      <dd>
+                        <span className="line-through opacity-60">{show(cur[k])}</span> → <strong>{show(v)}</strong>
+                      </dd>
+                    </div>
+                  ))}
+                  {Object.entries(c.changes.tracks ?? {}).map(([tid, ch]) => {
+                    const tr = c.current.tracks.find((x) => x.id === tid);
+                    return Object.entries(ch).map(([k, v]) => (
+                      <div key={tid + k} className="contents">
+                        <dt className="font-semibold text-b2b-muted">
+                          {t.changesTrack(tr?.track_number ?? 0)} · {t.changesFields[k] ?? k}
+                        </dt>
+                        <dd>
+                          <span className="line-through opacity-60">{show(tr ? (tr as unknown as Record<string, unknown>)[k] : null)}</span> → <strong>{show(v)}</strong>
+                        </dd>
+                      </div>
+                    ));
+                  })}
+                </dl>
+                {c.changes.note && <p className="mt-2 text-xs text-b2b-muted italic">{t.changesNote(c.changes.note)}</p>}
+              </div>
+              {rejecting === c.id ? (
+                <div className="flex w-full flex-wrap items-end gap-2 md:w-auto">
+                  <Input value={why} onChange={(e) => setWhy(e.target.value)} placeholder={t.changesRejectReason} className="w-64" />
+                  <Button size="sm" variant="danger" disabled={why.trim().length < 5} onClick={() => decide(c.id, false)}>
+                    {d.common.reject}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setRejecting(null)}>
+                    {d.common.cancel}
+                  </Button>
+                </div>
+              ) : (
+                <span className="inline-flex items-start gap-2">
+                  <Button size="sm" variant="outline-ink" onClick={() => setRejecting(c.id)}>
+                    {d.common.reject}
+                  </Button>
+                  <Button size="sm" variant="ink" onClick={() => decide(c.id, true)}>
+                    {d.common.approve}
+                  </Button>
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
+
 export function AdminQc() {
   const d = useDict('admin');
   const t = d.qc;
@@ -243,6 +342,7 @@ export function AdminQc() {
         }
       />
       <CoverQueue />
+      <ChangesQueue />
       <QueryState q={q} empty={q.data && !q.data.data.length ? <Empty title={t.empty} /> : undefined}>
         <div className="space-y-4">
           {q.data?.data.map((r) => (

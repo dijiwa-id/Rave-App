@@ -50,6 +50,31 @@ export async function releaseFull(q: Q, id: string) {
   return r;
 }
 
+/**
+ * Banyak rilis lengkap sekaligus (2 query, bukan 2×N) — urutan mengikuti `ids`. `extraCols` = kolom tambahan dari
+ * `releases r` (mis. kolom tinjauan Studio). Pemanggil memeriksa hak akses.
+ */
+export async function releasesFull(q: Q, ids: string[], extraCols = ''): Promise<any[]> {
+  if (!ids.length) return [];
+  const rels = await rows(
+    q,
+    `SELECT r.id, r.title, r.type, r.cover_url, to_char(r.release_date, 'YYYY-MM-DD') AS release_date,
+            json_build_object('id', a.id, 'name', a.name, 'slug', a.slug) AS artist, r.artist_id,
+            ${RELEASE_FULL_COLS}${extraCols ? ', ' + extraCols : ''}
+     FROM releases r JOIN artists a ON a.id = r.artist_id WHERE r.id = ANY($1::uuid[])`,
+    [ids],
+  );
+  const tracks = await rows(q, `${TRACK_SELECT} WHERE t.release_id = ANY($1::uuid[]) ORDER BY t.track_number`, [ids]);
+  const byRelease = new Map<string, any[]>();
+  for (const t of tracks) {
+    const k = t.release.id;
+    if (!byRelease.has(k)) byRelease.set(k, []);
+    byRelease.get(k)!.push(t);
+  }
+  const byId = new Map(rels.map((r) => [r.id, r]));
+  return ids.map((id) => byId.get(id)).filter(Boolean).map((r) => ({ ...r, tracks: byRelease.get(r.id) ?? [] }));
+}
+
 export function isUuid(s: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 }

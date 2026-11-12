@@ -115,6 +115,15 @@ export interface Release extends ReleaseSummary {
   pending_cover?: { url: string; submitted_at: string } | null;
   /** Studio: alasan penolakan pengajuan sampul terakhir. */
   cover_review_note?: string | null;
+  /** Studio: perubahan metadata yang menunggu tinjauan QC (rilis LIVE/SCHEDULED). */
+  pending_changes?: {
+    release: Partial<Record<'title' | 'genre' | 'label' | 'explicit' | 'release_date', string | boolean | null>>;
+    tracks: Record<string, Partial<Record<'title' | 'explicit', string | boolean>>>;
+    note: string | null;
+    submitted_at: string;
+  } | null;
+  /** Studio: alasan penolakan pengajuan perubahan terakhir. */
+  changes_review_note?: string | null;
 }
 export type ArtistLinkPlatform = 'instagram' | 'tiktok' | 'youtube' | 'spotify' | 'apple_music' | 'soundcloud' | 'bandcamp' | 'x' | 'facebook' | 'website';
 export interface ArtistLink {

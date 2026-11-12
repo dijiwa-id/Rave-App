@@ -17,7 +17,6 @@ export const ARTIST_LINK_HOSTS = {
 } as const satisfies Record<string, readonly string[] | null>;
 
 export type ArtistLinkPlatform = keyof typeof ARTIST_LINK_HOSTS;
-export const ARTIST_LINK_PLATFORMS = Object.keys(ARTIST_LINK_HOSTS) as ArtistLinkPlatform[];
 export const MAX_ARTIST_LINKS = 8;
 export const MAX_ARTIST_LINK_URL = 500;
 
