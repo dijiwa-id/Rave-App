@@ -3,6 +3,10 @@
 Hasil audit 2026-11-10, diperbarui 2026-11-12 terhadap BRD v3.0 §15.1. Status: **kode & infrastruktur siap; sisa blocker adalah keputusan/kontrak vendor dan data legal**.
 Jalankan `npm run prod:preflight` sebelum setiap deploy; blocker di bawah juga muncul sebagai peringatan di sana.
 
+> **Audit ulang 12 Nov 2026 (BRD/TDD v3.0): lihat [`docs/GO-LIVE-AUDIT.md`](GO-LIVE-AUDIT.md)** — menemukan P0 tambahan
+> di keamanan (hak admin, kebocoran master audio), alur uang (refund booking, eksekusi payout, pajak/split, pembatalan),
+> kontrak final, dan klaim produk. Tabel di bawah hanya mencakup blocker integrasi vendor.
+
 ## P0 — wajib sebelum menerima pengguna publik
 
 | # | Item | Kondisi sekarang | Yang dibutuhkan |
