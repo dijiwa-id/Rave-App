@@ -55,6 +55,7 @@ export interface DomainEvents {
   'finance.escrow.released': { referenceId: string; amount: number; lines: { partyId: string; amount: number }[] };
   'finance.escrow.refunded': { referenceId: string; amount: number; promotorOrgId?: string | null; promotorUserId?: string | null };
   'finance.payout.completed': { payoutId: string; partyId: string; amount: number };
+  'finance.payout.rejected': { payoutId: string; partyId: string; amount: number; reason: string };
   // Refund ke pembeli (dana keluar dari escrow lewat mitra ke metode pembayaran asal). Satu refund per invoice.
   'finance.refund.completed': { refundId: string; invoiceId: string; purpose: PaymentPurpose; referenceId: string; amount: number; payerUserId: string; reason: string };
   'finance.refund.failed': { invoiceId: string | null; purpose: PaymentPurpose; referenceId: string; reason: string; error: string };

@@ -142,6 +142,32 @@ services:
     # Tanpa profil tls: web melayani HTTP langsung (pasang TLS di LB/Cloudflare). Dengan profil tls: set WEB_BIND=127.0.0.1:8081.
     ports: ['${WEB_BIND:-80}:8080']
 
+  # Salinan off-site dump DB (dibuat service platform di storage:/data/backups) — docs/DEPLOYMENT.md §Backup.
+  # Hanya membaca volume storage. BACKUP_OFFSITE=none → container tetap jalan dan mencatat peringatan.
+  # Sekali jalan (keluar ≠ 0 bila gagal): scripts/prod.sh backup
+  backup-offsite:
+    image: rclone/rclone:1.68.2
+    restart: always
+    logging: *logging
+    security_opt: ['no-new-privileges:true']
+    # env_file agar RCLONE_S3_* / RCLONE_CONFIG_<REMOTE>_* dari .env.production terbaca rclone.
+    env_file: ['${RAVE_ENV_FILE:-.env.production}']
+    environment:
+      BACKUP_OFFSITE: ${BACKUP_OFFSITE:-none}
+      BACKUP_OFFSITE_DIR: ${BACKUP_OFFSITE_DIR:-}
+      BACKUP_S3_URI: ${BACKUP_S3_URI:-}
+      BACKUP_RCLONE_REMOTE: ${BACKUP_RCLONE_REMOTE:-}
+      BACKUP_OFFSITE_KEEP_DAYS: ${BACKUP_OFFSITE_KEEP_DAYS:-30}
+      BACKUP_OFFSITE_INTERVAL_HOURS: ${BACKUP_OFFSITE_INTERVAL_HOURS:-6}
+      BACKUP_MAX_AGE_HOURS: ${BACKUP_MAX_AGE_HOURS:-30}
+    entrypoint: ['/bin/sh', '/offsite.sh']
+    command: ['loop']
+    volumes:
+      - storage:/data:ro
+      - ./infra/docker/backup/offsite.sh:/offsite.sh:ro
+      # Mode dir: disk kedua/NAS di host. Tanpa BACKUP_OFFSITE_DIR dipasang volume kosong (tidak dipakai).
+      - ${BACKUP_OFFSITE_DIR:-offsite_unused}:/offsite
+
   # HTTPS otomatis (Let's Encrypt) — aktifkan dengan `--profile tls` dan RAVE_DOMAIN.
   caddy:
     image: caddy:2.8-alpine
@@ -162,3 +188,4 @@ volumes:
   redpanda:
   caddy_data:
   caddy_config:
+  offsite_unused:

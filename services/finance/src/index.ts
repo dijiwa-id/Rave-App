@@ -1,7 +1,7 @@
 import { createService, config } from '@rave/service-kit';
 import { consumers } from './consumers.js';
 import { expiryJob, payoutJob, refundDispatchJob, releaseJob, sandboxRefundSettleJob } from './jobs.js';
-import { paymentProvider } from './providers.js';
+import { paymentSettings } from './providers.js';
 import { routes } from './routes.js';
 import { seed } from './seed.js';
 
@@ -23,8 +23,12 @@ const svc = createService({
   seed,
 });
 
-// Fail fast bila PAYMENT_PROVIDER salah ketik; peringatkan bila produksi masih memakai sandbox (refund tidak memindahkan uang).
-const provider = paymentProvider();
-if (!config.isDev && provider.name === 'sandbox') console.warn('[finance] PAYMENT_PROVIDER=sandbox di produksi — refund & pembayaran tidak memindahkan uang sungguhan');
-
 await svc.start();
+
+// Peringatan bila produksi masih memakai sandbox (pembayaran & refund tidak memindahkan uang). Penyedia dapat diganti
+// Super Admin kapan saja (Platform → Integrasi) tanpa restart.
+void paymentSettings()
+  .then((s) => {
+    if (!config.isDev && s.provider === 'sandbox') console.warn('[finance] payment gateway = sandbox di produksi — pembayaran & refund tidak memindahkan uang sungguhan');
+  })
+  .catch((e) => console.error('[finance] konfigurasi payment gateway tidak valid:', e?.message ?? e));

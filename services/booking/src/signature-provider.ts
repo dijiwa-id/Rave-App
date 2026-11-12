@@ -1,6 +1,6 @@
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import type { SignParty } from '@rave/domain';
-import { HttpError, config, settings, uuidv7, unprocessable, type Db } from '@rave/service-kit';
+import { HttpError, brandedEmail, config, DeliveryError, sendEmail, settings, uuidv7, unprocessable, type Db } from '@rave/service-kit';
 
 export type SignMethod = 'OTP_NATIVE' | 'PRIVY' | 'VIDA';
 
@@ -84,6 +84,22 @@ export class NativeOtpProvider implements SignatureProvider {
         [id, ctx.contractId, ctx.party, ctx.userId, ctx.destination.channel, otpHash(ctx, code), ttl],
       );
     });
+    // Kirim kode ke email penandatangan (EMAIL_PROVIDER). Gagal kirim → kode dihapus, tidak memakan kuota.
+    try {
+      const mins = Math.max(1, Math.round(ttl / 60));
+      const m = brandedEmail({
+        heading: 'Kode tanda tangan kontrak',
+        lines: [`Gunakan kode berikut untuk menandatangani kontrak booking di RAVE. Berlaku ${mins} menit dan hanya untuk dokumen ini.`, `Sidik dokumen (SHA-256): ${ctx.docSha256.slice(0, 16)}…`, 'Jangan bagikan kode ini kepada siapa pun.'],
+        code,
+        footer: 'Tidak merasa sedang menandatangani kontrak? Abaikan email ini dan hubungi dukungan RAVE.',
+      });
+      await sendEmail({ to: ctx.destination.value, subject: `${code} adalah kode tanda tangan kontrak RAVE`, ...m, tag: 'contract-otp' });
+    } catch (e) {
+      // Kode tidak pernah terkirim → hapus agar tidak dihitung batas kirim / jeda kirim ulang.
+      await db.query(`DELETE FROM signature_otps WHERE id = $1`, [id]);
+      const permanent = e instanceof DeliveryError && !e.retryable;
+      throw new HttpError(permanent ? 502 : 503, permanent ? 'Bad Gateway' : 'Service Unavailable', 'Kode tanda tangan belum dapat dikirim. Coba lagi sebentar lagi.');
+    }
     return {
       challengeId: id,
       channel: ctx.destination.channel,

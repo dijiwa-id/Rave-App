@@ -8,6 +8,7 @@ import { useAuth } from '@/stores/auth';
 import type { MediaItem, Track } from '@/lib/types';
 import { cx, Skeleton } from '@/components/ui';
 import { LikeButton } from '@/layouts/PlayerBar';
+import { AddToPlaylist } from './AddToPlaylist';
 import { trackToPlayable, usePlayer, type Playable } from '@/stores/player';
 
 /** Warna gradien header deterministik dari string (pengganti ekstraksi warna dominan artwork). */
@@ -174,16 +175,17 @@ type RowProps = {
   onRemove?: (index: number) => void;
   onMove?: (index: number, dir: -1 | 1) => void;
   count: number;
+  playlistId?: string;
 };
 
 // memo: baris hanya render ulang bila status aktif/putar berubah, bukan setiap perubahan store pemutar.
-const TrackRow = memo(function TrackRow({ t, i, active, playing, showAlbum, showCover, numbered, batched, onPlay, onToggle, onRemove, onMove, count }: RowProps) {
+const TrackRow = memo(function TrackRow({ t, i, active, playing, showAlbum, showCover, numbered, batched, onPlay, onToggle, onRemove, onMove, count, playlistId }: RowProps) {
   const d = useDict('common');
   return (
     <div
       role="row"
       onDoubleClick={() => onPlay(i)}
-      className="group grid grid-cols-[24px_1fr_40px] items-center gap-4 rounded-none px-4 py-2 text-sm text-rave-muted hover:bg-white/10 md:grid-cols-[24px_4fr_3fr_80px]"
+      className="group grid grid-cols-[24px_1fr_84px] items-center gap-4 rounded-none px-4 py-2 text-sm text-rave-muted hover:bg-white/10 md:grid-cols-[24px_4fr_3fr_150px]"
     >
       <button onClick={() => (active ? onToggle() : onPlay(i))} aria-label={d.fan.playTrack(t.title)} className="w-6 text-right">
         <span className={cx('group-hover:hidden', active && 'text-rave-primary-text')}>{active && playing ? '♪' : numbered ? i + 1 : '•'}</span>
@@ -206,7 +208,9 @@ const TrackRow = memo(function TrackRow({ t, i, active, playing, showAlbum, show
       <Link to={`/app/album/${t.release.id}`} className="hidden truncate hover:text-white hover:underline md:block">
         {showAlbum ? t.release.title : ''}
       </Link>
-      <div className="flex items-center justify-end gap-3">
+      <div className="flex items-center justify-end gap-2 sm:gap-3">
+        {/* Tambah ke playlist: selalu tampak di layar sentuh, muncul saat hover/fokus di desktop */}
+        <AddToPlaylist trackId={t.id} trackTitle={t.title} excludePlaylistId={playlistId} className="sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100 sm:aria-expanded:opacity-100" />
         <span className="hidden opacity-0 group-hover:opacity-100 sm:inline">
           <LikeButton trackId={t.id} batched={batched} />
         </span>
@@ -239,8 +243,11 @@ export function TrackTable({
   onRemove,
   onMove,
   numbered = true,
+  playlistId,
 }: {
   tracks: Track[];
+  /** Playlist yang sedang dibuka — tidak ditawarkan lagi di menu "Tambah ke playlist". */
+  playlistId?: string;
   showAlbum?: boolean;
   showCover?: boolean;
   onRemove?: (index: number) => void;
@@ -261,7 +268,7 @@ export function TrackTable({
   const d = useDict('common');
   return (
     <div className="px-4 md:px-8" role="table" aria-label={d.fan.trackList}>
-      <div role="row" className="mb-2 grid grid-cols-[24px_1fr_40px] items-center gap-4 border-b border-white/10 px-4 pb-2 text-xs tracking-widest text-rave-muted uppercase md:grid-cols-[24px_4fr_3fr_80px]">
+      <div role="row" className="mb-2 grid grid-cols-[24px_1fr_84px] items-center gap-4 border-b border-white/10 px-4 pb-2 text-xs tracking-widest text-rave-muted uppercase md:grid-cols-[24px_4fr_3fr_150px]">
         <span>#</span>
         <span>{d.fan.colTitle}</span>
         <span className="hidden md:block">{showAlbum ? d.fan.colAlbum : ''}</span>
@@ -285,6 +292,7 @@ export function TrackTable({
             onRemove={onRemove}
             onMove={onMove}
             count={tracks.length}
+            playlistId={playlistId}
           />
         );
       })}

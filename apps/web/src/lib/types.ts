@@ -355,6 +355,9 @@ export interface Invoice {
   description: string;
   va_number: string | null;
   qris_payload: string | null;
+  /** Penyedia tempat invoice dibayar / akan dibayar ('sandbox' | 'midtrans'). */
+  provider?: string;
+  checkout_url?: string | null;
 }
 export interface EscrowStatus {
   reference_id: string;
@@ -368,6 +371,38 @@ export interface Wallet {
   party_id: string;
   balances: { royalty: number; offair: number; ticket: number; merch: number; tip: number; total: number };
   transactions: { id: string; source: string; amount: number; description: string; created_at: string }[];
+  payouts: Payout[];
+}
+export type PayoutStatus = 'PENDING_APPROVAL' | 'REQUESTED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'REJECTED';
+/** Penarikan dana. PENDING_APPROVAL = menunggu dual control; REQUESTED + hold_until = tertahan masa tunggu rekening baru. */
+export interface Payout {
+  id: string;
+  party_id: string;
+  amount: number;
+  status: PayoutStatus;
+  approval_required: boolean;
+  hold_until: string | null;
+  decision_note: string | null;
+  created_at: string;
+  decided_at: string | null;
+  completed_at: string | null;
+}
+/** Baris antrean persetujuan payout di back office. */
+export interface AdminPayoutRow {
+  id: string;
+  party_id: string;
+  amount: number;
+  status: PayoutStatus;
+  bank: { bank: string; number: string; holder: string };
+  requested_by: string;
+  approval_required: boolean;
+  hold_until: string | null;
+  bank_changed_at: string | null;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  created_at: string;
+  completed_at: string | null;
 }
 
 // ---- Ticketing ----

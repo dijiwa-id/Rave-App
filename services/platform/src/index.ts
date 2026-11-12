@@ -2,6 +2,7 @@ import { createService, config, type ServiceContext } from '@rave/service-kit';
 import type { FastifyInstance } from 'fastify';
 import { backupJob, backupRoutes } from './backups.js';
 import { brandingRoutes } from './branding.js';
+import { integrationRoutes } from './integrations.js';
 import { overviewRoutes } from './overview.js';
 import { settingsRoutes } from './settings.js';
 import { storageJobs, storageRoutes } from './storage.js';
@@ -13,6 +14,7 @@ async function routes(app: FastifyInstance, ctx: ServiceContext) {
   await storageRoutes(app, ctx);
   await backupRoutes(app, ctx);
   await brandingRoutes(app, ctx);
+  await integrationRoutes(app, ctx);
 }
 
 const svc = createService({

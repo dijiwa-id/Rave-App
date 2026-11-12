@@ -1,4 +1,5 @@
 import cors from '@fastify/cors';
+import { setIntegrationCaller } from './integrations.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { attachUser, requireService } from './auth.js';
 import { refreshSettings, settings, startSettingsListener } from './settings.js';
@@ -62,6 +63,7 @@ export function createService(def: ServiceDefinition) {
   const log = app.log;
   const bus = createBus(db, def.name, (o, m) => log.warn(o, m));
   const ctx: ServiceContext = { name: def.name, db, log, bus };
+  setIntegrationCaller(def.name);
   const timers: NodeJS.Timeout[] = [];
   let settingsListener: ReturnType<typeof startSettingsListener> | null = null;
   let stopping = false;

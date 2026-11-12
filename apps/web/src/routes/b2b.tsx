@@ -57,6 +57,7 @@ const platform = {
   storage: () => import('@/pages/admin/PlatformStorage'),
   roles: () => import('@/pages/admin/PlatformRoles'),
   landing: () => import('@/pages/admin/PlatformLanding'),
+  integrations: () => import('@/pages/admin/PlatformIntegrations'),
 };
 const access = (perms: AdminPermission[], children: RouteObject[]): RouteObject => ({ element: <RequireAdminAccess perms={perms} />, children });
 
@@ -130,7 +131,7 @@ export const b2bRoutes: RouteObject[] = [
               access(['kyc.review'], [{ path: 'kyc', element: named(admin, 'AdminKyc') }]),
               access(['dispute.resolve'], [{ path: 'disputes', element: named(admin, 'AdminDisputes') }]),
               access(['live.moderate'], [{ path: 'live', element: named(adminLive, 'AdminLive') }]),
-              access(['finance.view', 'finance.refund'], [{ path: 'finance', element: named(admin, 'AdminFinance') }]),
+              access(['finance.view', 'finance.refund', 'finance.payout'], [{ path: 'finance', element: named(admin, 'AdminFinance') }]),
               access(['users.view'], [{ path: 'users', element: named(admin, 'AdminUsers') }]),
               access(['audit.view'], [{ path: 'audit', element: named(admin, 'AdminAudit') }]),
               // Iklan tier Gratis (docs/API.md §11) — tab via ?tab=overview|campaigns|policy.
@@ -144,6 +145,7 @@ export const b2bRoutes: RouteObject[] = [
                   { path: 'platform/roles', element: named(platform.roles, 'PlatformRoles') },
                   { path: 'platform/storage', element: named(platform.storage, 'PlatformStorage') },
                   { path: 'platform/backups', element: named(platform.storage, 'PlatformBackups') },
+                  { path: 'platform/integrations', element: named(platform.integrations, 'PlatformIntegrations') },
                   { path: 'platform/bus', element: named(platform.main, 'PlatformBus') },
                   { path: 'platform/admins', element: named(platform.main, 'PlatformAdmins') },
                 ],

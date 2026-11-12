@@ -7,6 +7,8 @@
 #   scripts/prod.sh up                 # preflight → up -d → tunggu sehat → smoke test
 #   scripts/prod.sh rollback 0.1.0     # jalankan ulang versi lama (image harus sudah ada / bisa di-pull)
 #   scripts/prod.sh down | status | logs [service] | smoke
+#   scripts/prod.sh backup             # salin dump DB ke off-site sekali (BACKUP_OFFSITE); keluar ≠ 0 bila gagal
+#   scripts/prod.sh backup-verify [..] # uji pemulihan dump terbaru ke DB sementara (scripts/backup-verify.sh)
 #
 # Env: ENV_FILE (default .env.production), PROFILES="tls kafka" untuk mengaktifkan profil compose.
 set -euo pipefail
@@ -17,6 +19,8 @@ ENV_FILE="${ENV_FILE:-.env.production}"
 export RAVE_ENV_FILE="$ENV_FILE"
 # WSL + Docker Desktop: docker.exe hanya menerima env yang terdaftar di WSLENV (tanpa efek di Linux biasa).
 export WSLENV="${WSLENV:+$WSLENV:}RAVE_ENV_FILE:RAVE_VERSION:GIT_SHA:BUILD_DATE"
+# Override sesaat dari shell (mis. BACKUP_OFFSITE=dir BACKUP_OFFSITE_DIR=/mnt/nas scripts/prod.sh backup).
+export WSLENV="$WSLENV:BACKUP_OFFSITE:BACKUP_OFFSITE_DIR:BACKUP_S3_URI:BACKUP_RCLONE_REMOTE:BACKUP_OFFSITE_KEEP_DAYS:BACKUP_MAX_AGE_HOURS"
 
 profile_args=()
 for p in ${PROFILES:-}; do profile_args+=(--profile "$p"); done
@@ -81,5 +85,7 @@ case "$cmd" in
   status) dc ps ;;
   logs) dc logs -f --tail=200 "$@" ;;
   smoke) smoke ;;
+  backup) dc run --rm --no-deps -T backup-offsite once ;;
+  backup-verify) ENV_FILE="$ENV_FILE" bash scripts/backup-verify.sh --compose "$@" ;;
   *) echo "perintah tidak dikenal: $cmd"; exit 1 ;;
 esac

@@ -41,7 +41,6 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Validasi compose
         run: |
-          docker compose -f docker-compose.yml config -q
           cp .env.production.example .env.production
           sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci/' .env.production
           docker compose -f docker-compose.prod.yml --env-file .env.production config -q

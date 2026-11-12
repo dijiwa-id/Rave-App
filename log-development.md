@@ -1,5 +1,20 @@
 # Log Development — RAVE
 
+## 2026-11-12
+
+Ringkasan: penyempurnaan UI fan (onboarding, lirik/karaoke, tambah ke playlist) dan pekerjaan kesiapan go-live
+berdasarkan BRD v3.0 §15.1 yang bisa diselesaikan tanpa kontrak vendor.
+
+- Eksperimen login password + MFA di IAM dibatalkan atas permintaan; IAM dikembalikan ke alur OTP semula.
+- Go-live: adapter pengirim OTP/notifikasi (env, tanpa dependency), kontrol payout dual control + masa tunggu
+  rekening, backup off-site + uji pemulihan otomatis, preflight diperluas.
+- Verifikasi: typecheck bersih, unit 71/71 (8 baru untuk messaging), e2e terisolasi 204/204 (13 cek payout baru)
+  dengan `EMAIL_PROVIDER=webhook` ke penerima lokal: 69 email terkirim, 0 tanda tangan HMAC salah.
+- Catatan lingkungan: Vite di /mnt/d tidak hot-reload → `./rave restart-web`; Google Fonts kadang gagal dari WSL
+  sehingga screenshot headless kosong teks (bukan bug aplikasi).
+- Sisa blocker go-live = keputusan/kontrak: vendor email/WA (Q-01), PG berizin (Q-02), data legal/ISRC/domain,
+  tujuan off-site, PSrE/KYC, pentest, PSE.
+
 ## 2026-11-11
 
 Ringkasan: lingkungan WSL baru dibangun ulang (tanpa sudo), audit stabilitas FE/BE, fitur audio multi-format +
@@ -15,8 +30,26 @@ HQ/Lossless khusus Premium, sampul playlist, penyempurnaan landing & branding.
   bertanda tangan); sampul playlist; font primer 2 (Rubik Dirt); logo partner di Editor Landing.
 - Verifikasi: typecheck bersih, unit 63/63, e2e terisolasi 190/190, crawler UI 48 halaman tanpa galat, stack produksi
   Docker sehat + smoke test.
-- Belum: upgrade mayor `zod` 4 & `puppeteer-core` 25 (sisa temuan `npm audit`), normalisasi loudness saat transcoding
-  (`transcoding.loudness_target_lufs` masih "Disiapkan"), DRM untuk rendisi Premium (saat ini URL bertanda tangan).
+- Rilis: commit `8b2bf40` di-push ke https://github.com/dijiwa-id/Rave-App (remote `rave`, branch `main`); remote
+  `origin` (Gema-Apps) tidak diubah. Stack produksi Docker lokal (:8088) dibangun ulang dari kode yang sama.
+- Dokumen: **BRD v3.0** & **TDD v3.0** (Word) dibuat di folder `RAVE Apps/` (`RAVE_BRD_v3.0.docx`, `RAVE_TDD_v3.0.docx`),
+  diperbarui dari `GEMA_BRD_TDD_v2.0.docx` + kondisi kode: BRD 15 bab / 130 kebutuhan berstatus (74 Tersedia,
+  38 Sebagian, 18 Belum); TDD 18 bab, arsitektur terverifikasi dari kode + 25 deviasi dari v2.0. Belum ditinjau visual
+  di Word (otomasi Word dari WSL ditolak) — buka & "Update Field" untuk daftar isi. Angka bisnis (komisi, harga
+  Premium, royalti) masih default kode, menunggu pengesahan; kolom nama persetujuan kosong.
+- Temuan dari penyusunan TDD: **dual control payout belum ditegakkan** (`payout.approval_threshold_idr` &
+  `payout.bank_change_cooldown_hours` tidak dibaca service finance) → prioritas P0; `loudness_gain_db` belum dihitung;
+  paginasi memakai offset yang dikodekan sebagai cursor; `DB_POOL_MAX` default kode 6 vs contoh prod 10.
+- Belum: dual control payout (P0), upgrade mayor `zod` 4 & `puppeteer-core` 25 (sisa temuan `npm audit`),
+  normalisasi loudness saat transcoding (`transcoding.loudness_target_lufs` masih "Disiapkan"), DRM untuk rendisi
+  Premium (saat ini URL bertanda tangan), adapter vendor nyata (OTP email/WA, payment gateway, PSrE, KYC).
+- **Task berikutnya — aplikasi klien** (rencana lengkap: `docs/CLIENT-APPS.md`): mobile **Flutter** (Android/iOS; MVP
+  dengar + tiket QR + live + scanner check-in offline) dan desktop **Tauri v2** (membungkus `apps/web`; media keys,
+  tray, auto-update). Menggantikan rencana React Native di BRD/TDD v2.0. Prasyarat backend: OpenAPI + klien ter-generate,
+  adapter OTP, registrasi perangkat & push, versi minimum aplikasi, CORS origin Tauri, upload resumable, unduhan offline
+  Premium (DRM). Keputusan bisnis terbuka: billing langganan Premium lewat App Store/Play vs web.
+- Perubahan setelah commit `8b2bf40` (README, CHANGELOG, docs/generated-contract.md, docs/ARCHITECTURE.md,
+  docs/CLIENT-APPS.md, log ini) belum di-commit.
 
 ## 2026-11-10
 

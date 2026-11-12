@@ -15,6 +15,7 @@
     "./settings": "./src/settings.ts",
     "./ads": "./src/ads.ts",
     "./landing": "./src/landing.ts",
-    "./audio": "./src/audio.ts"
+    "./audio": "./src/audio.ts",
+    "./integrations": "./src/integrations.ts"
   }
 }

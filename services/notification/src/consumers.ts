@@ -129,6 +129,16 @@ export function consumers(_ctx: ServiceContext): Consumers {
         link: '/studio/finance',
       });
     },
+    'finance.payout.rejected': async (e, tx) => {
+      const p = e.payload;
+      const members = await orgRecipients(tx, p.partyId);
+      await notifyUsers(tx, members.length ? members : [p.partyId], e.id, {
+        category: 'payment',
+        title: 'Penarikan dana ditolak',
+        body: `${rupiah(p.amount)} dikembalikan ke saldo wallet. Alasan: ${p.reason}`,
+        link: '/studio/finance',
+      });
+    },
     'iam.kyc.verified': async (e, tx) => {
       const p = e.payload;
       await notifyUsers(tx, [p.userId], e.id, {

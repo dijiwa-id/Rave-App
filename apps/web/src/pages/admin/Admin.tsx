@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, ArrowRight, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow } from 'lucide-react';
+import { Activity, ArrowRight, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow } from 'lucide-react';
 import { ADMIN_ROLE_LABEL, type AdminPermission, type AdminRole } from '@rave/domain/settings';
 import { can, isSuperAdmin, useAuth } from '@/stores/auth';
 import { B2BLayout, type B2BNavItem } from '@/layouts/B2BLayout';
 import { api, fmt } from '@/lib/api';
 import { WEB_VERSION } from '@/lib/version';
 import { useDict } from '@/lib/i18n';
-import type { AdminRefundRow, Dispute, Me, Release, TicketRefundReason } from '@/lib/types';
+import type { AdminPayoutRow, AdminRefundRow, Dispute, Me, PayoutStatus, Release, TicketRefundReason } from '@/lib/types';
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Stat, Textarea, toast } from '@/components/ui';
 import { Empty, QueryState, Table } from '@/components/b2b/common';
 import { ReleaseStatusBadge } from '../studio/Releases';
@@ -26,7 +26,7 @@ export function AdminLayout() {
     { to: '/admin/kyc', label: n.kyc, icon: IdCard, perms: ['kyc.review'] },
     { to: '/admin/disputes', label: n.disputes, icon: Gavel, perms: ['dispute.resolve'] },
     { to: '/admin/live', label: n.live, icon: Radio, perms: ['live.moderate'] },
-    { to: '/admin/finance', label: n.finance, icon: Scale, perms: ['finance.view', 'finance.refund'] },
+    { to: '/admin/finance', label: n.finance, icon: Scale, perms: ['finance.view', 'finance.refund', 'finance.payout'] },
     { to: '/admin/users', label: n.users, icon: Users, perms: ['users.view'] },
     { to: '/admin/audit', label: n.audit, icon: FileClock, perms: ['audit.view'] },
     { to: '/admin/ads', label: n.ads, icon: Megaphone, perms: ['ads.manage', 'ads.review'] },
@@ -38,6 +38,7 @@ export function AdminLayout() {
     { to: '/admin/platform/admins', label: n.admins, icon: ShieldCheck, superOnly: true },
     { to: '/admin/platform/storage', label: n.storage, icon: HardDrive, superOnly: true },
     { to: '/admin/platform/backups', label: n.backups, icon: DatabaseBackup, superOnly: true },
+    { to: '/admin/platform/integrations', label: n.integrations, icon: PlugZap, superOnly: true },
     { to: '/admin/platform/bus', label: n.bus, icon: Workflow, superOnly: true },
   ];
   const sup = isSuperAdmin(user);
@@ -565,6 +566,132 @@ function RefundQueue() {
   );
 }
 
+const PAYOUT_STATUS_TONE: Record<PayoutStatus, 'amber' | 'blue' | 'green' | 'red'> = {
+  PENDING_APPROVAL: 'amber',
+  REQUESTED: 'blue',
+  PROCESSING: 'blue',
+  COMPLETED: 'green',
+  FAILED: 'red',
+  REJECTED: 'red',
+};
+
+/** Antrean persetujuan payout (dual control §11.5): setujui / tolak oleh admin selain pemohon. */
+function PayoutQueue() {
+  const d = useDict('admin');
+  const t = d.payouts;
+  const qc = useQueryClient();
+  const me = useAuth((s) => s.user);
+  const canDecide = can(me, 'finance.payout');
+  const [filter, setFilter] = useState<'' | PayoutStatus>('PENDING_APPROVAL');
+  const [acting, setActing] = useState<{ row: AdminPayoutRow; kind: 'approve' | 'reject' } | null>(null);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const q = useQuery({
+    queryKey: ['admin-payouts', filter],
+    queryFn: () => api<{ data: AdminPayoutRow[]; counts: Record<string, number>; threshold_idr: number; cooldown_hours: number }>('/v1/admin/finance/payouts', { query: { status: filter || undefined } }),
+  });
+  const mine = (r: AdminPayoutRow) => !!me && (r.requested_by === me.id || r.party_id === me.id || me.orgs.some((o) => o.id === r.party_id));
+  async function submit() {
+    if (!acting) return;
+    setBusy(true);
+    try {
+      if (acting.kind === 'approve') await api(`/v1/admin/finance/payouts/${acting.row.id}/approve`, { body: { note: text.trim() || undefined } });
+      else await api(`/v1/admin/finance/payouts/${acting.row.id}/reject`, { body: { reason: text.trim() } });
+      toast.success(acting.kind === 'approve' ? t.toastApproved : t.toastRejected);
+      qc.invalidateQueries({ queryKey: ['admin-payouts'] });
+      qc.invalidateQueries({ queryKey: ['recon'] });
+      setActing(null);
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const counts = q.data?.counts ?? {};
+  const pending = counts.PENDING_APPROVAL ?? 0;
+  return (
+    <Card title={t.title} className="mt-6">
+      {q.data && <p className="-mt-1 mb-4 text-sm text-b2b-muted">{t.rules(fmt.idr(q.data.threshold_idr), q.data.cooldown_hours)}</p>}
+      <div className="mb-4 flex flex-wrap gap-2">
+        {([['PENDING_APPROVAL', t.status.PENDING_APPROVAL], ['REQUESTED', t.status.REQUESTED], ['COMPLETED', t.status.COMPLETED], ['REJECTED', t.status.REJECTED], ['', t.all]] as const).map(([v, label]) => (
+          <button
+            key={v}
+            onClick={() => setFilter(v)}
+            className={`rounded-none border px-3 py-1.5 text-xs font-bold ${filter === v ? 'border-b2b-ink bg-b2b-ink text-b2b-on-ink' : 'border-b2b-line text-b2b-muted'}`}
+          >
+            {label}
+            {v && counts[v] ? ` · ${counts[v]}` : ''}
+          </button>
+        ))}
+        {pending > 0 && <span className="self-center text-xs font-bold text-amber-700">{t.needAction(pending)}</span>}
+      </div>
+      <QueryState q={q} empty={q.data && !q.data.data.length ? <Empty title={t.emptyTitle} body={t.emptyBody} /> : undefined}>
+        <Table head={[...t.head]}>
+          {q.data?.data.map((r) => {
+            const held = r.status === 'REQUESTED' && r.hold_until && new Date(r.hold_until).getTime() > Date.now();
+            const decidable = r.status === 'PENDING_APPROVAL' || r.status === 'REQUESTED';
+            return (
+              <tr key={r.id}>
+                <td className="px-4 py-3">
+                  <p className="font-bold">{r.bank.holder}</p>
+                  <p className="text-xs text-b2b-muted">
+                    {r.bank.bank} {r.bank.number} · <span className="font-mono">{r.party_id.slice(0, 8)}</span>
+                  </p>
+                  {r.bank_changed_at && <p className="mt-1 text-xs font-semibold text-amber-700">{t.bankChanged(fmt.dateTime(r.bank_changed_at))}</p>}
+                  {r.decision_note && <p className="mt-1 text-xs text-b2b-muted italic">{r.decision_note}</p>}
+                </td>
+                <td className="px-4 py-3 font-bold tabular-nums">{fmt.idr(r.amount)}</td>
+                <td className="px-4 py-3">
+                  <Badge tone={PAYOUT_STATUS_TONE[r.status]}>{t.status[r.status]}</Badge>
+                  {held && <span className="mt-1 block text-xs text-b2b-muted">{t.heldUntil(fmt.dateTime(r.hold_until!))}</span>}
+                </td>
+                <td className="px-4 py-3 text-xs whitespace-nowrap">{fmt.dateTime(r.created_at)}</td>
+                <td className="px-4 py-3 text-right">
+                  {canDecide && decidable && (mine(r) ? (
+                    <span className="text-xs text-b2b-muted">{t.selfNote}</span>
+                  ) : (
+                    <span className="inline-flex gap-2">
+                      <Button size="sm" variant="outline-ink" onClick={() => { setText(''); setActing({ row: r, kind: 'reject' }); }}>
+                        {d.common.reject}
+                      </Button>
+                      {r.status === 'PENDING_APPROVAL' && (
+                        <Button size="sm" variant="ink" onClick={() => { setText(''); setActing({ row: r, kind: 'approve' }); }}>
+                          {d.common.approve}
+                        </Button>
+                      )}
+                    </span>
+                  ))}
+                </td>
+              </tr>
+            );
+          })}
+        </Table>
+      </QueryState>
+      {acting && (
+        <Modal open onClose={() => setActing(null)} title={acting.kind === 'approve' ? t.approveTitle : t.rejectTitle}>
+          <div className="space-y-4 text-sm">
+            <p>
+              <strong>{acting.row.bank.holder}</strong> — {t.confirmBody(fmt.idr(acting.row.amount), `${acting.row.bank.bank} ${acting.row.bank.number}`)}
+            </p>
+            {acting.kind === 'reject' && <p className="text-b2b-muted">{t.rejectBody}</p>}
+            <Field label={acting.kind === 'approve' ? t.note : t.reason} hint={d.common.auditHint}>
+              <Textarea value={text} onChange={(e) => setText(e.target.value)} />
+            </Field>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline-ink" onClick={() => setActing(null)}>
+                {d.common.cancel}
+              </Button>
+              <Button variant={acting.kind === 'approve' ? 'ink' : 'danger'} loading={busy} disabled={acting.kind === 'reject' && text.trim().length < 5} onClick={submit}>
+                {acting.kind === 'approve' ? d.common.approve : d.common.reject}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </Card>
+  );
+}
+
 export function AdminFinance() {
   const t = useDict('admin').finance;
   const recon = useQuery({
@@ -586,6 +713,7 @@ export function AdminFinance() {
           </div>
         )}
       </QueryState>
+      <PayoutQueue />
       <RefundQueue />
       <div className="mt-6 grid gap-6 lg:grid-cols-[380px_1fr]">
         <Card title={t.balances}>

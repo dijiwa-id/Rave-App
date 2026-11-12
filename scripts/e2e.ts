@@ -830,5 +830,168 @@ console.log('\n▶ Akses per peran (fan, artis, manajer, promotor, admin, Super 
   for (const u of [fin, sup]) await call(S, 'PATCH', `/v1/admin/iam/users/${u.id}`, { admin_role: null, reason: 'selesai uji peran e2e' });
 }
 
+// ---------------- Kontrol payout: dual control & masa tunggu rekening baru (§11.5, GO-LIVE) ----------------
+{
+  console.log('\n▶ Payout: dual control & masa tunggu rekening');
+  const ART = (await login(SEED.emails.artist)).access_token;
+  const party = SEED.artists[0].orgId;
+  const wallet0 = await call(ART, 'GET', `/v1/finance/wallets/${party}`);
+  const total0 = Number(wallet0.data?.balances?.total ?? 0);
+  if (total0 < 400_000) {
+    check('saldo wallet artis cukup untuk uji payout (≥ Rp400.000)', false, total0);
+  } else {
+    await call(S, 'PUT', '/v1/admin/platform/settings', { changes: { 'payout.approval_threshold_idr': 100_000, 'payout.bank_change_cooldown_hours': 24 }, reason: 'uji kontrol payout e2e' });
+    await until(() => call(S, 'GET', '/v1/admin/finance/payouts'), (r) => r.data?.threshold_idr === 100_000, 15000);
+    const bankA = { bank: 'BCA', number: '1234567890', holder: 'Senja Kolektif' };
+    const small = await call(ART, 'POST', '/v1/finance/payouts', { party_id: party, amount: 60_000, bank_account: bankA }, true);
+    check('payout di bawah ambang → langsung antre (REQUESTED), rekening pertama tanpa masa tunggu', small.status === 201 && small.data?.status === 'REQUESTED' && !small.data?.hold_until, [small.status, small.data]);
+    const big = await call(ART, 'POST', '/v1/finance/payouts', { party_id: party, amount: 150_000, bank_account: bankA }, true);
+    check('payout di atas ambang → PENDING_APPROVAL (dual control)', big.status === 201 && big.data?.status === 'PENDING_APPROVAL' && big.data?.approval_required === true, [big.status, big.data]);
+    const selfApprove = await call(ART, 'POST', `/v1/admin/finance/payouts/${big.data?.id}/approve`, {});
+    check('pemohon (non-admin) tidak bisa menyetujui payout (403)', selfApprove.status === 403, selfApprove.status);
+    const queue = await call(S, 'GET', '/v1/admin/finance/payouts', undefined);
+    check('antrean persetujuan memuat payout PENDING_APPROVAL', queue.data?.data?.some((r: any) => r.id === big.data?.id && r.status === 'PENDING_APPROVAL'), queue.data?.counts);
+    const approved = await call(S, 'POST', `/v1/admin/finance/payouts/${big.data?.id}/approve`, { note: 'cek rekening OK' });
+    check('admin lain menyetujui → REQUESTED', approved.status === 200 && approved.data?.status === 'REQUESTED', [approved.status, approved.data]);
+    const again = await call(S, 'POST', `/v1/admin/finance/payouts/${big.data?.id}/approve`, {});
+    check('persetujuan ganda ditolak (409)', again.status === 409, again.status);
+    const done = await until(
+      () => call(ART, 'GET', `/v1/finance/wallets/${party}`),
+      (r) => r.data?.payouts?.filter((x: any) => [small.data?.id, big.data?.id].includes(x.id)).every((x: any) => x.status === 'COMPLETED'),
+      30000,
+    );
+    check('payout disetujui & di bawah ambang diproses job → COMPLETED', done.data?.payouts?.filter((x: any) => [small.data?.id, big.data?.id].includes(x.id)).every((x: any) => x.status === 'COMPLETED'), done.data?.payouts);
+
+    // Tolak → dana kembali ke wallet, ledger tetap seimbang.
+    const toReject = await call(ART, 'POST', '/v1/finance/payouts', { party_id: party, amount: 120_000, bank_account: bankA }, true);
+    const before = Number((await call(ART, 'GET', `/v1/finance/wallets/${party}`)).data?.balances?.total ?? 0);
+    const badReject = await call(S, 'POST', `/v1/admin/finance/payouts/${toReject.data?.id}/reject`, { reason: 'x' });
+    check('penolakan tanpa alasan memadai ditolak (400)', badReject.status === 400, badReject.status);
+    const rejected = await call(S, 'POST', `/v1/admin/finance/payouts/${toReject.data?.id}/reject`, { reason: 'Nama rekening tidak cocok dengan KYC' });
+    const after = Number((await call(ART, 'GET', `/v1/finance/wallets/${party}`)).data?.balances?.total ?? 0);
+    check('payout ditolak → REJECTED & dana kembali ke wallet', rejected.status === 200 && rejected.data?.status === 'REJECTED' && after === before + 120_000, [rejected.status, rejected.data?.status, before, after]);
+
+    // Ganti rekening → penarikan berikutnya ditahan masa tunggu, tidak diproses job.
+    const changed = await call(ART, 'POST', '/v1/finance/payouts', { party_id: party, amount: 60_000, bank_account: { ...bankA, number: '9988776655' } }, true);
+    const holdMs = changed.data?.hold_until ? new Date(changed.data.hold_until).getTime() - Date.now() : 0;
+    check('rekening baru diganti → payout tertahan ±24 jam', changed.status === 201 && changed.data?.status === 'REQUESTED' && holdMs > 23 * 3600_000, [changed.status, changed.data]);
+    await new Promise((r) => setTimeout(r, 7000));
+    const stillHeld = (await call(ART, 'GET', `/v1/finance/wallets/${party}`)).data?.payouts?.find((x: any) => x.id === changed.data?.id);
+    check('job payout melewati payout yang masih dalam masa tunggu', stillHeld?.status === 'REQUESTED', stillHeld?.status);
+    const cleanup = await call(S, 'POST', `/v1/admin/finance/payouts/${changed.data?.id}/reject`, { reason: 'Uji e2e: batalkan payout tertahan' });
+    check('payout tertahan dapat ditolak sebelum dikirim', cleanup.status === 200 && cleanup.data?.status === 'REJECTED', cleanup.status);
+    const reconP = await call(S, 'GET', '/v1/admin/finance/reconciliation');
+    check('ledger tetap seimbang setelah payout & penolakan', reconP.data?.balanced === true, reconP.data && { d: reconP.data.total_debit, c: reconP.data.total_credit });
+    const notifs = await until(() => call(ART, 'GET', '/v1/notifications'), (r) => r.data?.data?.some((n: any) => n.title === 'Penarikan dana ditolak'), 15000);
+    check('pemilik wallet menerima notifikasi penolakan', notifs.data?.data?.some((n: any) => n.title === 'Penarikan dana ditolak'));
+    await call(S, 'POST', '/v1/admin/platform/settings/reset', { keys: ['payout.approval_threshold_idr', 'payout.bank_change_cooldown_hours'], reason: 'selesai uji payout e2e' });
+  }
+}
+
+// ---------------- Integrasi Super Admin: email & payment gateway (Midtrans) ----------------
+{
+  console.log('\n▶ Integrasi: email & payment gateway');
+  const { createServer } = await import('node:http');
+  const { createHash, createHmac } = await import('node:crypto');
+  const SECRET = 'e2e-relay-secret-' + Date.now();
+  const got: { to: string; tag: string; sigOk: boolean }[] = [];
+  const relay = createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      const ts = String(req.headers['x-rave-timestamp'] ?? '');
+      const sigOk = req.headers['x-rave-signature'] === createHmac('sha256', SECRET).update(`${ts}.${body}`).digest('hex');
+      try {
+        const m = JSON.parse(body);
+        got.push({ to: m.to, tag: m.tag, sigOk });
+      } catch {}
+      res.writeHead(200, { 'content-type': 'application/json' }).end('{"id":"relay-ok"}');
+    });
+  });
+  await new Promise<void>((r) => relay.listen(0, '127.0.0.1', () => r()));
+  const relayUrl = `http://127.0.0.1:${(relay.address() as any).port}/send`;
+
+  const opsInt = await call(admin.access_token, 'GET', '/v1/admin/platform/integrations');
+  check('integrasi khusus Super Admin (admin OPS 403)', opsInt.status === 403, opsInt.status);
+  const int0 = await call(S, 'GET', '/v1/admin/platform/integrations');
+  check('integrasi: awalnya memakai env', int0.status === 200 && int0.data?.data?.every((x: any) => x.source === 'env'), int0.data?.data?.map((x: any) => x.source));
+
+  const badEmail = await call(S, 'PUT', '/v1/admin/platform/integrations/email', { provider: 'webhook', config: { EMAIL_FROM: 'RAVE <no-reply@rave.test>' }, secrets: {}, reason: 'uji validasi e2e' });
+  check('integrasi email: field wajib kosong ditolak (400)', badEmail.status === 400 && badEmail.data?.errors?.some((e: any) => e.path === 'EMAIL_WEBHOOK_URL'), badEmail.data?.errors);
+  const putEmail = await call(S, 'PUT', '/v1/admin/platform/integrations/email', {
+    provider: 'webhook',
+    config: { EMAIL_FROM: 'RAVE <no-reply@rave.test>', EMAIL_WEBHOOK_URL: relayUrl },
+    secrets: { MESSAGING_WEBHOOK_SECRET: SECRET },
+    reason: 'uji relay email e2e',
+  });
+  check('integrasi email disimpan; rahasia hanya tampil termasking', putEmail.status === 200 && putEmail.data?.source === 'dashboard' && putEmail.data?.secrets?.MESSAGING_WEBHOOK_SECRET === `••••${SECRET.slice(-4)}` && !JSON.stringify(putEmail.data).includes(SECRET), putEmail.data);
+  // OTP login baru dikirim lewat konfigurasi dasbor (cache service ±15 dtk).
+  const otpTo = `e2e-otp-${Date.now()}@rave.test`;
+  const delivered = await until(
+    async () => {
+      await callOtpClass('POST', '/v1/auth/otp', { channel: 'email', destination: otpTo });
+      return got.find((g) => g.to === otpTo && g.tag === 'otp');
+    },
+    (g) => !!g,
+    40000,
+    8000,
+  );
+  check('OTP login terkirim lewat relay dari dasbor (HMAC valid)', !!delivered && delivered.sigOk, got.slice(-3));
+  const testMail = await call(S, 'POST', '/v1/admin/platform/integrations/email/test', { to: 'qa@rave.test' });
+  check('email uji dari dasbor terkirim', testMail.data?.ok === true && got.some((g) => g.to === 'qa@rave.test' && g.tag === 'test'), testMail.data);
+  const keep = await call(S, 'PUT', '/v1/admin/platform/integrations/email', { provider: 'webhook', config: { EMAIL_FROM: 'RAVE <halo@rave.test>', EMAIL_WEBHOOK_URL: relayUrl }, secrets: {}, reason: 'ganti pengirim e2e' });
+  check('menyimpan tanpa mengisi ulang rahasia → rahasia lama dipertahankan', keep.data?.secrets?.MESSAGING_WEBHOOK_SECRET === `••••${SECRET.slice(-4)}`, keep.data?.secrets);
+  const resetEmail = await call(S, 'DELETE', '/v1/admin/platform/integrations/email', { reason: 'selesai uji e2e' });
+  check('integrasi email dikembalikan ke env', resetEmail.data?.source === 'env', resetEmail.data?.source);
+
+  // Payment gateway: Midtrans (sandbox) dengan server key uji — pembayaran dikonfirmasi lewat notifikasi bertanda tangan.
+  const SK = 'SB-Mid-server-e2e' + Date.now();
+  const badPg = await call(S, 'PUT', '/v1/admin/platform/integrations/payment', { provider: 'midtrans', config: { MIDTRANS_MODE: 'sandbox' }, secrets: {}, reason: 'uji validasi e2e' });
+  check('Midtrans tanpa server key ditolak (400)', badPg.status === 400, badPg.status);
+  const putPg = await call(S, 'PUT', '/v1/admin/platform/integrations/payment', { provider: 'midtrans', config: { MIDTRANS_MODE: 'sandbox', MIDTRANS_CLIENT_KEY: 'SB-Mid-client-e2e' }, secrets: { MIDTRANS_SERVER_KEY: SK }, reason: 'uji Midtrans e2e' });
+  check('Midtrans disimpan, server key termasking', putPg.status === 200 && putPg.data?.provider === 'midtrans' && !JSON.stringify(putPg.data).includes(SK), putPg.data?.secrets);
+  const pgTest = await call(S, 'POST', '/v1/admin/platform/integrations/payment/test', {});
+  check('uji koneksi Midtrans memberi hasil terstruktur (kunci uji → tidak valid / tak terjangkau)', pgTest.status === 200 && pgTest.data?.ok === false && typeof pgTest.data?.message === 'string', pgTest.data);
+
+  const starts = new Date(Date.now() + 40 * 86_400_000);
+  const ev = await call(P, 'POST', '/v1/ticketing/events', {
+    org_id: SEED.orgs.pensiPromotor, title: `E2E Midtrans ${Date.now()}`, city: 'Jakarta', venue_name: 'Aula PG',
+    starts_at: starts.toISOString(), ends_at: new Date(starts.getTime() + 3 * 3600_000).toISOString(),
+    ticket_types: [{ name: 'Reguler', price: 75_000, quota: 10, max_per_account: 2 }],
+  });
+  await call(P, 'POST', `/v1/ticketing/events/${ev.data?.id}/publish`);
+  const ord = await call(F, 'POST', '/v1/ticketing/orders', { event_id: ev.data?.id, items: [{ ticket_type_id: ev.data?.ticket_types?.[0]?.id, quantity: 1 }] }, true);
+  const inv = ord.data?.invoice;
+  // Tunggu cache konfigurasi finance (±15 dtk) memakai Midtrans: checkout tidak lagi "sandbox".
+  const co = await until(() => call(F, 'POST', `/v1/finance/invoices/${inv?.id}/checkout`, { finish_url: 'https://evil.example/steal' }), (r) => r.status !== 200 || r.data?.provider !== 'sandbox', 30000, 3000);
+  check('checkout Midtrans dengan kunci uji ditolak penyedia → 502/503 (bukan 500)', co.status === 502 || co.status === 503, [co.status, co.data?.detail]);
+  const sim = await call(F, 'POST', `/v1/finance/invoices/${inv?.id}/simulate-pay`, { method: 'QRIS' }, true);
+  check('simulasi bayar sandbox masih bisa untuk invoice yang belum ke Midtrans', sim.status === 200 || sim.status === 409, sim.status);
+  // Invoice kedua: dibayar lewat notifikasi Midtrans bertanda tangan.
+  const ord2 = await call(F, 'POST', '/v1/ticketing/orders', { event_id: ev.data?.id, items: [{ ticket_type_id: ev.data?.ticket_types?.[0]?.id, quantity: 1 }] }, true);
+  const inv2 = ord2.data?.invoice;
+  const gross = `${inv2?.amount}.00`;
+  const note = (status: string, sig?: string) => ({
+    order_id: inv2?.id, status_code: '200', gross_amount: gross, transaction_status: status, fraud_status: 'accept', payment_type: 'qris',
+    transaction_id: `e2e-${inv2?.id}`, settlement_time: new Date().toISOString().slice(0, 19).replace('T', ' '),
+    signature_key: sig ?? createHash('sha512').update(`${inv2?.id}200${gross}${SK}`).digest('hex'),
+  });
+  const forged = await fetch(BASE + '/v1/webhooks/pg/midtrans', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(note('settlement', 'f'.repeat(128))) });
+  check('notifikasi Midtrans dengan signature palsu ditolak (401)', forged.status === 401, forged.status);
+  const pending = await fetch(BASE + '/v1/webhooks/pg/midtrans', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(note('pending')) });
+  check('notifikasi pending diterima tanpa mengubah status', pending.status === 200, pending.status);
+  const settle = await fetch(BASE + '/v1/webhooks/pg/midtrans', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(note('settlement')) });
+  const settleAgain = await fetch(BASE + '/v1/webhooks/pg/midtrans', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(note('settlement')) });
+  const paidOrder = await until(() => call(F, 'GET', `/v1/ticketing/orders/${ord2.data?.order?.id}`), (r) => r.data?.status === 'PAID', 30000, 2500);
+  check('settlement Midtrans bertanda tangan → invoice & order PAID, notifikasi ulang idempoten', settle.status === 200 && settleAgain.status === 200 && paidOrder.data?.status === 'PAID', [settle.status, settleAgain.status, paidOrder.data?.status]);
+  const invAfter = await call(F, 'GET', `/v1/finance/invoices/${inv2?.id}`);
+  check('invoice mencatat penyedia midtrans', invAfter.data?.provider === 'midtrans' && invAfter.data?.status === 'PAID', invAfter.data && { p: invAfter.data.provider, s: invAfter.data.status });
+  const reconPg = await call(S, 'GET', '/v1/admin/finance/reconciliation');
+  check('ledger seimbang setelah pembayaran Midtrans', reconPg.data?.balanced === true, reconPg.data && { d: reconPg.data.total_debit, c: reconPg.data.total_credit });
+  await call(S, 'DELETE', '/v1/admin/platform/integrations/payment', { reason: 'selesai uji Midtrans e2e' });
+  await call(P, 'POST', `/v1/ticketing/events/${ev.data?.id}/cancel`, { reason: 'selesai uji e2e' }).catch(() => null);
+  relay.close();
+}
+
 console.log(`\n${failed ? '\x1b[31m' : '\x1b[32m'}${passed} lulus, ${failed} gagal\x1b[0m\n`);
 process.exit(failed ? 1 : 0);

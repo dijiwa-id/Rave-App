@@ -2,7 +2,6 @@
 # Image microservice RAVE (monorepo, runtime tsx — tanpa langkah kompilasi).
 #
 #   Produksi : docker build -f infra/docker/Dockerfile.service --target runtime --build-arg SERVICE=booking -t rave/booking .
-#   Dev      : docker build -f infra/docker/Dockerfile.service --target dev -t rave/dev .   (dipakai compose.dev.yaml)
 #
 # Lapisan sebelum `ARG SERVICE` identik untuk semua service → BuildKit membangunnya sekali dan dipakai bersama.
 ARG NODE_VERSION=22
@@ -17,13 +16,7 @@ COPY services ./services
 COPY apps/web/package.json ./apps/web/package.json
 RUN find packages services -type f ! -name package.json -delete
 
-# ---- 2a. Dependensi lengkap (dev) ----
-FROM node:${NODE_VERSION}-alpine AS deps-dev
-WORKDIR /repo
-COPY --from=manifests /src ./
-RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts --no-audit --no-fund
-
-# ---- 2b. Dependensi produksi backend saja (tanpa web & devDependencies) ----
+# ---- 2. Dependensi produksi backend saja (tanpa web & devDependencies) ----
 FROM node:${NODE_VERSION}-alpine AS deps-prod
 WORKDIR /repo
 COPY --from=manifests /src ./
@@ -31,20 +24,7 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
       $(for d in packages/* services/*; do printf -- '--workspace=%s ' "$d"; done)
 
-# ---- 3. Dev: satu image untuk semua service; source di-bind mount, tsx watch ----
-FROM node:${NODE_VERSION}-alpine AS dev
-RUN apk add --no-cache tini ffmpeg chromium nss freetype harfbuzz font-liberation font-dejavu postgresql16-client
-ENV NODE_ENV=development CHROMIUM_PATH=/usr/bin/chromium FFMPEG_PATH=/usr/bin/ffmpeg PG_DUMP=/usr/bin/pg_dump \
-    CHOKIDAR_USEPOLLING=true
-WORKDIR /repo
-# Milik `node`: Vite menulis cache dep-optimizer & tsx menulis cache transpile saat dev (root → EACCES).
-COPY --from=deps-dev --chown=node:node /repo ./
-RUN mkdir -p /data/uploads /data/backups /data/live /data/contracts /data/branding /home/node/.cache \
- && chown -R node:node /data /home/node /repo
-USER node
-ENTRYPOINT ["/sbin/tini", "--"]
-
-# ---- 4. Runtime produksi ----
+# ---- 3. Runtime produksi ----
 FROM node:${NODE_VERSION}-alpine AS runtime-base
 ARG TSX_VERSION
 RUN apk add --no-cache tini && npm install -g tsx@${TSX_VERSION} && npm cache clean --force

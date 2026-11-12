@@ -197,7 +197,7 @@ export default function Playlist() {
             </>
           )}
         </ActionBar>
-        {tracks.length ? <TrackTable tracks={tracks} onRemove={mine ? remove : undefined} onMove={mine ? move : undefined} /> : <EmptyState title={d.playlist.empty} body={mine ? d.playlist.emptyBody : undefined} />}
+        {tracks.length ? <TrackTable tracks={tracks} playlistId={id} onRemove={mine ? remove : undefined} onMove={mine ? move : undefined} /> : <EmptyState title={d.playlist.empty} body={mine ? d.playlist.emptyBody : undefined} />}
         {mine && <AddTracks playlistId={id} onAdded={refresh} />}
       </div>
       <Modal open={edit} onClose={() => setEdit(false)} title={d.playlist.editDetails} theme="dark">

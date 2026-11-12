@@ -1,12 +1,21 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, fmt } from '@/lib/api';
-import type { OrgClaim, Wallet } from '@/lib/types';
+import type { OrgClaim, Payout, PayoutStatus, Wallet } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
 import { setting, usePlatformConfig } from '@/lib/platform';
-import { Button, Card, Field, Input, Modal, PageHeader, Select, Stat, toast } from '@/components/ui';
+import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Stat, toast } from '@/components/ui';
 import { Empty, QueryState, Table, useCurrentArtist } from '@/components/b2b/common';
 import { useDict } from '@/lib/i18n';
+
+const PAYOUT_TONE: Record<PayoutStatus, 'amber' | 'blue' | 'green' | 'red' | 'neutral'> = {
+  PENDING_APPROVAL: 'amber',
+  REQUESTED: 'blue',
+  PROCESSING: 'blue',
+  COMPLETED: 'green',
+  FAILED: 'red',
+  REJECTED: 'red',
+};
 
 /** Wallet penerima (REQ-PAY-02): saldo per sumber + penarikan ke rekening terverifikasi. */
 export function WalletPanel({ parties, title: titleProp }: { parties: { id: string; name: string; role?: string }[]; title?: string }) {
@@ -18,6 +27,7 @@ export function WalletPanel({ parties, title: titleProp }: { parties: { id: stri
   const q = useQuery({ queryKey: ['wallet', partyId], queryFn: () => api<Wallet>(`/v1/finance/wallets/${partyId}`), enabled: !!partyId });
   // Minimum penarikan dari Super Admin (`payout.min_amount_idr`, juga ditegakkan finance).
   const minPayout = setting<number>(usePlatformConfig(), 'payout.min_amount_idr', 50_000);
+  const payouts = q.data?.payouts ?? [];
   const [payout, setPayout] = useState<null | { amount: number; bank: string; number: string; holder: string }>(null);
   const [busy, setBusy] = useState(false);
   const party = parties.find((p) => p.id === partyId);
@@ -25,11 +35,14 @@ export function WalletPanel({ parties, title: titleProp }: { parties: { id: stri
   async function submit() {
     setBusy(true);
     try {
-      await api('/v1/finance/payouts', {
+      const r = await api<Payout>('/v1/finance/payouts', {
         body: { party_id: partyId, amount: payout!.amount, bank_account: { bank: payout!.bank, number: payout!.number, holder: payout!.holder } },
         idempotencyKey: true,
       });
-      toast.success(t.payoutRequested);
+      // Beri tahu bila penarikan menunggu persetujuan (dual control) atau tertahan masa tunggu rekening baru.
+      if (r.status === 'PENDING_APPROVAL') toast.info(t.payoutPending);
+      else if (r.hold_until && new Date(r.hold_until).getTime() > Date.now()) toast.info(t.payoutHeld(fmt.dateTime(r.hold_until)));
+      else toast.success(t.payoutRequested);
       setPayout(null);
       qc.invalidateQueries({ queryKey: ['wallet', partyId] });
     } catch (e) {
@@ -70,6 +83,27 @@ export function WalletPanel({ parties, title: titleProp }: { parties: { id: stri
                 <Stat key={k} label={l} value={fmt.idrShort((b as any)[k])} />
               ))}
             </div>
+            {payouts.length > 0 && (
+              <Card title={t.payouts}>
+                <Table head={[t.payoutHead.date, t.payoutHead.amount, t.payoutHead.status, t.payoutHead.note]}>
+                  {payouts.map((p) => {
+                    const held = p.status === 'REQUESTED' && p.hold_until && new Date(p.hold_until).getTime() > Date.now();
+                    return (
+                      <tr key={p.id}>
+                        <td className="px-4 py-2.5 whitespace-nowrap">{fmt.dateTime(p.created_at)}</td>
+                        <td className="px-4 py-2.5 font-bold tabular-nums">{fmt.idr(Number(p.amount))}</td>
+                        <td className="px-4 py-2.5">
+                          <Badge tone={PAYOUT_TONE[p.status]}>{t.payoutStatus[p.status]}</Badge>
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-b2b-muted">
+                          {held ? t.heldUntil(fmt.dateTime(p.hold_until!)) : p.status === 'REJECTED' ? p.decision_note : p.status === 'COMPLETED' && p.completed_at ? fmt.dateTime(p.completed_at) : ''}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </Table>
+              </Card>
+            )}
             <Card title={t.history}>
               {!q.data!.transactions.length ? (
                 <Empty title={t.emptyTitle} body={t.emptyBody} />

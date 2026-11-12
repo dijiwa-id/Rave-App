@@ -2,7 +2,6 @@ import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { LedgerAccounts, allocate, pct, ticketRefundAmount, withholdingTax, type PaymentPurpose } from '@rave/domain';
 import { badRequest, config, conflict, notFound, publish, settings, unauthorized, uuidv7, type Client } from '@rave/service-kit';
 import { C, D, payableAccount, post } from './ledger.js';
-import { paymentProvider } from './providers.js';
 
 export const ESCROW_BANK = LedgerAccounts.escrowBank('mitra-sandbox');
 
@@ -20,6 +19,8 @@ export function invoiceView(r: any) {
     description: r.description,
     va_number: r.va_number,
     qris_payload: r.qris_payload,
+    provider: r.provider ?? 'sandbox',
+    checkout_url: r.checkout_url && r.checkout_expires_at && new Date(r.checkout_expires_at).getTime() > Date.now() ? r.checkout_url : null,
     escrow_amount: r.escrow_amount,
     fee_amount: r.fee_amount,
     depends_on: r.depends_on,
@@ -90,6 +91,8 @@ export async function processPgEvent(c: Client, provider: string, ev: PgEvent) {
   if (!dup.rowCount) return { duplicate: true };
   const inv = (await c.query(`SELECT * FROM invoices WHERE id=$1 FOR UPDATE`, [ev.intent_id])).rows[0];
   if (!inv) throw notFound('Invoice');
+  // Dana diterima lewat penyedia ini → refund kelak lewat penyedia yang sama (juga untuk pembayaran yang dikembalikan).
+  inv.provider = provider;
   if (inv.status === 'PAID') return { duplicate: true };
   if (ev.status === 'FAILED') {
     await c.query(`UPDATE invoices SET status='FAILED' WHERE id=$1`, [inv.id]);
@@ -128,7 +131,8 @@ export async function processPgEvent(c: Client, provider: string, ev: PgEvent) {
     lines.push(C(`revenue:${inv.purpose.toLowerCase()}`, inv.amount));
   }
   await post(c, { key: `pg:${ev.event_id}`, kind: `payment.${inv.purpose.toLowerCase()}`, referenceId: inv.reference_id, description: inv.description, lines });
-  await c.query(`UPDATE invoices SET status='PAID', paid_at=$2 WHERE id=$1`, [inv.id, ev.paid_at]);
+  await c.query(`UPDATE invoices SET status='PAID', paid_at=$2, provider=$3 WHERE id=$1`, [inv.id, ev.paid_at, provider]);
+  inv.provider = provider;
 
   if (inv.purpose === 'TICKET_ORDER') {
     await c.query(
@@ -175,11 +179,11 @@ async function refundUnappliedPayment(c: Client, inv: any, ev: PgEvent, reason: 
     description: `${inv.description} — ${reason}`,
     lines: [D(ESCROW_BANK, amount), C(LedgerAccounts.refundPayable(inv.payer_user_id), amount)],
   });
-  await c.query(`UPDATE invoices SET status='PAID', paid_at=$2 WHERE id=$1`, [inv.id, ev.paid_at]);
+  await c.query(`UPDATE invoices SET status='PAID', paid_at=$2, provider=$3 WHERE id=$1`, [inv.id, ev.paid_at, inv.provider ?? 'sandbox']);
   await c.query(
     `INSERT INTO refunds (id, invoice_id, purpose, reference_id, payer_user_id, escrow_amount, fee_amount, amount, escrow_pct, reason, status, provider)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,100,$9,'REQUESTED',$10) ON CONFLICT (invoice_id) DO NOTHING`,
-    [uuidv7(), inv.id, inv.purpose, inv.reference_id, inv.payer_user_id, Number(inv.escrow_amount), Number(inv.fee_amount), amount, reason, paymentProvider().name],
+    [uuidv7(), inv.id, inv.purpose, inv.reference_id, inv.payer_user_id, Number(inv.escrow_amount), Number(inv.fee_amount), amount, reason, inv.provider ?? 'sandbox'],
   );
 }
 
@@ -228,7 +232,7 @@ export async function refundTicketOrder(c: Client, p: { orderId: string; escrowP
     await c.query(
       `INSERT INTO refunds (id, invoice_id, purpose, reference_id, payer_user_id, escrow_amount, fee_amount, amount, escrow_pct, reason, status, provider)
        VALUES ($1,$2,'TICKET_ORDER',$3,$4,$5,$6,$7,$8,$9,'REQUESTED',$10) RETURNING *`,
-      [id, inv.id, p.orderId, inv.payer_user_id, amt.escrow, amt.fee, amt.total, p.escrowPct, p.reason, paymentProvider().name],
+      [id, inv.id, p.orderId, inv.payer_user_id, amt.escrow, amt.fee, amt.total, p.escrowPct, p.reason, inv.provider ?? 'sandbox'],
     )
   ).rows[0];
   // Nominal nol (mis. porsi 0%) tidak perlu dikirim ke penyedia.

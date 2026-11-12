@@ -11,6 +11,7 @@ import { cx, Modal, PageLoader, toast } from '@/components/ui';
 import { EventLiveCard } from '@/components/live/EventLiveCard';
 import { setting, usePlatformConfig } from '@/lib/platform';
 import { localeTag, useDict } from '@/lib/i18n';
+import { returnUrl, useCheckoutInfo } from '@/lib/payment';
 
 const METHODS = ['QRIS', 'VA', 'EWALLET', 'CARD'] as const;
 
@@ -28,6 +29,8 @@ function Checkout({ order, invoice, onClose }: { order: Order; invoice: Invoice;
   const [method, setMethod] = useState<(typeof METHODS)[number]>('QRIS');
   const d = useDict('fan');
   const nav = useNavigate();
+  // Penyedia aktif (Platform → Integrasi): Midtrans → halaman Snap; sandbox → simulasi (dev).
+  const gw = useCheckoutInfo(invoice, () => returnUrl(invoice.id, '/app/tickets'));
   async function pay() {
     await api(`/v1/finance/invoices/${invoice.id}/simulate-pay`, { body: { method }, idempotencyKey: `pay-${invoice.id}` });
     // Tiket terbit asinkron (event finance.payment.succeeded → ticketing); tunggu sebentar.
@@ -57,6 +60,25 @@ function Checkout({ order, invoice, onClose }: { order: Order; invoice: Invoice;
           <Clock className="size-3.5" /> {d.event.heldFor} <Countdown until={order.reserved_until} />
         </p>
       </div>
+      {gw.isLoading ? (
+        <p className="py-6 text-center text-sm text-rave-muted">{d.event.preparingPay}</p>
+      ) : gw.isError ? (
+        <DarkError error={gw.error} retry={() => gw.refetch()} />
+      ) : gw.data?.provider === 'midtrans' ? (
+        <div className="space-y-3">
+          <a
+            href={gw.data.redirect_url}
+            className="flex h-12 w-full items-center justify-center gap-2 rounded-none bg-rave-primary text-sm font-black text-rave-on-primary transition hover:scale-[1.01]"
+          >
+            <ShieldCheck className="size-4" /> {d.event.payNow} · {fmt.idr(invoice.amount)}
+          </a>
+          <p className="text-xs leading-relaxed text-rave-muted">{d.event.gatewayNote}</p>
+          {gw.data.mode === 'sandbox' && <p className="text-xs font-bold text-amber-300">{d.event.gatewaySandbox}</p>}
+        </div>
+      ) : gw.data && !gw.data.simulate ? (
+        <p className="border border-white/15 p-4 text-sm text-rave-muted">{d.event.payUnavailable}</p>
+      ) : (
+      <>
       <fieldset>
         <legend className="mb-2 text-sm font-bold">{d.event.paymentMethod}</legend>
         <div className="grid grid-cols-2 gap-2">
@@ -89,6 +111,8 @@ function Checkout({ order, invoice, onClose }: { order: Order; invoice: Invoice;
         <ShieldCheck className="size-4 shrink-0 text-rave-primary-text" />
         {d.event.sandboxNote}
       </p>
+      </>
+      )}
     </div>
   );
 }

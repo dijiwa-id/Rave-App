@@ -1,6 +1,6 @@
 import { config, publish, settings, uuidv7, type Job } from '@rave/service-kit';
 import { processRefundEvent, releaseEscrow, releaseEventEscrow, settleRefund, signPayload, verifySignature } from './escrow.js';
-import { PermanentRefundError, paymentProvider } from './providers.js';
+import { PermanentRefundError, providerByName } from './providers.js';
 import { C, D, post, serial } from './ledger.js';
 
 /** Fast clock dev (RAVE_FAST_CLOCK, default aktif di non-produksi): jendela dispute 30 dtk, bukan 24 jam. */
@@ -33,10 +33,11 @@ export const payoutJob: Job = {
   name: 'payouts',
   everyMs: FAST_CLOCK ? 3_000 : 60_000,
   async run({ db, log }) {
-    const rows = await db.query(`SELECT * FROM payouts WHERE status='REQUESTED' ORDER BY created_at LIMIT 20`);
+    // Yang menunggu persetujuan (PENDING_APPROVAL) tidak diambil; yang tertahan masa tunggu rekening dilewati sampai hold_until.
+    const rows = await db.query(`SELECT * FROM payouts WHERE status='REQUESTED' AND (hold_until IS NULL OR hold_until <= now()) ORDER BY created_at LIMIT 20`);
     for (const p of rows) {
       await serial(db, async (c) => {
-        const r = await c.query(`UPDATE payouts SET status='COMPLETED', completed_at=now() WHERE id=$1 AND status='REQUESTED' RETURNING id`, [p.id]);
+        const r = await c.query(`UPDATE payouts SET status='COMPLETED', completed_at=now() WHERE id=$1 AND status='REQUESTED' AND (hold_until IS NULL OR hold_until <= now()) RETURNING id`, [p.id]);
         if (!r.rowCount) return;
         await post(c, {
           key: `payout-complete:${p.id}`,
@@ -73,7 +74,6 @@ export const refundDispatchJob: Job = {
   name: 'refund-dispatch',
   everyMs: FAST_CLOCK ? 2_000 : 15_000,
   async run({ db, log }) {
-    const provider = paymentProvider();
     const rows = await db.query(
       `SELECT r.*, i.va_number, i.paid_at,
          (SELECT w.payload->>'method' FROM pg_webhook_events w WHERE w.invoice_id = r.invoice_id AND w.status = 'PAID' ORDER BY w.received_at LIMIT 1) AS method,
@@ -91,6 +91,8 @@ export const refundDispatchJob: Job = {
       );
       if (!claim.length) continue;
       try {
+        // Refund lewat penyedia tempat invoice dibayar (bukan penyedia aktif saat ini).
+        const provider = await providerByName(r.provider ?? 'sandbox');
         const d = await provider.requestRefund({
           refundId: r.id,
           invoiceId: r.invoice_id,
@@ -125,13 +127,12 @@ export const refundDispatchJob: Job = {
 
 /**
  * Sandbox saja: penyedia "mengonfirmasi" refund PENDING lewat webhook bertanda tangan — jalur verifikasi & pemrosesan
- * yang sama dengan webhook vendor nyata. Tidak berjalan bila PAYMENT_PROVIDER bukan sandbox.
+ * yang sama dengan webhook vendor nyata. Hanya menyentuh refund ber-provider sandbox.
  */
 export const sandboxRefundSettleJob: Job = {
   name: 'refund-sandbox-settle',
   everyMs: FAST_CLOCK ? 2_000 : 10_000,
   async run({ db }) {
-    if (paymentProvider().name !== 'sandbox') return;
     const rows = await db.query(
       `SELECT provider_ref FROM refunds WHERE status = 'PENDING' AND provider = 'sandbox' AND dispatched_at < now() - interval '1 second' ORDER BY dispatched_at LIMIT 50`,
     );

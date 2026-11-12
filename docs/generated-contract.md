@@ -2,7 +2,7 @@
 
 Memperluas modul kontrak di `services/booking` (templat markdown `booking-v1`, tanda tangan PSrE tiruan) menjadi mesin kontrak: PDF, versi, e-sign OTP multi-pihak, invoice DP otomatis, verifikasi publik.
 
-Status implementasi: **Tahap 0–3 selesai** (dokumen, skema, domain murni, templat `spk-v2`, PDF, QR, hash, storage privat). Tahap 4–8 belum.
+Status implementasi: **Tahap 0–3 selesai** (dokumen, skema, domain murni, templat `spk-v2`, PDF, QR, hash, storage privat). **Tahap 4 sebagian** (per 2026-11-11): tanda tangan OTP native (`ESIGN_PROVIDER=OTP_NATIVE`, `request-otp`/`verify-otp`, urutan penandatangan, verifikasi publik) sudah berjalan dan diuji e2e; job `RENDER_FINAL`/`DISTRIBUTE`, adapter PSrE (Privy/Vida), dan e-Meterai belum. Tahap 5–8 belum.
 
 ## Keputusan
 

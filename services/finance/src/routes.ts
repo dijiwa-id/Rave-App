@@ -7,10 +7,12 @@ import {
   config,
   conflict,
   forbidden,
+  HttpError,
   idempotent,
   isAdmin,
   managedArtistIds,
   notFound,
+  publish,
   requireAuth,
   requirePermission,
   requireRole,
@@ -18,11 +20,32 @@ import {
   unprocessable,
   uuidv7,
   z,
+  unauthorized,
   type AuthUser,
   type ServiceContext,
 } from '@rave/service-kit';
 import { createInvoice, invoiceView, processPgEvent, processRefundEvent, settleRefund, signPayload, verifySignature, type PgEvent } from './escrow.js';
 import { C, D, SOURCES, payableAccount, post, serial, walletBalances } from './ledger.js';
+import { activePaymentProvider, mapMidtransStatus, paymentSettings, providerByName, ProviderError, testMidtrans, verifyMidtransSignature, type ProviderPaymentStatus } from './providers.js';
+
+/** Status penyedia → event PG internal (jalur pemrosesan yang sama dengan webhook sandbox). */
+const toPgEvent = (s: ProviderPaymentStatus): PgEvent => ({ event_id: s.eventId, intent_id: s.invoiceId, status: s.status, amount: s.amount, paid_at: s.paidAt, method: s.method });
+
+/** URL kembali setelah bayar: hanya ke origin web RAVE sendiri (mencegah open redirect). */
+function safeFinishUrl(u: string | undefined): string | undefined {
+  if (!u) return undefined;
+  try {
+    const url = new URL(u);
+    const allowed = new Set([new URL(process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').origin]);
+    if (config.isDev) for (const o of ['http://localhost:5173', 'http://127.0.0.1:5173']) allowed.add(o);
+    return allowed.has(url.origin) ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Kolom payout yang aman ditampilkan ke pemilik wallet (tanpa id pemutus). */
+const PAYOUT_COLS = 'id, party_id, amount, status, approval_required, hold_until, decision_note, created_at, decided_at, completed_at';
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
@@ -56,6 +79,26 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
   // ---------- Webhook PG (raw body untuk verifikasi HMAC) ----------
   await app.register(async (s) => {
     s.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => done(null, body));
+    // Notifikasi HTTP Midtrans (Payment Notification URL di dasbor Midtrans = <PUBLIC_WEB_URL>/v1/webhooks/pg/midtrans).
+    // Diverifikasi signature_key SHA-512 dengan server key; selalu 200 untuk event yang bukan pembayaran final.
+    s.post('/v1/webhooks/pg/midtrans', async (req, reply) => {
+      const n = JSON.parse(req.body as string);
+      const ps = await paymentSettings();
+      if (!ps.midtrans) throw unauthorized('Midtrans belum dikonfigurasi');
+      if (!verifyMidtransSignature(n, ps.midtrans.serverKey)) throw unauthorized('Signature Midtrans tidak valid');
+      const st = mapMidtransStatus(n);
+      if (!st || !isUuid(st.invoiceId)) {
+        req.log.info({ order: n.order_id, status: n.transaction_status }, 'notifikasi Midtrans dicatat (belum final / bukan pembayaran)');
+        return { ok: true, ignored: true };
+      }
+      const exists = await db.one(`SELECT id FROM invoices WHERE id=$1`, [st.invoiceId]);
+      if (!exists) {
+        reply.status(200);
+        return { ok: true, ignored: true, reason: 'invoice tidak dikenal' };
+      }
+      const r = await serial(db, (c) => processPgEvent(c, 'midtrans', toPgEvent(st)));
+      return { ok: true, duplicate: r.duplicate };
+    });
     s.post('/v1/webhooks/pg/:provider', async (req) => {
       const raw = req.body as string;
       verifySignature(raw, req.headers['x-pg-signature'] as string | undefined);
@@ -74,6 +117,16 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       const r = await serial(db, (c) => processPgEvent(c, (req.params as any).provider, ev));
       return { ok: true, duplicate: r.duplicate };
     });
+  });
+
+  // ---------- Internal (platform): uji kredensial payment gateway sebelum/ sesudah disimpan ----------
+  app.post('/internal/payment/test', { preHandler: requireRole('service') }, async (req) => {
+    const b = z
+      .object({ provider: z.enum(['sandbox', 'midtrans']), server_key: z.string().optional(), mode: z.enum(['sandbox', 'production']).optional() })
+      .parse(req.body);
+    if (b.provider === 'sandbox') return { ok: true, message: 'Sandbox aktif — tidak ada uang yang berpindah (simulasi pembayaran hanya di development).' };
+    if (!b.server_key) return { ok: false, message: 'Server key Midtrans belum diisi' };
+    return testMidtrans({ serverKey: b.server_key, production: b.mode === 'production' });
   });
 
   // ---------- Internal (ticketing) ----------
@@ -144,6 +197,59 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       return invoiceView(inv);
     });
 
+    // Mulai pembayaran lewat penyedia aktif. Midtrans → halaman Snap (redirect); sandbox → simulasi (dev).
+    s.post('/v1/finance/invoices/:id/checkout', async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isUuid(id)) throw notFound('Invoice');
+      const b = z.object({ finish_url: z.string().max(2000).optional() }).parse(req.body ?? {});
+      const inv = await db.one(`SELECT * FROM invoices WHERE id=$1`, [id]);
+      if (!inv) throw notFound('Invoice');
+      if (!canPayInvoice(req.user!, inv)) throw forbidden('Bukan pembayar tagihan ini');
+      if (inv.status !== 'PENDING') throw conflict(`Invoice berstatus ${inv.status}`);
+      if (new Date(inv.due_at).getTime() <= Date.now()) throw conflict('Tagihan sudah melewati batas waktu');
+      if (inv.depends_on) {
+        const dep = await db.one(`SELECT status FROM invoices WHERE id=$1`, [inv.depends_on]);
+        if (dep?.status !== 'PAID') throw unprocessable('Bayar DP terlebih dahulu');
+      }
+      const ps = await paymentSettings();
+      if (ps.provider === 'sandbox') return { provider: 'sandbox', simulate: config.isDev, invoice: invoiceView(inv) };
+      // Sesi lama yang masih berlaku dipakai ulang (Midtrans menolak order_id yang sama dibuat dua kali).
+      if (inv.provider === 'midtrans' && inv.checkout_url && inv.checkout_expires_at && new Date(inv.checkout_expires_at).getTime() > Date.now() + 60_000)
+        return { provider: 'midtrans', redirect_url: inv.checkout_url, token: inv.checkout_token, mode: ps.midtrans?.production ? 'production' : 'sandbox', invoice: invoiceView(inv) };
+      const provider = await activePaymentProvider();
+      let sess;
+      try {
+        sess = await provider.createCheckout!({ invoiceId: inv.id, amount: Number(inv.amount), description: inv.description, dueAt: new Date(inv.due_at), finishUrl: safeFinishUrl(b.finish_url) });
+      } catch (e) {
+        req.log.error({ invoice: inv.id, err: (e as Error).message }, 'checkout payment gateway gagal');
+        throw new HttpError(e instanceof ProviderError && e.retryable ? 503 : 502, 'Bad Gateway', 'Halaman pembayaran belum dapat dibuat. Coba lagi sebentar lagi.');
+      }
+      const up = (
+        await db.query(
+          `UPDATE invoices SET provider='midtrans', checkout_token=$2, checkout_url=$3, checkout_expires_at=$4 WHERE id=$1 AND status='PENDING' RETURNING *`,
+          [inv.id, sess.token, sess.redirectUrl, sess.expiresAt],
+        )
+      )[0];
+      return { provider: 'midtrans', redirect_url: sess.redirectUrl, token: sess.token, mode: ps.midtrans?.production ? 'production' : 'sandbox', invoice: invoiceView(up ?? inv) };
+    });
+
+    // Tarik status dari penyedia (pengguna kembali dari halaman bayar, atau webhook terlambat). Idempoten.
+    s.post('/v1/finance/invoices/:id/sync', async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isUuid(id)) throw notFound('Invoice');
+      const inv = await db.one(`SELECT * FROM invoices WHERE id=$1`, [id]);
+      if (!inv) throw notFound('Invoice');
+      if (!canPayInvoice(req.user!, inv)) throw forbidden('Bukan pembayar tagihan ini');
+      if (inv.status !== 'PENDING' || inv.provider === 'sandbox') return invoiceView(inv);
+      const provider = await providerByName(inv.provider);
+      const st = await provider.fetchStatus?.(inv.id).catch((e: Error) => {
+        req.log.warn({ invoice: inv.id, err: e.message }, 'cek status penyedia gagal');
+        return null;
+      });
+      if (st) await serial(db, (c) => processPgEvent(c, inv.provider, toPgEvent(st)));
+      return invoiceView(await db.one(`SELECT * FROM invoices WHERE id=$1`, [id]));
+    });
+
     // Sandbox PG: mensimulasikan pembayaran VA/QRIS → webhook bertanda tangan yang sama dengan produksi.
     s.post('/v1/finance/invoices/:id/simulate-pay', async (req, reply) => {
       if (!config.isDev) throw notFound('Endpoint');
@@ -154,6 +260,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         if (!inv) throw notFound('Invoice');
         if (!canPayInvoice(req.user!, inv)) throw forbidden('Bukan pembayar tagihan ini');
         if (inv.status !== 'PENDING') throw conflict(`Invoice berstatus ${inv.status}`);
+        if (inv.provider !== 'sandbox') throw conflict('Invoice ini dibayar lewat payment gateway nyata, bukan simulasi');
         if (inv.depends_on) {
           const dep = (await c.query(`SELECT status FROM invoices WHERE id=$1`, [inv.depends_on])).rows[0];
           if (dep?.status !== 'PAID') throw unprocessable('Bayar DP terlebih dahulu');
@@ -199,7 +306,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
          WHERE e.account LIKE $1 ORDER BY e.id DESC LIMIT 100`,
         [`liability:payable:${partyId}:%`],
       );
-      const payouts = await db.query(`SELECT id, party_id, amount, status, created_at, completed_at FROM payouts WHERE party_id=$1 ORDER BY created_at DESC LIMIT 20`, [partyId]);
+      const payouts = await db.query(`SELECT ${PAYOUT_COLS} FROM payouts WHERE party_id=$1 ORDER BY created_at DESC LIMIT 20`, [partyId]);
       const bank = await db.one(`SELECT bank, number_masked, holder FROM bank_accounts WHERE party_id=$1`, [partyId]);
       return { party_id: partyId, balances, transactions: tx.map((t) => ({ ...t, id: String(t.id) })), payouts, bank_account: bank };
     });
@@ -225,7 +332,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
           (
             await c.query(
               `SELECT coalesce(sum(amount), 0) AS n FROM payouts
-               WHERE party_id=$1 AND status <> 'FAILED' AND (created_at AT TIME ZONE 'Asia/Jakarta')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date`,
+               WHERE party_id=$1 AND status NOT IN ('FAILED','REJECTED') AND (created_at AT TIME ZONE 'Asia/Jakarta')::date = (now() AT TIME ZONE 'Asia/Jakarta')::date`,
               [p.party_id],
             )
           ).rows[0].n,
@@ -234,18 +341,29 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
           throw unprocessable(`Melebihi batas penarikan harian ${rupiah(dailyLimit)} (sisa hari ini ${rupiah(Math.max(0, dailyLimit - today))})`);
         const bal = await walletBalances(c, p.party_id);
         if (bal.total < p.amount) throw unprocessable(`Saldo tidak cukup (tersedia ${bal.total})`);
-        // Rekening: perubahan dicatat audit (produksi: dual control + cooling 24 jam, §11.5).
+        // Rekening (§11.5): penggantian nomor dicatat audit dan memulai masa tunggu (payout.bank_change_cooldown_hours) —
+        // penarikan ke rekening yang baru diganti ditahan agar pengambilalihan akun tidak langsung menguras saldo.
         const hash = createHash('sha256').update(p.bank_account.number).digest('hex');
         const masked = '****' + p.bank_account.number.slice(-4);
-        const prev = (await c.query(`SELECT number_hash FROM bank_accounts WHERE party_id=$1`, [p.party_id])).rows[0];
+        const prev = (await c.query(`SELECT number_hash, changed_at FROM bank_accounts WHERE party_id=$1`, [p.party_id])).rows[0];
+        let changedAt: Date | null = prev?.changed_at ? new Date(prev.changed_at) : null;
         if (!prev || prev.number_hash !== hash) {
-          await c.query(
-            `INSERT INTO bank_accounts (party_id, bank, number_masked, number_hash, holder, verified_at) VALUES ($1,$2,$3,$4,$5, now())
-             ON CONFLICT (party_id) DO UPDATE SET bank=$2, number_masked=$3, number_hash=$4, holder=$5, verified_at=now(), updated_at=now()`,
-            [p.party_id, p.bank_account.bank, masked, hash, p.bank_account.holder],
+          const changed = !!prev; // pendaftaran rekening pertama tidak memicu masa tunggu
+          const r = await c.query(
+            `INSERT INTO bank_accounts (party_id, bank, number_masked, number_hash, holder, verified_at, changed_at) VALUES ($1,$2,$3,$4,$5, now(), NULL)
+             ON CONFLICT (party_id) DO UPDATE SET bank=$2, number_masked=$3, number_hash=$4, holder=$5, verified_at=now(), updated_at=now(),
+               changed_at = CASE WHEN $6 THEN now() ELSE bank_accounts.changed_at END
+             RETURNING changed_at`,
+            [p.party_id, p.bank_account.bank, masked, hash, p.bank_account.holder, changed],
           );
-          await audit(c, { actorId: u.sub, action: 'bank_account.change', entity: 'party', entityId: p.party_id, data: { bank: p.bank_account.bank, number: masked }, ip: req.ip });
+          changedAt = r.rows[0]?.changed_at ? new Date(r.rows[0].changed_at) : null;
+          await audit(c, { actorId: u.sub, action: changed ? 'bank_account.change' : 'bank_account.register', entity: 'party', entityId: p.party_id, data: { bank: p.bank_account.bank, number: masked }, ip: req.ip });
         }
+        const cooldownH = settings.num('payout.bank_change_cooldown_hours');
+        const holdUntil = changedAt && cooldownH > 0 ? new Date(changedAt.getTime() + cooldownH * 3_600_000) : null;
+        const hold = holdUntil && holdUntil.getTime() > Date.now() ? holdUntil : null;
+        // Dual control: penarikan di atas ambang menunggu persetujuan tim finance (bukan pemohon).
+        const approvalRequired = p.amount > settings.num('payout.approval_threshold_idr');
         const id = uuidv7();
         let left = p.amount;
         const lines = [];
@@ -258,16 +376,104 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         lines.push(C('asset:payout_clearing', p.amount));
         await post(c, { key: `payout:${id}`, kind: 'payout.request', referenceId: id, description: `Penarikan ke ${p.bank_account.bank} ${masked}`, lines });
         const r = await c.query(
-          `INSERT INTO payouts (id, party_id, amount, bank_snapshot, requested_by) VALUES ($1,$2,$3,$4,$5) RETURNING id, party_id, amount, status, created_at`,
-          [id, p.party_id, p.amount, JSON.stringify({ bank: p.bank_account.bank, number: masked, holder: p.bank_account.holder }), u.sub],
+          `INSERT INTO payouts (id, party_id, amount, bank_snapshot, requested_by, status, approval_required, hold_until) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           RETURNING ${PAYOUT_COLS}`,
+          [id, p.party_id, p.amount, JSON.stringify({ bank: p.bank_account.bank, number: masked, holder: p.bank_account.holder }), u.sub, approvalRequired ? 'PENDING_APPROVAL' : 'REQUESTED', approvalRequired, hold],
         );
-        await audit(c, { actorId: u.sub, action: 'payout.request', entity: 'payout', entityId: id, data: { amount: p.amount }, ip: req.ip });
+        await audit(c, { actorId: u.sub, action: 'payout.request', entity: 'payout', entityId: id, data: { amount: p.amount, approval_required: approvalRequired, hold_until: hold }, ip: req.ip });
         return { status: 201, body: r.rows[0] };
       });
     });
   });
 
   // ---------- Admin finance (REQ-PAY-05, REQ-ADM-01) ----------
+  // ---------- Persetujuan payout (dual control, §11.5) ----------
+  const PAYOUT_STATUSES = ['PENDING_APPROVAL', 'REQUESTED', 'PROCESSING', 'COMPLETED', 'FAILED', 'REJECTED'] as const;
+  app.get('/v1/admin/finance/payouts', { preHandler: requirePermission(['finance.view', 'finance.payout']) }, async (req) => {
+    const q = z.object({ status: z.enum(PAYOUT_STATUSES).optional() }).parse(req.query);
+    const rows = await db.query(
+      `SELECT p.*, b.changed_at AS bank_changed_at FROM payouts p LEFT JOIN bank_accounts b ON b.party_id = p.party_id
+       ${q.status ? 'WHERE p.status = $1' : ''} ORDER BY (p.status = 'PENDING_APPROVAL') DESC, p.created_at DESC LIMIT 200`,
+      q.status ? [q.status] : [],
+    );
+    const counts = await db.query<{ status: string; n: number }>(`SELECT status, count(*)::int AS n FROM payouts GROUP BY status`);
+    return {
+      data: rows.map((p: any) => ({
+        id: p.id,
+        party_id: p.party_id,
+        amount: Number(p.amount),
+        status: p.status,
+        bank: p.bank_snapshot,
+        requested_by: p.requested_by,
+        approval_required: p.approval_required,
+        hold_until: p.hold_until,
+        bank_changed_at: p.bank_changed_at,
+        decided_by: p.decided_by,
+        decided_at: p.decided_at,
+        decision_note: p.decision_note,
+        created_at: p.created_at,
+        completed_at: p.completed_at,
+      })),
+      counts: Object.fromEntries(counts.map((c) => [c.status, c.n])),
+      threshold_idr: settings.num('payout.approval_threshold_idr'),
+      cooldown_hours: settings.num('payout.bank_change_cooldown_hours'),
+    };
+  });
+
+  /** Pemutus tidak boleh pemohon sendiri atau anggota wallet yang ditarik (empat mata). */
+  function assertNotRequester(u: AuthUser, p: any) {
+    if (p.requested_by === u.sub || p.party_id === u.sub || orgIds(u).includes(p.party_id))
+      throw forbidden('Dual control: penarikan harus diputuskan admin lain, bukan pemohon atau anggota wallet ini');
+  }
+
+  app.post('/v1/admin/finance/payouts/:id/approve', { preHandler: requirePermission('finance.payout') }, async (req) => {
+    const { id } = req.params as { id: string };
+    if (!isUuid(id)) throw notFound('Payout');
+    const b = z.object({ note: z.string().trim().max(500).optional() }).parse(req.body ?? {});
+    const u = req.user!;
+    return db.tx(async (c) => {
+      const p = (await c.query(`SELECT * FROM payouts WHERE id=$1 FOR UPDATE`, [id])).rows[0];
+      if (!p) throw notFound('Payout');
+      assertNotRequester(u, p);
+      if (p.status !== 'PENDING_APPROVAL') throw conflict(`Payout berstatus ${p.status}`);
+      const r = await c.query(
+        `UPDATE payouts SET status='REQUESTED', decided_by=$2, decided_at=now(), decision_note=$3 WHERE id=$1 RETURNING ${PAYOUT_COLS}`,
+        [id, u.sub, b.note || null],
+      );
+      await audit(c, { actorId: u.sub, action: 'payout.approve', entity: 'payout', entityId: id, data: { amount: Number(p.amount), note: b.note ?? null }, ip: req.ip });
+      return r.rows[0];
+    });
+  });
+
+  app.post('/v1/admin/finance/payouts/:id/reject', { preHandler: requirePermission('finance.payout') }, async (req) => {
+    const { id } = req.params as { id: string };
+    if (!isUuid(id)) throw notFound('Payout');
+    const b = z.object({ reason: z.string().trim().min(5, 'Alasan minimal 5 karakter').max(500) }).parse(req.body);
+    const u = req.user!;
+    return serial(db, async (c) => {
+      const p = (await c.query(`SELECT * FROM payouts WHERE id=$1 FOR UPDATE`, [id])).rows[0];
+      if (!p) throw notFound('Payout');
+      assertNotRequester(u, p);
+      // Hanya yang belum dikirim ke bank: menunggu persetujuan, atau antre (termasuk yang tertahan masa tunggu rekening).
+      if (p.status !== 'PENDING_APPROVAL' && p.status !== 'REQUESTED') throw conflict(`Payout berstatus ${p.status}`);
+      // Jurnal pembalik: kembalikan dana dari kliring payout ke sumber saldo semula.
+      const orig = await c.query(
+        `SELECT e.account, e.side, e.amount FROM ledger_entries e JOIN ledger_transactions t ON t.id = e.txn_id WHERE t.idempotency_key = $1`,
+        [`payout:${id}`],
+      );
+      const lines = orig.rows.map((e: any) => (e.side === 'DEBIT' ? C(e.account, Number(e.amount)) : D(e.account, Number(e.amount))));
+      if (!lines.length) throw conflict('Jurnal penarikan tidak ditemukan');
+      await post(c, { key: `payout-reject:${id}`, kind: 'payout.reject', referenceId: id, description: `Penarikan ditolak: ${b.reason}`, lines });
+      const r = await c.query(
+        `UPDATE payouts SET status='REJECTED', decided_by=$2, decided_at=now(), decision_note=$3 WHERE id=$1 RETURNING ${PAYOUT_COLS}`,
+        [id, u.sub, b.reason],
+      );
+      await publish(c, 'finance.payout.rejected', id, { payoutId: id, partyId: p.party_id, amount: Number(p.amount), reason: b.reason });
+      await audit(c, { actorId: u.sub, action: 'payout.reject', entity: 'payout', entityId: id, data: { amount: Number(p.amount), reason: b.reason }, ip: req.ip });
+      return r.rows[0];
+    });
+  });
+
   // ---------- Refund (back office) ----------
   const refundOut = (r: any) => ({
     id: r.id,

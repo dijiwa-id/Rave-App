@@ -15,10 +15,12 @@ export function hasPermission(u: AuthUser | null | undefined, perm: AdminPermiss
 }
 
 /** preHandler: admin dengan izin `perm` (atau token service antar-service). */
-export function requirePermission(perm: AdminPermission) {
+/** Izin back office; array = cukup salah satu (mis. melihat ATAU memutuskan antrean). */
+export function requirePermission(perm: AdminPermission | AdminPermission[]) {
+  const perms = Array.isArray(perm) ? perm : [perm];
   return async (req: FastifyRequest) => {
     if (!req.user) throw unauthorized();
     if (req.user.roles.includes('service')) return;
-    if (!hasPermission(req.user, perm)) throw forbidden(`Peran Anda tidak memiliki akses: ${ADMIN_PERMISSIONS[perm].label}`);
+    if (!perms.some((p) => hasPermission(req.user!, p))) throw forbidden(`Peran Anda tidak memiliki akses: ${perms.map((p) => ADMIN_PERMISSIONS[p].label).join(' / ')}`);
   };
 }

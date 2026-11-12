@@ -82,7 +82,7 @@ Kalender dijaga **exclusion constraint** PostgreSQL (`btree_gist`) sehingga dua 
 | HLS/DASH + multi-DRM | Redirect bertanda tangan ke file MP3 demo | Belum ada vendor DRM (§11.9) | Pipeline transcoding (FFmpeg/Shaka Packager) + license proxy di `playback`. |
 | PG, PSrE, KYC, WA | Adapter sandbox/mock | Vendor belum dipilih (Bab 18) | Implementasi adapter per provider di service terkait. |
 | Uang BIGINT sen | BIGINT rupiah utuh | IDR tidak memakai pecahan; mengurangi bug konversi ×100 | Lihat `docs/adr/0003-money.md`. |
-| Mobile (React Native) & Check-in app | Belum; check-in tersedia di web Promotor Hub | Fokus Fase 0–1 web | `apps/mobile` (Expo) memakai `packages/domain` & kontrak API yang sama. |
+| Mobile (Flutter) & Desktop (Tauri) & Check-in app | Belum; check-in tersedia di web Promotor Hub | Fokus Fase 0–1 web; teknologi klien diputuskan ulang 2026-11-11 (React Native → Flutter, tambah Tauri) | Rencana & prasyarat backend: `docs/CLIENT-APPS.md` |
 
 ## 6. Menjalankan beberapa replika per service
 
@@ -99,6 +99,6 @@ Semua service boleh dijalankan >1 replika di belakang load balancer biasa — **
 Syarat deploy:
 - **`LIVE_DIR` harus volume bersama** (NFS/EFS/RWX PVC) untuk semua replika live — segmen HLS ditulis pemilik dan dilayani replika mana pun. (Produksi besar: ganti dengan object storage + CDN.)
 - Setiap replika live butuh `LIVE_INTERNAL_URL` yang bisa dijangkau replika lain (mis. IP pod: `http://$(POD_IP):4010`; default `http://127.0.0.1:$LIVE_PORT` hanya cocok untuk satu host) dan port RTMP sendiri bila satu host (`LIVE_RTMP_PORT`). RTMP di belakang LB TCP (L4) cukup; encoder yang menyambung ulang ke replika lain mengambil alih siaran INTERRUPTED.
-- Gateway: set `RATE_LIMIT_STORE=pg` (sudah di `docker-compose.yml`).
+- Gateway: set `RATE_LIMIT_STORE=pg` (sudah di `docker-compose.prod.yml`).
 - Koneksi Postgres per replika ≈ `DB_POOL_MAX` + 1 LISTEN bus + 1 LISTEN pengaturan (+ 5 pool rate limit di gateway, + 1 kunci demo di live). Hitung terhadap `max_connections` (atau pasang PgBouncer mode session untuk koneksi LISTEN).
 - Job berkala (`jobs`) berjalan di setiap replika; job yang ada idempoten/aman paralel (kunci baris / `SKIP LOCKED` / UPDATE bersyarat).

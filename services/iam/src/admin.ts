@@ -17,6 +17,15 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
     return o;
   });
 
+  // Internal: kontak pengguna untuk worker notifikasi (email/WhatsApp). Tidak diteruskan gateway (/internal/*).
+  app.get('/internal/users/:id/contact', { preHandler: requireService }, async (req) => {
+    const { id } = req.params as { id: string };
+    if (!isUuid(id)) throw notFound('Pengguna');
+    const u = await db.one(`SELECT email, phone, display_name, locale, deleted_at, suspended_at FROM users WHERE id = $1`, [id]);
+    if (!u || u.deleted_at) throw notFound('Pengguna');
+    return { email: u.email, phone: u.phone, display_name: u.display_name, locale: u.locale, suspended: !!u.suspended_at };
+  });
+
   // Internal: persetujuan pengguna (service iklan memeriksa consent `ads` untuk penargetan — UU PDP).
   app.get('/internal/users/:id/consents', { preHandler: requireService }, async (req) => {
     const { id } = req.params as { id: string };

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QRCodeSVG } from 'qrcode.react';
 import { CalendarDays, MapPin, RotateCcw, Ticket as TicketIcon } from 'lucide-react';
@@ -10,6 +10,7 @@ import { DarkError, FanPage } from '@/components/fan';
 import { Button, EmptyState, Modal, PageLoader, Spinner, toast } from '@/components/ui';
 import { setting, usePlatformConfig } from '@/lib/platform';
 import { dict, useDict } from '@/lib/i18n';
+import { useInvoiceSync } from '@/lib/payment';
 
 /** QR berputar tiap 15 detik (anti-screenshot, REQ-TIX-02). */
 /** Hitung mundur tersendiri: tick 1 dtk hanya me-render teks ini, bukan QR. */
@@ -142,6 +143,13 @@ export default function Tickets() {
   const [refunding, setRefunding] = useState<Ticket | null>(null);
   const d = useDict('fan');
   const q = useQuery({ queryKey: ['tickets', 'mine'], queryFn: () => api<Paged<Ticket>>('/v1/ticketing/tickets/mine') });
+  // Kembali dari halaman bayar payment gateway (?invoice=<id>): konfirmasi status lalu muat ulang tiket.
+  const [params] = useSearchParams();
+  const payInvoice = params.get('invoice');
+  const sync = useInvoiceSync(payInvoice, () => {
+    // Tiket terbit asinkron setelah pembayaran → muat ulang beberapa kali.
+    for (const ms of [800, 2500, 6000]) setTimeout(() => q.refetch(), ms);
+  });
   if (q.isLoading) return <PageLoader />;
   const tickets = q.data?.data ?? [];
   const upcoming = tickets.filter((t) => t.status === 'VALID');
@@ -150,6 +158,17 @@ export default function Tickets() {
     <FanPage>
       <h1 className="mb-2 text-4xl font-black tracking-tight">{d.tickets.title}</h1>
       <p className="mb-8 text-rave-muted">{d.tickets.subtitle}</p>
+      {payInvoice && sync !== 'idle' && (
+        <p
+          role="status"
+          className={
+            'mb-6 border px-4 py-3 text-sm font-semibold ' +
+            (sync === 'PAID' ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200' : sync === 'checking' ? 'border-white/20 bg-white/5' : sync === 'PENDING' ? 'border-amber-400/40 bg-amber-400/10 text-amber-200' : 'border-red-400/40 bg-red-400/10 text-red-200')
+          }
+        >
+          {sync === 'checking' ? d.tickets.paymentConfirming : sync === 'PAID' ? d.tickets.paymentConfirmed : sync === 'PENDING' ? d.tickets.paymentPending : d.tickets.paymentFailed}
+        </p>
+      )}
       {q.isError && <DarkError error={q.error} retry={() => q.refetch()} />}
       {!q.isError && !tickets.length && (
         <EmptyState icon={<TicketIcon className="size-12" />} title={d.tickets.empty} body={d.tickets.emptyBody} action={<Link to="/app/events" className="rounded-none bg-white px-6 py-2.5 text-sm font-bold text-black">{d.tickets.seeEvents}</Link>} />

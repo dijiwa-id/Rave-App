@@ -12,3 +12,5 @@ export { z } from 'zod';
 export * from './crypto.js';
 export * from './version.js';
 export * from './media-sign.js';
+export * from './messaging.js';
+export * from './integrations.js';

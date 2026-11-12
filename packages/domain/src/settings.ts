@@ -303,8 +303,8 @@ export const SETTINGS: SettingDef[] = [
   // ---- Payout ----
   { key: 'payout.min_amount_idr', group: 'payout', label: 'Penarikan minimum', description: 'Nominal terkecil per permintaan penarikan.', type: 'number', default: 50_000, min: 10_000, max: 10_000_000, step: 10_000, unit: 'Rp', public: true, consumers: ['finance', 'web'] },
   { key: 'payout.daily_limit_idr', group: 'payout', label: 'Batas penarikan harian', description: 'Total penarikan per wallet (artis/org) dalam satu hari kalender WIB. Membatasi kerugian bila akun diambil alih.', type: 'number', default: 100_000_000, min: 1_000_000, max: 10_000_000_000, step: 1_000_000, unit: 'Rp', consumers: ['finance'], dangerous: true },
-  { key: 'payout.approval_threshold_idr', group: 'payout', label: 'Ambang persetujuan admin', description: 'Penarikan di atas nominal ini menunggu persetujuan tim finance (dual control) sebelum diproses.', type: 'number', default: 25_000_000, min: 0, max: 10_000_000_000, step: 1_000_000, unit: 'Rp', consumers: ['finance'], planned: 'Butuh antrean persetujuan payout di Back Office.' },
-  { key: 'payout.bank_change_cooldown_hours', group: 'payout', label: 'Masa tunggu rekening baru', description: 'Penarikan ke rekening yang baru diganti ditahan selama masa ini (mitigasi pengambilalihan akun, §11.5).', type: 'number', default: 24, min: 0, max: 168, unit: 'jam', consumers: ['finance'], planned: 'Butuh pengelolaan rekening bank terpisah dari permintaan penarikan.' },
+  { key: 'payout.approval_threshold_idr', group: 'payout', label: 'Ambang persetujuan admin', description: 'Penarikan di atas nominal ini menunggu persetujuan tim finance (dual control) sebelum diproses.', type: 'number', default: 25_000_000, min: 0, max: 10_000_000_000, step: 1_000_000, unit: 'Rp', consumers: ['finance'] },
+  { key: 'payout.bank_change_cooldown_hours', group: 'payout', label: 'Masa tunggu rekening baru', description: 'Penarikan ke rekening yang baru diganti ditahan selama masa ini (mitigasi pengambilalihan akun, §11.5).', type: 'number', default: 24, min: 0, max: 168, unit: 'jam', consumers: ['finance'] },
   { key: 'payout.fee_idr', group: 'payout', label: 'Biaya transfer', description: 'Dipotong dari nominal penarikan. 0 = ditanggung RAVE.', type: 'number', default: 0, min: 0, max: 25_000, step: 500, unit: 'Rp', public: true, consumers: ['finance', 'web'], planned: 'Butuh adapter disbursement payment gateway (biaya riil per bank).' },
   { key: 'payout.sla_business_days', group: 'payout', label: 'Target dana diterima', description: 'Janji layanan yang ditampilkan ke artis & promotor saat menarik dana.', type: 'number', default: 2, min: 1, max: 14, unit: 'hari kerja', public: true, consumers: ['web'], planned: 'Ditampilkan setelah payout memakai disbursement riil.' },
 
@@ -421,6 +421,7 @@ export const ADMIN_PERMISSIONS = {
   'dispute.resolve': { label: 'Mediasi dispute booking', area: 'Kepercayaan' },
   'finance.view': { label: 'Lihat ledger, rekonsiliasi & antrean refund', area: 'Keuangan' },
   'finance.refund': { label: 'Putuskan, kirim ulang & selesaikan refund', area: 'Keuangan' },
+  'finance.payout': { label: 'Setujui / tolak penarikan dana (dual control)', area: 'Keuangan' },
   'users.view': { label: 'Lihat pengguna & organisasi', area: 'Pengguna' },
   'audit.view': { label: 'Lihat audit log', area: 'Pengguna' },
 } as const;
@@ -434,7 +435,7 @@ export const CONFIGURABLE_ADMIN_ROLES = ADMIN_ROLES.filter((r) => r !== 'SUPER_A
 export const DEFAULT_ROLE_PERMISSIONS: Record<Exclude<AdminRole, 'SUPER_ADMIN'>, AdminPermission[]> = {
   OPS: ['qc.review', 'live.moderate', 'ads.review', 'ads.manage', 'kyc.review', 'dispute.resolve', 'finance.view', 'users.view', 'audit.view'],
   CONTENT_QC: ['qc.review', 'live.moderate', 'ads.review'],
-  FINANCE: ['finance.view', 'finance.refund', 'kyc.review'],
+  FINANCE: ['finance.view', 'finance.refund', 'finance.payout', 'kyc.review'],
   LEGAL: ['qc.review', 'kyc.review', 'dispute.resolve', 'audit.view'],
   SUPPORT: ['users.view', 'finance.view'],
   EDITORIAL: ['live.moderate', 'ads.manage'],

@@ -2,13 +2,17 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   audit,
   badRequest,
+  brandedEmail,
   config,
+  DeliveryError,
   conflict,
   forbidden,
   HttpError,
   notFound,
   publish,
   requireAuth,
+  sendEmail,
+  sendWhatsApp,
   settings,
   slugify,
   unauthorized,
@@ -100,7 +104,26 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         OTP_TTL_SEC,
       ]);
     });
-    // Produksi: kirim via adapter email / WhatsApp Business API (§11.9).
+    // Kirim lewat adapter email / WhatsApp Business API (§11.9, EMAIL_PROVIDER / WHATSAPP_PROVIDER). Kode tidak pernah dicatat ke log.
+    try {
+      const mins = Math.round(OTP_TTL_SEC / 60);
+      if (provider === 'email') {
+        const m = brandedEmail({
+          heading: 'Kode masuk RAVE',
+          lines: [`Masukkan kode berikut untuk masuk ke RAVE. Berlaku ${mins} menit.`, 'Jangan bagikan kode ini kepada siapa pun, termasuk tim RAVE.'],
+          code,
+          footer: 'Tidak merasa meminta kode? Abaikan email ini — akunmu tetap aman.',
+        });
+        await sendEmail({ to: dest, subject: `${code} adalah kode masuk RAVE`, ...m, tag: 'otp' });
+      } else {
+        await sendWhatsApp({ to: dest, text: `${code} adalah kode masuk RAVE. Berlaku ${mins} menit. Jangan bagikan kode ini.`, otpCode: code });
+      }
+    } catch (e) {
+      req.log.error({ dest: mask(dest), channel: provider, err: (e as Error).message }, 'OTP gagal dikirim');
+      // Kode yang tidak terkirim dihapus agar tidak memakan kuota permintaan OTP pengguna.
+      await db.query(`DELETE FROM otp_codes WHERE destination = $1 AND consumed_at IS NULL AND code_hash = $2`, [dest, sha256(`${dest}:${code}`)]);
+      throw new HttpError(e instanceof DeliveryError && !e.retryable ? 502 : 503, e instanceof DeliveryError && !e.retryable ? 'Bad Gateway' : 'Service Unavailable', 'Kode belum dapat dikirim. Coba lagi sebentar lagi.');
+    }
     req.log.info({ dest: mask(dest), channel: b.channel }, 'OTP diterbitkan');
     return { sent: true, expires_in: OTP_TTL_SEC, ...(config.isDev ? { dev_code: code } : {}) };
   });
