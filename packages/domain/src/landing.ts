@@ -131,7 +131,7 @@ export const LANDING_DEFAULT: LandingContent = {
     {
       q: l('Apakah dana booking aman?', 'Is booking money safe?'),
       a: l(
-        'Pembayaran promotor ditahan di rekening bersama (escrow) milik mitra pembayaran berizin — bukan rekening operasional RAVE. Dana baru dicairkan H+1 setelah show selesai tanpa sengketa, dan otomatis dibagi sesuai kontrak.',
+        'Pembayaran promotor ditahan di rekening bersama (escrow) milik mitra pembayaran berizin — bukan rekening operasional RAVE. Dana baru masuk saldo wallet H+1 setelah show selesai tanpa sengketa, dibagi sesuai kontrak, lalu dapat ditarik ke rekening setelah verifikasi.',
         "Promoter payments are held in escrow by a licensed payment partner — not in RAVE's operating account. Funds are released one day after the show ends without dispute, and split automatically according to the contract.",
       ),
     },

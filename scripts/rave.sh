@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 # Satu pintu untuk menjalankan aplikasi RAVE secara lokal (WSL, tanpa Docker/sudo).
 #
-#   ./rave start            # Postgres → migrasi (seed otomatis bila DB kosong) → semua service + gateway + web, di background
-#   ./rave dev              # sama, tetapi di foreground (log langsung di terminal, Ctrl+C untuk berhenti)
+#   ./rave dev              # Postgres → migrasi (seed otomatis bila DB kosong) → semua service + gateway + web, foreground,
+#                           # auto-reload: web (Vite HMR) & service (restart saat src berubah). Ctrl+C untuk berhenti.
+#   ./rave start            # sama, tetapi di background (log: ./rave logs)
 #   ./rave stop             # hentikan service + web (Postgres tetap jalan; `stop --all` ikut mematikan Postgres)
 #   ./rave restart          # stop lalu start
 #   ./rave status           # cek port & /healthz tiap komponen
 #   ./rave logs             # ikuti log (tail -f)
-#   ./rave restart-web      # restart Vite saja (Vite di /mnt/d tidak hot-reload)
+#   ./rave restart-web      # restart Vite saja (biasanya tidak perlu lagi — polling aktif otomatis di /mnt/*)
 #   ./rave restart-svc iam  # restart satu service
 #   ./rave seed             # jalankan seed data demo (idempoten)
 set -euo pipefail
+
+# Toolchain user-local (Node/PostgreSQL tanpa sudo, lihat README) — dimuat otomatis agar tidak perlu `source` manual.
+if [ -f "$HOME/.rave/env.sh" ]; then
+  # shellcheck disable=SC1091
+  source "$HOME/.rave/env.sh"
+fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE="$HOME/.rave"
@@ -21,6 +28,14 @@ if [ -z "${RAVE_PGPORT:-}" ] && [ -f "$ROOT/.env" ]; then RAVE_PGPORT="$(grep -E
 PGPORT="${RAVE_PGPORT:-55432}"
 PGDATA_DIR="${RAVE_PGDATA:-$HOME/.rave/pgdata}"
 PGBIN="${PGBIN:-$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -1)}"
+export PGBIN
+
+# Hot-reload: proyek di /mnt/* (drvfs WSL) tidak mengirim event inotify → Vite & watcher service memakai polling.
+case "$ROOT" in
+  /mnt/*) export CHOKIDAR_USEPOLLING="${CHOKIDAR_USEPOLLING:-true}" ;;
+esac
+# Auto-restart service saat src berubah (scripts/dev-services.ts). RAVE_WATCH=0 untuk mematikan.
+export RAVE_WATCH="${RAVE_WATCH:-1}"
 
 # name:port — urutan sama dengan scripts/services.ts
 COMPONENTS=(platform:4009 iam:4001 catalog:4002 library:4003 playback:4004 booking:4005 finance:4006
@@ -102,6 +117,7 @@ urls() {
   ${c_b}Web${c_0}       http://localhost:5173
   ${c_b}Gateway${c_0}   http://localhost:8080
   ${c_b}RTMP${c_0}      rtmp://localhost:1935/live
+  ${c_dim}Auto-reload: web $( [ "${CHOKIDAR_USEPOLLING:-}" = true ] && echo "(polling)" || echo "(HMR)" ) · service $( [ "$RAVE_WATCH" = 1 ] && echo aktif || echo mati )${c_0}
   ${c_dim}Log: $LOG   ·   ./rave logs   ·   ./rave stop${c_0}
 
 EOF
@@ -124,12 +140,17 @@ cmd_start() {
 }
 
 cmd_dev() {
+  [ -n "$(running_pid)" ] && die "RAVE sudah berjalan di background (pid $(running_pid)) — './rave stop' dulu, atau './rave logs'"
   preflight
   free_ports
   db_up
   : >"$LOG"
   db_prepare
-  cd "$ROOT" && exec npm run --silent dev
+  urls
+  cd "$ROOT"
+  # pid dicatat agar `./rave status|stop` dari terminal lain juga mengenali sesi foreground ini.
+  echo $$ >"$PIDFILE"
+  exec npm run --silent dev
 }
 
 cmd_stop() {

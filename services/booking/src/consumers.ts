@@ -39,6 +39,14 @@ export function consumers({ log }: ServiceContext): Consumers {
         await transition(tx, b, 'BOOKED_AND_SECURED', 'system', { note: 'Pelunasan diterima — advancing dibuka', set: { settlement_paid: inv.settlement } });
       }
     },
+    // DP tidak dibayar sampai jatuh tempo → booking dibatalkan (tanpa dana), tanggal dibebaskan.
+    'finance.payment.failed': async (e, tx) => {
+      const p = e.payload;
+      if (p.purpose !== 'BOOKING_DP') return;
+      const b = await loadBooking(tx, p.referenceId, true).catch(() => null);
+      if (!b || b.status !== 'SIGNED' || Number(b.dp_paid) > 0) return;
+      await transition(tx, b, 'CANCELLED_BY_PROMOTOR', 'system', { note: 'DP tidak dibayar sampai jatuh tempo — booking batal, tanggal dibebaskan' });
+    },
     'finance.escrow.released': async (e, tx) => {
       const b = await loadBooking(tx, e.payload.referenceId, true).catch(() => null);
       if (b?.status === 'COMPLETED') await transition(tx, b, 'SETTLED', 'system', { note: 'Dana dicairkan sesuai split' });

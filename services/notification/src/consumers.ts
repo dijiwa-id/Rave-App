@@ -1,9 +1,10 @@
-import type { Consumers, ServiceContext } from '@rave/service-kit';
+import { brandedEmail, sendEmail, type Consumers, type ServiceContext } from '@rave/service-kit';
 import { BOOKING_STATUS_LABEL, type BookingStatus } from '@rave/domain/booking';
 import { TICKET_REFUND_REASON_LABEL, type TicketRefundReason } from '@rave/domain';
 import { artistRecipients, notifyFollowers, notifyUsers, orgRecipients, rupiah } from './notify.js';
 
-export function consumers(_ctx: ServiceContext): Consumers {
+export function consumers(ctx: ServiceContext): Consumers {
+  const log = ctx.log;
   return {
     // ---- Read model ----
     'iam.org.created': async (e, tx) => {
@@ -64,6 +65,17 @@ export function consumers(_ctx: ServiceContext): Consumers {
         title: p.byParty === 'promotor' ? 'Counter-offer dari promotor' : 'Offer baru dari manajemen',
         body: `Fee diajukan: ${rupiah(p.fee)}`,
         link: p.byParty === 'promotor' ? `/studio/bookings/${p.bookingId}` : `/promotor/bookings/${p.bookingId}`,
+      });
+    },
+    'booking.contract.sign_requested': async (e, tx) => {
+      const p = e.payload;
+      const to = p.nextParty === 'promotor' ? await orgRecipients(tx, p.promotorOrgId) : await artistRecipients(tx, p.artistId);
+      const link = p.nextParty === 'promotor' ? `/promotor/bookings/${p.bookingId}` : `/studio/bookings/${p.bookingId}`;
+      await notifyUsers(tx, to, e.id, {
+        category: 'booking',
+        title: 'Giliran Anda menandatangani kontrak',
+        body: `${p.signedBy} sudah menandatangani kontrak${p.eventName ? ` "${p.eventName}"` : ''}. Tinjau PDF kontrak lalu tanda tangani dengan OTP.`,
+        link,
       });
     },
     'booking.status.changed': async (e, tx) => {
@@ -138,6 +150,39 @@ export function consumers(_ctx: ServiceContext): Consumers {
         body: `${rupiah(p.amount)} dikembalikan ke saldo wallet. Alasan: ${p.reason}`,
         link: '/studio/finance',
       });
+    },
+    'catalog.release.cover_curated': async (e, tx) => {
+      const p = e.payload;
+      await notifyUsers(tx, await artistRecipients(tx, p.artistId), e.id, {
+        category: 'release',
+        title: p.action === 'replaced' ? 'Sampul rilis diganti tim kurasi RAVE' : 'Tim kurasi meminta sampul baru',
+        body: p.action === 'replaced' ? `Sampul "${p.title}" diganti: ${p.reason}` : `Mohon unggah sampul baru untuk "${p.title}": ${p.reason}. Sampul saat ini tetap tayang sampai sampul baru disetujui.`,
+        link: '/studio/releases',
+      });
+    },
+    'catalog.release.cover_reviewed': async (e, tx) => {
+      const p = e.payload;
+      await notifyUsers(tx, await artistRecipients(tx, p.artistId), e.id, {
+        category: 'release',
+        title: p.approved ? 'Sampul rilis diperbarui' : 'Sampul rilis ditolak',
+        body: p.approved ? `Sampul baru "${p.title}" sudah tayang.` : `Sampul baru "${p.title}" tidak disetujui: ${p.reason}. Sampul lama tetap tayang.`,
+        link: '/studio/releases',
+      });
+    },
+    'catalog.split.invited': async (e) => {
+      const p = e.payload;
+      const url = `${(process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').replace(/\/$/, '')}/studio`;
+      const m = brandedEmail({
+        heading: 'Persetujuan pembagian hak lagu',
+        lines: [
+          `${p.invitedBy} mencantumkan Anda sebagai pemegang hak ${p.type === 'MASTER' ? 'master' : 'publishing'} sebesar ${p.pct}% untuk lagu "${p.trackTitle}" (${p.artistName}).`,
+          'Masuk ke RAVE dengan email ini, lalu setujui atau hubungi artis bila angkanya tidak sesuai. Rilis tidak dapat tayang sebelum semua pihak menyetujui.',
+        ],
+        cta: { label: 'Tinjau di RAVE', url },
+      });
+      await sendEmail({ to: p.email, subject: `Persetujuan split "${p.trackTitle}"`, ...m, tag: 'split-invite' }).catch((err: unknown) =>
+        log.warn({ split: p.splitId, err: (err as Error).message }, 'undangan split gagal dikirim'),
+      );
     },
     'iam.kyc.verified': async (e, tx) => {
       const p = e.payload;

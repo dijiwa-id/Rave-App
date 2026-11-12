@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, FileSignature, Lock, MessageSquare, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Copy, Download, ExternalLink, FileSignature, Lock, MessageSquare, ShieldCheck } from 'lucide-react';
 import HoldButton from '@/components/reactbits/HoldButton';
 import PeekRating from '@/components/reactbits/PeekRating';
 import { api, fmt } from '@/lib/api';
-import type { Booking, EscrowStatus } from '@/lib/types';
+import type { Booking, Contract, EscrowStatus } from '@/lib/types';
 import { Badge, Button, Card, cx, ErrorState, Field, Input, Modal, PageLoader, Textarea, toast } from '@/components/ui';
 import { BookingStatusBadge, bookingStatusLabel, categoryLabel, formatLabel, SimpleMarkdown } from './common';
 import { PayInvoice } from './PayInvoice';
@@ -19,6 +19,141 @@ const RATING_KEYS = {
   promotor: ['ketepatan_waktu', 'kualitas_penampilan', 'profesionalisme', 'kepatuhan_rider'],
   management: ['ketepatan_bayar', 'kualitas_produksi', 'hospitality', 'komunikasi'],
 } as const;
+
+/** Respons GET /v1/booking/contracts/:id/preview-url (signed URL privat berbatas waktu). */
+interface ContractPreview {
+  url: string;
+  expires_in: number;
+  kind: 'DRAFT' | 'FINAL';
+  sha256: string;
+  draft_sha256: string | null;
+  final_sha256: string | null;
+  final_pending?: boolean;
+  contract_no: string | null;
+  version: number;
+  status: string;
+  status_label: string;
+  verify_path: string;
+  filename: string;
+}
+
+/** Kontrak lama (templat booking-v1, tanpa PDF) — tetap ditampilkan sebagai teks. */
+const isLegacyContract = (k: Contract) => k.template_version === 'booking-v1' || ['SENT', 'SIGNED', 'VOID'].includes(k.status);
+
+/** Signed URL PDF kontrak. Di-cache < TTL agar tidak membuat jejak audit "view" berulang; final yang masih dirender dipoll. */
+function useContractPreview(k: Contract | null, enabled: boolean, kind: 'AUTO' | 'DRAFT' = 'AUTO') {
+  return useQuery({
+    queryKey: ['contract-preview', k?.id, kind, k?.status],
+    queryFn: () => api<ContractPreview>(`/v1/booking/contracts/${k!.id}/preview-url`, { query: { kind: kind === 'DRAFT' ? 'DRAFT' : undefined } }),
+    enabled: !!k && enabled && !!k.pdf_ready && !isLegacyContract(k),
+    staleTime: 4 * 60_000,
+    refetchInterval: (q) => (q.state.data?.final_pending ? 5_000 : 4 * 60_000),
+    retry: 1,
+  });
+}
+
+function ShaLine({ label, sha }: { label: string; sha: string }) {
+  const d = useDict('b2b').booking.contractDoc;
+  return (
+    <div className="min-w-0">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-b2b-muted">{label}</p>
+      <div className="mt-0.5 flex items-start gap-2">
+        <code className="min-w-0 flex-1 font-mono text-[11px] break-all">{sha}</code>
+        <button
+          type="button"
+          className="inline-flex shrink-0 items-center gap-1 text-xs text-b2b-muted hover:text-b2b-ink"
+          onClick={() => void navigator.clipboard?.writeText(sha).then(() => toast.success(d.copied), () => undefined)}
+          aria-label={`${d.copy} ${label}`}
+        >
+          <Copy className="size-3.5" /> {d.copy}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Penampil dokumen kontrak: PDF spk-v2 (draf/final) + hash yang ditandatangani + verifikasi publik; kontrak lama = teks. */
+function ContractDocument({ contract }: { contract: Contract }) {
+  const d = useDict('b2b').booking.contractDoc;
+  const [kind, setKind] = useState<'AUTO' | 'DRAFT'>('AUTO');
+  const p = useContractPreview(contract, true, kind);
+  // Penampil memakai URL pertama per jenis dokumen: penyegaran signed URL (untuk tombol unduh) tidak memuat ulang PDF yang sedang dibaca.
+  const [viewer, setViewer] = useState<{ kind: string; url: string } | null>(null);
+  useEffect(() => {
+    if (p.data && viewer?.kind !== p.data.kind) setViewer({ kind: p.data.kind, url: p.data.url });
+  }, [p.data, viewer?.kind]);
+  if (isLegacyContract(contract))
+    return (
+      <div className="space-y-3">
+        <div className="border border-b2b-line bg-b2b-bg p-3 text-sm">
+          <p className="font-semibold">{d.legacyTitle}</p>
+          <p className="mt-1 text-b2b-muted">{d.legacyNote}</p>
+          <div className="mt-2"><ShaLine label={d.legacySha} sha={contract.sha256} /></div>
+        </div>
+        <SimpleMarkdown text={contract.body_markdown} />
+      </div>
+    );
+  if (!contract.pdf_ready) return <Badge tone="amber">{d.notReady}</Badge>;
+  if (p.isLoading) return <p className="text-sm text-b2b-muted">{d.loading}</p>;
+  if (p.error || !p.data) return <ErrorState error={p.error} retry={() => p.refetch()} />;
+  const v = p.data;
+  const final = v.kind === 'FINAL';
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-b2b-line pb-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[.18em] text-b2b-muted">{d.title}</p>
+          <p className="mt-0.5 font-mono text-sm font-bold break-all">{v.contract_no ?? contract.contract_no ?? contract.id}</p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <Badge tone={final ? 'green' : 'amber'}>{final ? d.final : d.draft}</Badge>
+            <Badge>{d.version(String(v.version))}</Badge>
+            <span className="text-xs text-b2b-muted">{v.status_label}</span>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <a href={v.url} download={v.filename} className="inline-flex items-center gap-1.5 border border-b2b-ink px-3 py-1.5 text-sm font-semibold hover:bg-b2b-bg">
+            <Download className="size-4" /> {d.download}
+          </a>
+          <a href={v.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 border border-b2b-line px-3 py-1.5 text-sm hover:border-b2b-ink">
+            <ExternalLink className="size-4" /> {d.openPdf}
+          </a>
+          <a href={v.verify_path} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 border border-b2b-line px-3 py-1.5 text-sm hover:border-b2b-ink">
+            <ShieldCheck className="size-4" /> {d.verify}
+          </a>
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {final ? (
+          <>
+            <ShaLine label={d.shaFinalLabel} sha={v.sha256} />
+            {v.draft_sha256 && <ShaLine label={d.shaSignedDraftLabel} sha={v.draft_sha256} />}
+          </>
+        ) : (
+          <ShaLine label={d.shaDraftLabel} sha={v.sha256} />
+        )}
+      </div>
+      {v.final_pending && <Badge tone="blue">{d.finalPending}</Badge>}
+      {(final || kind === 'DRAFT') && v.final_sha256 && (
+        <button type="button" className="text-xs font-semibold underline underline-offset-2" onClick={() => setKind(kind === 'DRAFT' ? 'AUTO' : 'DRAFT')}>
+          {kind === 'DRAFT' ? d.viewFinal : d.viewSignedDraft}
+        </button>
+      )}
+      <object key={viewer?.url ?? v.url} data={viewer?.url ?? v.url} type="application/pdf" className="h-[70vh] min-h-[420px] w-full border border-b2b-line bg-white" aria-label={d.frameTitle(v.contract_no ?? '')}>
+        <div className="grid h-full place-items-center p-6 text-center text-sm text-b2b-muted">
+          <p>{d.fallback}</p>
+        </div>
+      </object>
+    </div>
+  );
+}
+
+/** Ringkas: dokumen & hash yang akan ditandatangani (ditampilkan tepat di atas tombol OTP). */
+function SigningTarget({ contract }: { contract: Contract }) {
+  const d = useDict('b2b').booking.contractDoc;
+  const p = useContractPreview(contract, true);
+  if (!p.data || p.data.kind !== 'DRAFT') return null;
+  return <p className="w-full border-l-2 border-b2b-ink bg-b2b-bg px-3 py-2 text-xs break-all">{d.signingNote(String(p.data.version), p.data.sha256)}</p>;
+}
 
 /** Tanda tangan elektronik: minta OTP ke email akun → masukkan kode → tanda tangan (urutan ditegakkan backend). */
 function SignOtp({ contractId, onDone }: { contractId: string; onDone: () => void }) {
@@ -193,7 +328,10 @@ export function BookingDetail({ id }: { id: string }) {
                   )
                 ) : turn === me ? (
                   b.contract?.pdf_ready ? (
-                    <SignOtp contractId={b.contract.id} onDone={() => { void q.refetch(); }} />
+                    <div className="flex w-full flex-col gap-3">
+                      <SigningTarget contract={b.contract} />
+                      <SignOtp contractId={b.contract.id} onDone={() => { void q.refetch(); }} />
+                    </div>
                   ) : (
                     <Badge tone="amber">{d.pdfRendering}</Badge>
                   )
@@ -347,7 +485,11 @@ export function BookingDetail({ id }: { id: string }) {
           {b.contract && (
             <Card title={d.contract}>
               <p className="text-xs text-b2b-muted">{d.templateVersion(String(b.contract.template_version))}</p>
-              <p className="mt-1 font-mono text-[11px] break-all text-b2b-muted">SHA-256 {b.contract.sha256}</p>
+              {isLegacyContract(b.contract) ? (
+                <p className="mt-1 font-mono text-[11px] break-all text-b2b-muted">SHA-256 {b.contract.sha256}</p>
+              ) : (
+                b.contract.contract_no && <p className="mt-1 font-mono text-[11px] break-all text-b2b-muted">{b.contract.contract_no} · v{b.contract.version ?? 1}</p>
+              )}
               <Button variant="outline-ink" size="sm" className="mt-3" onClick={() => setContractOpen(true)}>
                 {d.viewContract}
               </Button>
@@ -380,7 +522,7 @@ export function BookingDetail({ id }: { id: string }) {
       </div>
 
       <Modal open={contractOpen} onClose={() => setContractOpen(false)} title={d.contractModal} wide>
-        {b.contract ? <SimpleMarkdown text={b.contract.body_markdown} /> : <p>{d.noContract}</p>}
+        {b.contract ? <ContractDocument contract={b.contract} /> : <p>{d.noContract}</p>}
       </Modal>
 
       <Modal open={cancelOpen} onClose={() => { setCancelOpen(false); setCancelResult(null); }} title={d.cancelBooking}>

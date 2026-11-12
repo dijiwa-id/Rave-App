@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, ArrowRight, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow } from 'lucide-react';
+import { Activity, ArrowRight, Images, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow } from 'lucide-react';
 import { ADMIN_ROLE_LABEL, type AdminPermission, type AdminRole } from '@rave/domain/settings';
 import { can, isSuperAdmin, useAuth } from '@/stores/auth';
 import { B2BLayout, type B2BNavItem } from '@/layouts/B2BLayout';
@@ -34,6 +34,7 @@ export function AdminLayout() {
     { to: '/admin/platform', label: n.platformDashboard, icon: Gauge, end: true, section: n.platformSection, superOnly: true },
     { to: '/admin/platform/settings', label: n.settings, icon: SlidersHorizontal, superOnly: true },
     { to: '/admin/platform/landing', label: cmsTitle, icon: PanelsTopLeft, superOnly: true },
+    { to: '/admin/platform/artwork', label: n.artwork, icon: Images, superOnly: true },
     { to: '/admin/platform/roles', label: n.roles, icon: KeyRound, superOnly: true },
     { to: '/admin/platform/admins', label: n.admins, icon: ShieldCheck, superOnly: true },
     { to: '/admin/platform/storage', label: n.storage, icon: HardDrive, superOnly: true },
@@ -125,6 +126,78 @@ export function AdminDashboard() {
 
 type QcSignal = { title: string; isrc: string | null; duplicate_release_id: string; duplicate_title: string };
 
+/** Pengajuan ganti sampul untuk rilis yang sudah tayang — bandingkan sampul lama & baru. */
+function CoverQueue() {
+  const d = useDict('admin');
+  const t = d.qc;
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ['qc-covers'],
+    queryFn: () => api<{ data: { id: string; title: string; status: string; artist_name: string; current_cover: string | null; pending_cover: string; submitted_at: string }[] }>('/v1/admin/qc/covers'),
+  });
+  const [rejecting, setRejecting] = useState<string | null>(null);
+  const [why, setWhy] = useState('');
+  async function decide(id: string, approve: boolean) {
+    try {
+      await api(`/v1/admin/qc/covers/${id}/decision`, { body: approve ? { approve } : { approve, reason: why } });
+      toast.success(approve ? t.coverApproved : t.coverRejectedToast);
+      setRejecting(null);
+      setWhy('');
+      qc.invalidateQueries({ queryKey: ['qc-covers'] });
+    } catch (e) {
+      toast.error(e);
+    }
+  }
+  if (!q.data?.data.length) return null;
+  return (
+    <Card title={t.coverQueue(q.data.data.length)} className="mb-6">
+      <ul className="divide-y divide-b2b-line">
+        {q.data.data.map((c) => (
+          <li key={c.id} className="flex flex-wrap items-center gap-4 py-3">
+            <div className="flex items-center gap-2">
+              <figure className="text-center">
+                {c.current_cover ? <img src={c.current_cover} alt="" className="size-20 object-cover opacity-70" /> : <div className="size-20 bg-b2b-bg" />}
+                <figcaption className="mt-1 text-[10px] font-bold text-b2b-muted uppercase">{t.coverCurrent}</figcaption>
+              </figure>
+              <span className="text-b2b-muted">→</span>
+              <figure className="text-center">
+                <img src={c.pending_cover} alt="" className="size-20 object-cover ring-2 ring-amber-400" />
+                <figcaption className="mt-1 text-[10px] font-bold text-amber-700 uppercase">{t.coverNew}</figcaption>
+              </figure>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold">{c.title}</p>
+              <p className="text-xs text-b2b-muted">
+                {c.artist_name} · {c.status} · {fmt.dateTime(c.submitted_at)}
+              </p>
+            </div>
+            {rejecting === c.id ? (
+              <div className="flex w-full flex-wrap items-end gap-2 md:w-auto">
+                <Input value={why} onChange={(e) => setWhy(e.target.value)} placeholder={t.coverRejectReason} className="w-64" />
+                <Button size="sm" variant="danger" disabled={why.trim().length < 5} onClick={() => decide(c.id, false)}>
+                  {d.common.reject}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setRejecting(null)}>
+                  {d.common.cancel}
+                </Button>
+              </div>
+            ) : (
+              <span className="inline-flex gap-2">
+                <Button size="sm" variant="outline-ink" onClick={() => setRejecting(c.id)}>
+                  {d.common.reject}
+                </Button>
+                <Button size="sm" variant="ink" onClick={() => decide(c.id, true)}>
+                  {d.common.approve}
+                </Button>
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 export function AdminQc() {
   const d = useDict('admin');
   const t = d.qc;
@@ -169,6 +242,7 @@ export function AdminQc() {
           </Select>
         }
       />
+      <CoverQueue />
       <QueryState q={q} empty={q.data && !q.data.data.length ? <Empty title={t.empty} /> : undefined}>
         <div className="space-y-4">
           {q.data?.data.map((r) => (

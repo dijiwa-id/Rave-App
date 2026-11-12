@@ -14,6 +14,28 @@ import type { Me } from '@/lib/types';
 import { setting, useBranding, usePlatformConfig } from '@/lib/platform';
 import { applyPlatformDefault, initLocale, setLocale, useDict, useLocale } from '@/lib/i18n';
 
+/*
+ * Gambar gagal dimuat (host eksternal tidak terjangkau, berkas dihapus, URL salah) → tile bermerek RAVE, bukan ikon
+ * gambar rusak. Satu penangan global (fase capture) untuk semua <img>: sampul album, foto artis, poster, playlist.
+ */
+const IMG_FALLBACK =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='xMidYMid slice'><defs><radialGradient id='g' cx='72%' cy='28%' r='95%'><stop offset='0' stop-color='#7a3e91'/><stop offset='.55' stop-color='#2a1233'/><stop offset='1' stop-color='#181818'/></radialGradient></defs><rect width='100' height='100' fill='url(#g)'/><circle cx='50' cy='50' r='24' fill='none' stroke='#f4c21f' stroke-opacity='.5' stroke-width='1.2'/><circle cx='50' cy='50' r='15' fill='none' stroke='#ededed' stroke-opacity='.18' stroke-width='.8'/><circle cx='50' cy='50' r='3.5' fill='#f4c21f' fill-opacity='.85'/></svg>",
+  );
+document.addEventListener(
+  'error',
+  (e) => {
+    const t = e.target;
+    if (t instanceof HTMLImageElement && !t.dataset.raveFallback) {
+      t.dataset.raveFallback = '1';
+      t.removeAttribute('srcset');
+      t.src = IMG_FALLBACK;
+    }
+  },
+  true,
+);
+
 // Chunk lama hilang setelah deploy → muat ulang sekali (lihat juga RouteError).
 window.addEventListener('vite:preloadError', (e) => {
   e.preventDefault();

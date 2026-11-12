@@ -3,7 +3,7 @@ import { ARTIST_SUMMARY_COLS } from './queries.js';
 
 /** Publikasikan read model artis (booking/ticketing/library memakai event ini) & kembalikan data artis. */
 export async function publishArtist(tx: Client, artistId: string) {
-  const r = await tx.query(`SELECT ${ARTIST_SUMMARY_COLS}, a.bio, a.cover_url, a.followers, a.org_id FROM artists a WHERE a.id = $1`, [artistId]);
+  const r = await tx.query(`SELECT ${ARTIST_SUMMARY_COLS}, a.bio, a.cover_url, a.followers, a.org_id, a.links FROM artists a WHERE a.id = $1`, [artistId]);
   const a = r.rows[0];
   if (!a) return null;
   await publish(tx, 'catalog.artist.upserted', a.id, {

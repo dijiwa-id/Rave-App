@@ -53,13 +53,13 @@ const dict: Shape<typeof id> = {
     items: [
       { t: 'Free music', b: 'On-demand streaming for every listener — AAC 320 & Lossless on Premium.' },
       { t: 'Audience Match by city', b: 'Promoters see which cities actually listen to an artist.' },
-      { t: 'Funds safe in escrow', b: 'Deposits held by a BI-licensed partner, paid out D+1 after the show.' },
+      { t: 'Funds safe in escrow', b: 'Deposits held in escrow until the show is done, then credited to the artist wallet on D+1.' },
       { t: 'Contracts & OTP e-sign', b: 'Work orders generated automatically, signed in sequence, hash-verified.' },
     ],
     copy1: "RAVE is Indonesia's home for independent music — where listeners, musicians and promoters meet.",
     copy2: "More than streaming: every play becomes data that takes artists from the playlist to a stage in your city.",
     escrowSteps: ['Deposit', 'Held', 'Show'],
-    escrowPaid: 'Paid D+1',
+    escrowPaid: 'In wallet D+1',
   },
   spotlight: {
     eyebrow: 'The future of music is',
@@ -117,7 +117,7 @@ const dict: Shape<typeof id> = {
     steps: [
       { t: 'Listen', b: 'Fans stream for free. Every play of 30 seconds or more becomes market-demand data by city.' },
       { t: 'Book', b: 'Promoters find artists through Audience Match, negotiate in a structured flow, then sign an e-contract.' },
-      { t: 'Play', b: 'Fans buy tickets, the artist performs, funds are paid out D+1 after the show — split straight to the team.' },
+      { t: 'Play', b: 'Fans buy tickets, the artist performs, funds reach the wallet D+1 after the show — split across the team.' },
     ],
     step: (n) => `Step ${n}`,
     escrowTitle: 'Escrow fund flow',
@@ -127,7 +127,7 @@ const dict: Shape<typeof id> = {
       { t: 'Promoter pays deposit', s: 'Held by escrow partner' },
       { t: 'Balance due D-7', s: 'Booked & secured' },
       { t: 'Show complete', s: '24-hour dispute window' },
-      { t: 'Payout D+1', s: 'Automatic split + income tax' },
+      { t: 'In wallet D+1', s: 'Split per agreement + income tax' },
     ],
   },
   events: {
@@ -221,7 +221,7 @@ const dict: Shape<typeof id> = {
         kicker: 'For artists & management',
         title: 'From playlist to stage — one dashboard.',
         body: 'Your listener data becomes an EPK that sells, gig offers arrive neatly, and fees are paid out safely through escrow.',
-        perks: ['Dynamic EPK from real listener data', 'Clash-proof calendar & e-sign contracts', 'Fees paid D+1, auto-split to your team'],
+        perks: ['Dynamic EPK from real listener data', 'Clash-proof calendar & e-sign contracts', 'Fees credited D+1, split across your team'],
         cta: 'Your studio is waiting.',
       },
       promotor: {

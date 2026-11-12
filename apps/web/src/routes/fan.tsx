@@ -31,6 +31,8 @@ export const publicRoutes: RouteObject[] = [
   { path: '/berita', element: page(() => import('@/pages/company/News')) },
   { path: '/berita/:slug', element: page(() => import('@/pages/company/NewsArticlePage')) },
   { path: '/ketentuan', element: page(() => import('@/pages/company/Terms')) },
+  // Verifikasi publik kontrak (tujuan QR di setiap halaman PDF kontrak).
+  { path: '/verify/:contractId', element: page(() => import('@/pages/public/ContractVerify')) },
   { path: '/privasi', element: page(() => import('@/pages/company/Privacy')) },
   { path: '/hak-cipta', element: page(() => import('@/pages/company/Copyright')) },
   { path: '/cookie', element: page(() => import('@/pages/company/Cookies')) },

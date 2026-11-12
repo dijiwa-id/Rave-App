@@ -3,7 +3,8 @@ import { Link, useParams } from 'react-router-dom';
 import halftone from '@/assets/brand/paper-halftone.webp';
 import folded from '@/assets/brand/hero-poster-folded.webp';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BadgeCheck, CalendarDays, ExternalLink, MapPin } from 'lucide-react';
+import { BadgeCheck, CalendarDays, ExternalLink, Globe, MapPin } from 'lucide-react';
+import { LINK_ICON } from '@/components/studio/artist-profile';
 import { api, fmt } from '@/lib/api';
 import type { Artist, EventSummary, Paged } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
@@ -15,6 +16,20 @@ import { cx, PageLoader, toast } from '@/components/ui';
 import { LivePill, liveHref, useLiveSettings, useLiveStreams } from '@/components/live/common';
 import { useModule } from '@/components/ModuleGate';
 import { localeTag, useDict } from '@/lib/i18n';
+
+/** Nama merek platform (tidak diterjemahkan). */
+const PLATFORM_LABEL: Record<string, string> = {
+  instagram: 'Instagram',
+  tiktok: 'TikTok',
+  youtube: 'YouTube',
+  spotify: 'Spotify',
+  apple_music: 'Apple Music',
+  soundcloud: 'SoundCloud',
+  bandcamp: 'Bandcamp',
+  x: 'X',
+  facebook: 'Facebook',
+  website: 'Web',
+};
 
 /** Tepi bawah sobek header band. */
 const HEADER_TORN = 'polygon(0 0,100% 0,100% 94%,96% 97%,92% 93%,87% 98%,83% 94%,78% 99%,73% 95%,68% 98%,63% 93%,58% 97%,53% 94%,48% 99%,43% 95%,38% 98%,33% 93%,28% 97%,23% 94%,18% 99%,13% 95%,8% 98%,4% 94%,0 97%)';
@@ -116,6 +131,28 @@ export default function ArtistPage() {
         <Link to={`/promotor/artists/${a.id}`} className="inline-flex items-center gap-1.5 text-sm font-bold text-rave-muted hover:text-white">
           <ExternalLink className="size-4" /> {d.artist.epkBooking}
         </Link>
+        {(a.links?.length ?? 0) > 0 && (
+          <ul aria-label={d.artist.links} className="flex flex-wrap items-center gap-2">
+            {a.links!.map((l) => {
+              const Icon = LINK_ICON[l.platform] ?? Globe;
+              const label = PLATFORM_LABEL[l.platform] ?? l.platform;
+              return (
+                <li key={l.url}>
+                  <a
+                    href={l.url}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                    title={label}
+                    aria-label={d.artist.openLink(label)}
+                    className="grid size-9 place-items-center rounded-none border border-rave-muted/60 text-rave-muted transition hover:border-white hover:text-white"
+                  >
+                    <Icon className="size-4" aria-hidden />
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
       {live.data?.data[0] && (

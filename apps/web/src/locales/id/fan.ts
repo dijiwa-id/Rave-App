@@ -110,6 +110,8 @@ const fan = {
     discography: 'Diskografi',
     gigs: 'Jadwal manggung',
     noGigs: 'Belum ada jadwal manggung terdekat.',
+    links: 'Tautan artis',
+    openLink: (p: string) => `Buka ${p} (tab baru)`,
   },
   track: {
     plays: (n: string) => `${n} diputar`,

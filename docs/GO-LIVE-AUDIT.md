@@ -28,6 +28,17 @@ dan alur uang** yang bisa dikerjakan sekarang tanpa vendor, serta **klaim produk
 
 Sisa terkait (masuk batch berikutnya): klaim "cair H+1 / split otomatis / escrow mitra berizin BI" di landing & company menunggu kepastian vendor; paket Pelajar/Duo di halaman Premium belum ada billing; persetujuan artis sebelum dicantumkan di event; nama pemilik rekening belum dicocokkan dengan KYC.
 
+## Status Batch 2 (selesai 12 Nov 2026)
+| Item | Perbaikan |
+|---|---|
+| B5 | Penanda tangan melihat PDF spk-v2 yang sebenarnya (penampil + SHA-256 + unduh + verifikasi publik); PDF final dirender otomatis saat kontrak ACTIVE (tanpa watermark, Lembar Pengesahan berisi penanda tangan, metode, waktu, hash draf), deterministik; halaman `/verify/:id` publik; tata letak profesional (Pasal bernomor, tabel pihak & termin, blok tanda tangan, header logo & footer QR/halaman di setiap halaman) |
+| Legalitas | Grup pengaturan "Legalitas & Dokumen" (nama badan hukum, NIB, NPWP, alamat, tanda daftar PSE, PSrE, logo) — tampil di kontrak & halaman verifikasi hanya bila diisi; tidak ada logo instansi bawaan |
+| Status macet | Inquiry tanpa hold kedaluwarsa (`booking.inquiry_ttl_days`), kontrak tak ditandatangani kedaluwarsa, DP tidak dibayar → booking batal & kalender bebas, AT_RISK lewat hari-H → batal dengan DP hangus ke artis |
+| Notifikasi | Giliran tanda tangan kontrak dinotifikasi ke pihak berikutnya |
+| Split | Undangan persetujuan split dikirim ke email pihak; QC tidak dapat menyetujui rilis sebelum semua split disetujui |
+| Gambar | Data demo tidak lagi bergantung pada picsum.photos (sering tidak terjangkau → sampul rusak): karya demo dibuat lokal (`/v1/catalog/demo-art/...`), dan web menampilkan tile RAVE untuk gambar yang gagal dimuat |
+| Klaim | "Cair H+1 / split otomatis / berizin BI" diselaraskan: dana masuk wallet H+1 sesuai split, penarikan diproses setelah verifikasi; teks "tersertifikasi PSrE" diganti OTP (tidak tersertifikasi) |
+
 ## A. P0 — wajib sebelum publik (dapat dikerjakan sekarang, tanpa vendor)
 
 ### Keamanan & akses

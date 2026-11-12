@@ -15,10 +15,12 @@ export function available(): string[] {
 }
 
 /** Jalankan perintah tsx pada service; log JSON pino diringkas jadi satu baris berwarna. */
-export function run(name: string, args: string[] = [], idx = 0): ChildProcess {
+export function run(name: string, args: string[] = [], idx = 0, opts: { group?: boolean } = {}): ChildProcess {
   const cwd = name === 'web' ? join(ROOT, 'apps', 'web') : join(ROOT, 'services', name);
   const cmd = name === 'web' ? ['vite'] : ['tsx', 'src/index.ts', ...args];
-  const child = spawn('npx', cmd, { cwd, env: { ...process.env, FORCE_COLOR: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  // group: proses grup sendiri (npx → sh → tsx → node) agar killTree bisa menghentikan seluruh pohon sekaligus —
+  // SIGTERM ke npx saja meninggalkan node cucu yang masih memegang port.
+  const child = spawn('npx', cmd, { cwd, env: { ...process.env, FORCE_COLOR: '1' }, stdio: ['ignore', 'pipe', 'pipe'], detached: !!opts.group });
   const tag = `\x1b[${COLORS[idx % COLORS.length]}m${name.padEnd(12)}\x1b[0m`;
   const out = (buf: Buffer) => {
     for (const line of buf.toString().split('\n')) {
@@ -46,4 +48,18 @@ export function run(name: string, args: string[] = [], idx = 0): ChildProcess {
 
 export function waitExit(c: ChildProcess): Promise<number> {
   return new Promise((r) => c.on('exit', (code) => r(code ?? 0)));
+}
+
+/** Hentikan seluruh pohon proses milik child yang dijalankan dengan `run(..., { group: true })`. */
+export function killTree(c: ChildProcess, sig: NodeJS.Signals = 'SIGTERM') {
+  if (!c.pid) return;
+  try {
+    process.kill(-c.pid, sig);
+  } catch {
+    try {
+      c.kill(sig);
+    } catch {
+      /* sudah berhenti */
+    }
+  }
 }

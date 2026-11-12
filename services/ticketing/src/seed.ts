@@ -1,4 +1,4 @@
-import { SEED, seedId, seedSchedule } from '@rave/domain';
+import { SEED, seedId, seedSchedule, demoArt } from '@rave/domain';
 import { publish, type ServiceContext } from '@rave/service-kit';
 
 const A = Object.fromEntries(SEED.artists.map((a) => [a.slug, a.id]));
@@ -49,7 +49,7 @@ export async function seed({ db, log }: ServiceContext) {
         [
           id, e.slug, SEED.orgs.pensiPromotor, e.title,
           `${e.title} menghadirkan penampilan langsung dari artis independen terbaik. Dipersembahkan oleh Pensi Nusantara bersama RAVE.`,
-          e.city, e.venue, e.address, e.start, e.end, `https://picsum.photos/seed/rave-event-${e.n}/800/1000`, e.artists,
+          e.city, e.venue, e.address, e.start, e.end, demoArt(`event-${e.n}`, 800, 1000), e.artists,
           'Usia 17+. Tiket QR berputar di aplikasi RAVE — screenshot tidak berlaku. Dilarang membawa makanan & minuman dari luar.',
           SEED.users.promotor,
         ],

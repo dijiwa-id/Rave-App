@@ -18,7 +18,7 @@ const company: Shape<typeof id> = {
       alt: 'A musician performing on stage at the microphone',
       epk: 'EPK · listeners by city',
       feeTitle: 'Fee paid',
-      feeSub: 'D+1 after the show',
+      feeSub: 'in wallet D+1 after the show',
       contract: 'Contract · Campus Festival',
       signed: 'Signed · OTP',
     },
@@ -379,7 +379,7 @@ const company: Shape<typeof id> = {
       { title: 'Rate card', body: 'Set fee ranges by event type and city, so incoming inquiries already match your expectations.' },
       { title: 'Clash-proof calendar', body: 'One calendar for the artist and management. Booked dates lock automatically.' },
       { title: 'Electronic contracts', body: 'Structured negotiation through to a digital contract — cancellation and payment clauses spelled out from the start.' },
-      { title: 'Secure funds & automatic splits', body: 'Fees are held in escrow before the show, then released and split automatically across the whole team after the event.' },
+      { title: 'Secure funds & split per agreement', body: 'Fees are held in escrow before the show, then credited to every team member’s wallet according to the split after the event. Withdrawals to a bank account are processed after KYC verification.' },
       { title: 'Live streaming', body: 'Broadcast concerts or acoustic sessions from OBS or straight from the browser, free or ticketed.' },
     ],
     flowHeading: { kicker: 'Booking flow', title: 'From inquiry to payout.' },
@@ -549,7 +549,7 @@ const company: Shape<typeof id> = {
         faqs: [
           { q: 'How do I release a song?', a: 'Sign in as an Artist and open Artist Studio → New release. Upload the master, fill in metadata & rights splits, then submit it for review.' },
           { q: 'How are royalties calculated?', a: 'User-centric model: each listener’s subscription & ad revenue is shared among the artists they actually listen to. Royalty reports in Studio are being prepared and will be announced when available.' },
-          { q: 'When are gig fees paid out?', a: 'Booking funds are held in escrow and released D+1 after the show, split automatically across the team according to the split.' },
+          { q: 'When are gig fees paid out?', a: 'Booking funds are held in escrow and credited to the wallet D+1 after the show (if there is no dispute), split across the team. Withdrawals are requested from Artist Studio and processed by the RAVE finance team.' },
         ],
       },
       promotor: {
@@ -710,7 +710,7 @@ const company: Shape<typeof id> = {
       },
       booking: {
         title: 'Off-air booking',
-        p: 'Artist bookings are made through an electronic contract signed with an OTP. Deposits and balance payments are held in a licensed partner’s escrow account, then released on D+1 after the performance and split automatically according to the team’s split.',
+        p: 'Artist bookings are made through an electronic contract signed with an OTP. Deposits and balance payments are held in a licensed partner’s escrow account, then credited to the team’s wallets on D+1 after the performance (if there is no dispute) according to the agreed split; withdrawals to bank accounts are processed after verification.',
         items: [
           'Platform commission and service fees are shown in the contract before signing.',
           'Disputes must be filed no later than 24 hours after the event; funds are frozen during mediation by the RAVE team (max. 14 business days).',

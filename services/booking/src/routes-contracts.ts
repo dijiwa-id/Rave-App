@@ -31,17 +31,30 @@ async function loadForParty(req: FastifyRequest, db: Db, id: string) {
 
 export async function contractRoutes(app: FastifyInstance, { db }: ServiceContext) {
   // ---- Pratinjau: signed URL berbatas waktu (PDF disimpan privat) ----
+  // Default: PDF FINAL bila sudah dirender (kontrak ACTIVE), selain itu draf. `?kind=DRAFT` = draf yang ditandatangani.
   app.get('/v1/booking/contracts/:id/preview-url', { preHandler: requireAuth }, async (req) => {
     const { k, party } = await loadForParty(req, db, (req.params as any).id);
     if (!k.draft_key && !k.final_key) throw notFound('Dokumen PDF belum siap (sedang dirender), coba lagi sebentar');
     const ttl = settings.num('contract.file_url_ttl_sec');
-    const final = !!k.final_key;
+    const wantDraft = String((req.query as any)?.kind ?? '').toUpperCase() === 'DRAFT' && !!k.draft_key;
+    const final = !!k.final_key && !wantDraft;
     await contractAudit(db, { contractId: k.id, action: 'view', actorId: req.user!.sub, party, req, data: { kind: final ? 'final' : 'draft' } });
     return {
       url: `/v1/booking/contract-files/${signFileToken(final ? k.final_key : k.draft_key, ttl)}`,
       expires_in: ttl,
       kind: final ? 'FINAL' : 'DRAFT',
       sha256: final ? k.final_sha256 : k.draft_sha256,
+      // Hash yang ditandatangani para pihak = hash PDF draf; hash final = berkas final bertanda tangan.
+      draft_sha256: k.draft_sha256 ?? null,
+      final_sha256: k.final_sha256 ?? null,
+      final_pending: k.status === 'ACTIVE' && !k.final_key,
+      contract_id: k.id,
+      contract_no: k.contract_no ?? k.data_snapshot?.contract_no ?? null,
+      version: k.version,
+      status: k.status,
+      status_label: contractStatusLabel(k.status),
+      verify_path: `/verify/${k.id}`,
+      filename: `${String(k.contract_no ?? 'kontrak').replace(/[^A-Za-z0-9-]+/g, '-')}-v${k.version}-${final ? 'final' : 'draf'}.pdf`,
     };
   });
 
@@ -110,7 +123,7 @@ export async function contractRoutes(app: FastifyInstance, { db }: ServiceContex
     const k = await db.one(`SELECT * FROM contracts WHERE id=$1`, [id]);
     if (!k) throw notFound('Kontrak');
     const snap = k.data_snapshot;
-    const sigs = await db.query(`SELECT party, signed_at FROM signatures WHERE contract_id=$1 ORDER BY signed_at`, [id]);
+    const sigs = await db.query(`SELECT party, signed_at, method, doc_sha256 FROM signatures WHERE contract_id=$1 ORDER BY signed_at`, [id]);
     const final = !!k.final_sha256;
     return {
       contract_no: snap?.contract_no ?? null,
@@ -119,10 +132,14 @@ export async function contractRoutes(app: FastifyInstance, { db }: ServiceContex
       status_label: contractStatusLabel(k.status),
       document: final ? 'FINAL' : 'DRAFT',
       sha256: k.final_sha256 ?? k.draft_sha256 ?? k.sha256,
+      // Cocokkan hash berkas PDF cetakan: draf (yang ditandatangani) atau final (bertanda tangan + lembar pengesahan).
+      draft_sha256: k.draft_sha256 ?? null,
+      final_sha256: k.final_sha256 ?? null,
+      final_rendered_at: k.final_rendered_at ?? null,
       template_version: k.template_version,
       event: snap ? { name: snap.booking.event_name, date: snap.booking.event_date } : null,
       parties: snap ? { promotor: snap.promotor.legal_name, management: snap.management.legal_name, artist: snap.artist.stage_name } : null,
-      signatures: sigs.map((s) => ({ party: s.party, signed_at: s.signed_at })),
+      signatures: sigs.map((s) => ({ party: s.party, signed_at: s.signed_at, method: s.method, signed_sha256: s.doc_sha256 ?? null })),
       created_at: k.created_at,
       signed_at: k.signed_at,
     };

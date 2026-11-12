@@ -10,6 +10,7 @@ import {
 } from '@rave/domain';
 import { audit, conflict, forbidden, managedArtistIds, notFound, publish, unprocessable, type AuthUser, type Client, type Db } from '@rave/service-kit';
 import { commissionPolicy, isPromotorMember, type BookingRow } from './common.js';
+import { enqueueContractJob } from './contract-jobs.js';
 import { contractAudit } from './routes-contracts.js';
 import { loadBooking, managementOrgId, transition, freezeReleaseTerms } from './repo.js';
 import { getProvider, type SignContext, type SignatureRequest } from './signature-provider.js';
@@ -89,11 +90,20 @@ export async function verifySignOtp(db: Db, req: FastifyRequest, contractId: str
     await c.query(`UPDATE contracts SET status=$2, signed_at = CASE WHEN $2='ACTIVE' THEN now() ELSE signed_at END WHERE id=$1`, [contractId, next]);
     await contractAudit(c, { contractId, action: party === 'artist' ? 'ack' : 'sign', actorId: u.sub, party, req, data: { method: result.method, doc_sha256: cur.draft_sha256, status: next } });
     await audit(c, { actorId: u.sub, action: 'contract.sign', entity: 'contract', entityId: contractId, data: { party, sha256: cur.draft_sha256 }, ip: req.ip });
-    if (next === 'ACTIVE') await activateBooking(c, b, contractId, cur.draft_sha256);
-    else
+    if (next === 'ACTIVE') {
+      await activateBooking(c, b, contractId, cur.draft_sha256);
+      await enqueueContractJob(c, contractId, 'RENDER_FINAL'); // PDF final + lembar pengesahan (contract-jobs.ts)
+    } else {
       await c.query(`INSERT INTO booking_events (booking_id, from_status, to_status, actor, actor_id, note) VALUES ($1,$2,$2,$3,$4,$5)`, [
         b.id, b.status, party === 'artist' ? 'management' : party, u.sub, `Ditandatangani oleh ${PARTY_LABEL[party]} (${name}); menunggu ${PARTY_LABEL[expectedSigner(next)!]}`,
       ]);
+      // Beri tahu pihak berikutnya bahwa sekarang gilirannya menandatangani (audit go-live: sebelumnya tidak ada notifikasi).
+      const nextParty = expectedSigner(next);
+      if (nextParty)
+        await publish(c, 'booking.contract.sign_requested', b.id, {
+          bookingId: b.id, contractId, artistId: b.artist_id, promotorOrgId: b.promotor_org_id, signedBy: PARTY_LABEL[party], nextParty: nextParty as 'promotor' | 'management' | 'artist', eventName: b.event_name,
+        });
+    }
     return { contract_id: contractId, party, status: next, signed: true };
   });
 }

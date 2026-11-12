@@ -13,6 +13,22 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 - Kesiapan go-live: `npm run prod:preflight`, validasi secret saat boot, CORS terbatas di produksi, docs/GO-LIVE.md.
 
 ### Ditambahkan
+- **Profil artis (Artist Studio)** didesain ulang: pratinjau publik langsung, kartu kelengkapan profil, bar simpan
+  dengan peringatan perubahan belum tersimpan, cek ukuran foto/banner. **Tautan sosial & streaming** (Instagram,
+  TikTok, YouTube, Spotify, Apple Music, dll., https + host sesuai platform, maks. 8) tampil di halaman artis.
+  Foto/banner hanya dari unggahan Studio (URL eksternal ditolak). Migrasi catalog `009_artist_links`.
+- **Ganti sampul rilis dari Artist Studio** (rilis LIVE lewat tinjauan QC) dan **Kurasi Artwork Super Admin**
+  (ganti langsung / minta artis mengganti); grafik dasbor B2B dirapikan dengan palet RAVE tervalidasi.
+- **`./rave dev` dengan auto-reload**: memuat `~/.rave/env.sh` sendiri, Vite polling otomatis di `/mnt/*`, service
+  di-restart saat `src` berubah (`RAVE_WATCH`, `RAVE_WATCH_INTERVAL`); restart/stop mematikan seluruh pohon proses.
+
+### Diperbaiki
+- Gateway tidak meneruskan `/v1/admin/artwork` ke catalog (halaman Kurasi Artwork selalu 404).
+
+- **Batch 2 go-live (kontrak & alur B2B)**: penampil PDF kontrak spk-v2 + PDF final bertanda tangan dengan Lembar
+  Pengesahan & halaman verifikasi publik, tata letak kontrak profesional, pengaturan Legalitas & Dokumen, timeout status
+  booking yang macet, notifikasi giliran tanda tangan, undangan & persetujuan split wajib sebelum QC, karya demo lokal
+  (tanpa picsum) + fallback gambar di web.
 - **Batch 1 go-live (keamanan & uang, docs/GO-LIVE-AUDIT.md)**: admin back office tidak lagi bertindak sebagai OWNER
   semua org/wallet; master audio wajib URL bertanda tangan; refund booking lewat mesin refund; rekening bank terenkripsi
   & payout manual oleh Finance di produksi; KYC wajib untuk payout & event bertiket; pajak/komisi/split dari kontrak;

@@ -58,6 +58,7 @@ const platform = {
   roles: () => import('@/pages/admin/PlatformRoles'),
   landing: () => import('@/pages/admin/PlatformLanding'),
   integrations: () => import('@/pages/admin/PlatformIntegrations'),
+  artwork: () => import('@/pages/admin/PlatformArtwork'),
 };
 const access = (perms: AdminPermission[], children: RouteObject[]): RouteObject => ({ element: <RequireAdminAccess perms={perms} />, children });
 
@@ -146,6 +147,7 @@ export const b2bRoutes: RouteObject[] = [
                   { path: 'platform/storage', element: named(platform.storage, 'PlatformStorage') },
                   { path: 'platform/backups', element: named(platform.storage, 'PlatformBackups') },
                   { path: 'platform/integrations', element: named(platform.integrations, 'PlatformIntegrations') },
+                  { path: 'platform/artwork', element: named(platform.artwork, 'PlatformArtwork') },
                   { path: 'platform/bus', element: named(platform.main, 'PlatformBus') },
                   { path: 'platform/admins', element: named(platform.main, 'PlatformAdmins') },
                 ],

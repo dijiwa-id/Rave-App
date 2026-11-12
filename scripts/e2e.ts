@@ -163,6 +163,77 @@ console.log('\n▶ Master multi-format & rendisi (Artist Studio)');
   const done = await until(() => call(AT, 'GET', `/v1/studio/uploads/${init.data?.upload_id}`), (r) => ['done', 'failed'].includes(r.data?.transcode_status), 90_000, 1000);
   check('transcoding → AAC 64/160/320 + FLAC 24/96', done.data?.transcode_status === 'done' && Object.keys(done.data.renditions ?? {}).sort().join() === 'high,lossless,low,normal' && done.data.renditions.lossless?.codec_label === 'FLAC 24/96', done.data);
   const baseUrl = String(up.public_url).replace(/\.flac$/, '');
+  // Batch 2 — split hak wajib disetujui semua pihak sebelum QC meloloskan rilis; undangan dikirim ke pihak.
+  {
+    const png = pngSquare(400);
+    const art = await call(AT, 'POST', '/v1/studio/uploads', { kind: 'artwork', filename: 'e2e-cover.png', content_type: 'image/png', size: png.length });
+    const artPut = await fetch(BASE + art.data?.upload_url, { method: 'PUT', headers: { authorization: `Bearer ${AT}`, 'content-type': 'image/png' }, body: new Uint8Array(png) });
+    const artUp = await artPut.json();
+    const rel = await call(AT, 'POST', '/v1/studio/releases', {
+      artist_id: SEED.artists[0].id, title: `E2E Split ${Date.now()}`, type: 'SINGLE', genre: 'indie-pop', release_date: '2026-01-01', cover_url: artUp.public_url,
+      tracks: [{ title: 'E2E Split Track', audio_url: up.public_url, duration_ms: 3000 }],
+    });
+    const trackId = rel.data?.tracks?.[0]?.id;
+    const invitee = `e2e-split-${Date.now()}@rave.test`;
+    const sp = await call(AT, 'PUT', `/v1/studio/tracks/${trackId}/splits`, {
+      master: [{ party_name: 'Senja Kolektif', pct: 70 }, { party_name: 'Produser Tamu', email: invitee, pct: 30 }],
+      publishing: [{ party_name: 'Senja Kolektif', pct: 100 }],
+    });
+    const sub = await call(AT, 'POST', `/v1/studio/releases/${rel.data?.id}/submit`, {});
+    check('rilis dengan master unggahan & split diajukan (IN_REVIEW)', rel.status === 201 && sp.status === 200 && sub.data?.status === 'IN_REVIEW', [rel.status, rel.data?.detail, sp.status, sub.status, sub.data?.errors ?? sub.data?.detail]);
+    const qcList = await call(admin.access_token, 'GET', '/v1/admin/qc/releases');
+    const qcRow = qcList.data?.data?.find((r: any) => r.id === rel.data?.id);
+    check('QC melihat peringatan split belum disetujui', qcRow?.qc_warnings?.some((w: string) => /belum disetujui/.test(w)), qcRow?.qc_warnings);
+    const blocked = await call(admin.access_token, 'POST', `/v1/admin/qc/releases/${rel.data?.id}/decision`, { approve: true });
+    check('QC tidak bisa menyetujui rilis sebelum semua split disetujui (409)', blocked.status === 409, blocked.status);
+    const inv = await login(invitee);
+    const pend = await call(inv.access_token, 'GET', '/v1/studio/splits/pending');
+    const mineSplit = pend.data?.data?.find((x: any) => x.track_id === trackId);
+    const ok = mineSplit ? await call(inv.access_token, 'POST', `/v1/studio/splits/${mineSplit.id}/approve`, {}) : { status: 0 };
+    check('pihak yang diundang menyetujui bagiannya', ok.status === 200, [pend.status, ok.status]);
+    const approved = await call(admin.access_token, 'POST', `/v1/admin/qc/releases/${rel.data?.id}/decision`, { approve: true });
+    check('setelah semua split disetujui, QC menyetujui rilis', approved.status === 200 && ['LIVE', 'SCHEDULED'].includes(approved.data?.status), [approved.status, approved.data?.status]);
+    // Ganti sampul: rilis LIVE → menunggu QC (sampul lama tetap tayang); URL eksternal ditolak.
+    const ext = await call(AT, 'PUT', `/v1/studio/releases/${rel.data?.id}/cover`, { cover_url: 'https://example.com/x.jpg' });
+    check('sampul dari URL eksternal ditolak (422)', ext.status === 422, ext.status);
+    const png2 = pngSquare(500);
+    const art2 = await call(AT, 'POST', '/v1/studio/uploads', { kind: 'artwork', filename: 'e2e-cover-2.png', content_type: 'image/png', size: png2.length });
+    const art2Up = await (await fetch(BASE + art2.data?.upload_url, { method: 'PUT', headers: { authorization: `Bearer ${AT}`, 'content-type': 'image/png' }, body: new Uint8Array(png2) })).json();
+    const sub2 = await call(AT, 'PUT', `/v1/studio/releases/${rel.data?.id}/cover`, { cover_url: art2Up.public_url });
+    check('ganti sampul rilis LIVE → menunggu tinjauan, sampul lama tetap', sub2.status === 200 && sub2.data?.pending_cover?.url === art2Up.public_url && sub2.data?.cover_url === artUp.public_url, [sub2.status, sub2.data?.pending_cover, sub2.data?.cover_url]);
+    const pubRel = await call(null, 'GET', `/v1/catalog/releases/${rel.data?.id}`);
+    check('API publik tetap menampilkan sampul lama & tidak membocorkan pengajuan', pubRel.data?.cover_url === artUp.public_url && !('pending_cover' in (pubRel.data ?? {})), [pubRel.status, pubRel.data?.cover_url]);
+    const coverQ = await call(admin.access_token, 'GET', '/v1/admin/qc/covers');
+    check('antrean QC memuat pengajuan sampul', coverQ.data?.data?.some((c: any) => c.id === rel.data?.id && c.pending_cover === art2Up.public_url), coverQ.data?.data?.length);
+    const ok2 = await call(admin.access_token, 'POST', `/v1/admin/qc/covers/${rel.data?.id}/decision`, { approve: true });
+    const relAfter = await call(null, 'GET', `/v1/catalog/releases/${rel.data?.id}`);
+    check('QC menyetujui → sampul baru tayang', ok2.status === 200 && relAfter.data?.cover_url === art2Up.public_url, [ok2.status, relAfter.data?.cover_url]);
+    const notifC = await until(() => call(AT, 'GET', '/v1/notifications'), (r) => r.data?.data?.some((n: any) => n.title === 'Sampul rilis diperbarui'), 15000, 1000);
+    check('artis dinotifikasi hasil tinjauan sampul', notifC.data?.data?.some((n: any) => n.title === 'Sampul rilis diperbarui'));
+    (globalThis as any).__e2eCoverRelease = rel.data?.id;
+    // Profil artis (Artist Studio): foto/banner hanya unggahan Studio; tautan sosial divalidasi & tampil di API publik.
+    {
+      const aid = SEED.artists[0].id;
+      const before = await call(null, 'GET', `/v1/catalog/artists/${aid}`);
+      const extImg = await call(AT, 'PATCH', `/v1/studio/artists/${aid}`, { image_url: 'https://example.com/me.jpg' });
+      const extBanner = await call(AT, 'PATCH', `/v1/studio/artists/${aid}`, { cover_url: 'https://example.com/banner.jpg' });
+      check('profil: foto/banner dari URL eksternal ditolak (422)', extImg.status === 422 && extBanner.status === 422, [extImg.status, extBanner.status]);
+      const badHost = await call(AT, 'PATCH', `/v1/studio/artists/${aid}`, { links: [{ platform: 'instagram', url: 'https://evil.example.com/rave' }] });
+      const badHttp = await call(AT, 'PATCH', `/v1/studio/artists/${aid}`, { links: [{ platform: 'website', url: 'http://band.example.id' }] });
+      const dup = await call(AT, 'PATCH', `/v1/studio/artists/${aid}`, { links: [{ platform: 'spotify', url: 'https://open.spotify.com/artist/a' }, { platform: 'spotify', url: 'https://open.spotify.com/artist/b' }] });
+      check('profil: tautan host salah / http / platform ganda ditolak (422)', badHost.status === 422 && badHttp.status === 422 && dup.status === 422, [badHost.status, badHttp.status, dup.status]);
+      const okP = await call(AT, 'PATCH', `/v1/studio/artists/${aid}`, {
+        image_url: before.data?.image_url, // nilai lama (demo-art seed) tetap sah bila tidak diubah
+        links: [{ platform: 'instagram', url: 'instagram.com/senjakolektif' }, { platform: 'website', url: 'https://senja.example.id' }],
+      });
+      check('profil: tautan valid disimpan & dinormalisasi', okP.status === 200 && okP.data?.links?.[0]?.url === 'https://instagram.com/senjakolektif' && okP.data?.links?.length === 2, [okP.status, okP.data?.detail, okP.data?.links]);
+      const pubA = await call(null, 'GET', `/v1/catalog/artists/${aid}`);
+      check('profil: API publik artis mengembalikan tautan', pubA.data?.links?.length === 2 && pubA.data?.image_url === before.data?.image_url, pubA.data?.links);
+      const other = await call(AT, 'PATCH', `/v1/studio/artists/${SEED.artists[1].id}`, { bio: 'x' });
+      check('profil: tidak bisa mengubah artis lain (403/404)', [403, 404].includes(other.status), other.status);
+      await call(AT, 'PATCH', `/v1/studio/artists/${aid}`, { links: [] });
+    }
+  }
   const std = await fetch(`${BASE}${baseUrl}.normal.m4a`);
   check('rendisi standar dapat diputar (audio/mp4)', std.status === 200 && std.headers.get('content-type') === 'audio/mp4', std.status);
   const [hq, ll] = await Promise.all([fetch(`${BASE}${baseUrl}.high.m4a`), fetch(`${BASE}${baseUrl}.lossless.flac`)]);
@@ -371,12 +442,29 @@ const okSign = await call(P, 'POST', `/v1/booking/contracts/${KID}/sign/verify-o
 check('promotor menandatangani → menunggu manajemen', okSign.data?.status === 'AWAITING_MANAGEMENT_SIGN', okSign.data);
 const otpReuse = await call(P, 'POST', `/v1/booking/contracts/${KID}/sign/verify-otp`, { code: otp1.data.dev_code });
 check('OTP sekali pakai & tidak bisa tanda tangan dua kali (409/422)', [409, 422].includes(otpReuse.status), otpReuse.status);
+const turnNotif = await until(() => call(M, 'GET', '/v1/notifications'), (r) => r.data?.data?.some((n: any) => n.title === 'Giliran Anda menandatangani kontrak'), 15000, 1000);
+check('manajemen dinotifikasi giliran tanda tangan setelah promotor menandatangani', turnNotif.data?.data?.some((n: any) => n.title === 'Giliran Anda menandatangani kontrak'));
+const stillDraft = await call(P, 'GET', `/v1/booking/contracts/${KID}/preview-url`);
+check('sebelum ACTIVE pratinjau tetap DRAF', stillDraft.data?.kind === 'DRAFT', stillDraft.data?.kind);
 const otp2 = await call(M, 'POST', `/v1/booking/contracts/${KID}/sign/request-otp`, {});
 const signed = await (async () => {
   await call(M, 'POST', `/v1/booking/contracts/${KID}/sign/verify-otp`, { code: otp2.data.dev_code });
   return call(M, 'GET', `/v1/booking/bookings/${B}`);
 })();
 check('tanda tangan kedua pihak (SIGNED)', signed.data?.status === 'SIGNED' && signed.data?.contract?.status === 'ACTIVE', [signed.data?.status, signed.data?.contract?.status]);
+// ---- PDF final + lembar pengesahan + verifikasi publik (Batch 2, B5) ----
+const fin = await until(() => call(P, 'GET', `/v1/booking/contracts/${KID}/preview-url`), (r) => r.data?.kind === 'FINAL', 90000, 1500);
+check('PDF final dirender setelah semua pihak menandatangani', fin.data?.kind === 'FINAL' && /^[0-9a-f]{64}$/.test(fin.data?.sha256 ?? '') && fin.data?.final_sha256 === fin.data?.sha256 && fin.data?.draft_sha256 === prev.data?.sha256 && fin.data?.final_pending === false && fin.data?.verify_path === `/verify/${KID}`, fin.data);
+if (fin.data?.url) {
+  const fpdf = Buffer.from(await (await fetch(BASE + fin.data.url)).arrayBuffer());
+  check('unduhan PDF final cocok dengan final_sha256', fpdf.subarray(0, 5).toString() === '%PDF-' && (await import('node:crypto')).createHash('sha256').update(fpdf).digest('hex') === fin.data.final_sha256, fpdf.length);
+}
+const draftAgain = await call(P, 'GET', `/v1/booking/contracts/${KID}/preview-url?kind=DRAFT`);
+check('draf yang ditandatangani tetap bisa diunduh', draftAgain.data?.kind === 'DRAFT' && draftAgain.data?.sha256 === fin.data?.draft_sha256, draftAgain.data?.kind);
+const vfyFinal = await call(null, 'GET', `/v1/booking/verify/${KID}`);
+check('verifikasi publik menampilkan dokumen FINAL & hash tanda tangan', vfyFinal.data?.document === 'FINAL' && vfyFinal.data?.final_sha256 === fin.data?.final_sha256 && vfyFinal.data?.status === 'ACTIVE' && (vfyFinal.data?.signatures ?? []).every((x: any) => x.signed_sha256 === fin.data?.draft_sha256) && !JSON.stringify(vfyFinal.data).match(/nik|npwp|rekening|bank|\*{4}/i), vfyFinal.data);
+const auditLog = await call(M, 'GET', `/v1/booking/contracts/${KID}/audit-log`);
+check('audit kontrak mencatat finalize', auditLog.data?.data?.some((x: any) => x.action === 'finalize' && x.data?.final_sha256 === fin.data?.final_sha256), auditLog.data?.data?.map((x: any) => x.action));
 const sigAudit = await call(M, 'GET', `/v1/booking/contracts/${KID}/audit-log`);
 const acts = (sigAudit.data?.data ?? []).map((r: any) => r.action);
 check('audit kontrak mencatat generate, OTP, tanda tangan (IP & UA)', ['generate', 'sign.otp_requested', 'sign.otp_failed', 'sign'].every((a) => acts.includes(a)) && sigAudit.data.data.filter((r: any) => r.action === 'sign').every((r: any) => r.ip_address), acts);
@@ -1003,7 +1091,16 @@ console.log('\n▶ Akses per peran (fan, artis, manajer, promotor, admin, Super 
 // ---------------- Batch 1 go-live: hak admin, KYC, force majeure, refund booking, kode rilis ----------------
 {
   console.log('\n▶ Batch 1 go-live (audit 2026-11-12)');
-  const OPS = admin.access_token;
+  // Suite panjang: token akses (15 mnt) dari awal sudah kedaluwarsa → perbarui lewat refresh token (rotasi), tanpa OTP baru.
+  const renew = async (sess: { refresh_token: string }) => {
+    const r = await callOtpClass('POST', '/v1/auth/token', { grant_type: 'refresh_token', refresh_token: sess.refresh_token });
+    if (r.status !== 200) throw new Error(`refresh gagal: ${JSON.stringify(r.data)}`);
+    return r.data.access_token as string;
+  };
+  const P = await renew(promotor);
+  const M = await renew(manager);
+  const S = await renew(sa);
+  const OPS = await renew(admin);
   const artistOrg = SEED.artists[0].orgId;
   // A1 — admin back office bukan OWNER semua org/wallet
   const opsPayout = await call(OPS, 'POST', '/v1/finance/payouts', { party_id: artistOrg, amount: 100_000, bank_account: { bank: 'BCA', number: '5555666677', holder: 'Penyusup' } }, true);
@@ -1033,6 +1130,16 @@ console.log('\n▶ Akses per peran (fan, artis, manajer, promotor, admin, Super 
   if (ownKyc.data?.id) await call(S, 'POST', `/v1/admin/iam/kyc/${ownKyc.data.id}/decision`, { approve: false, reason: 'Uji e2e — dibersihkan' });
   const noReason = await call(S, 'POST', `/v1/admin/iam/kyc/${crypto.randomUUID()}/decision`, { approve: false });
   check('B3: penolakan KYC wajib beralasan / pengajuan harus ada', noReason.status === 400 || noReason.status === 404, noReason.status);
+
+  // Kurasi artwork — khusus Super Admin
+  const artOps = await call(OPS, 'GET', '/v1/admin/artwork');
+  const artS = await call(S, 'GET', '/v1/admin/artwork?filter=all');
+  check('kurasi artwork khusus Super Admin (OPS 403, Super Admin 200)', artOps.status === 403 && artS.status === 200 && artS.data?.data?.length > 0, [artOps.status, artS.status]);
+  const curRel = (globalThis as any).__e2eCoverRelease ?? artS.data?.data?.[0]?.id;
+  const reqChange = await call(S, 'POST', `/v1/admin/artwork/${curRel}/request-change`, { reason: 'Logo pihak ketiga terlihat di artwork' });
+  check('Super Admin meminta artis mengganti artwork', reqChange.status === 200, reqChange.status);
+  const badReplace = await call(S, 'POST', `/v1/admin/artwork/${curRel}/replace`, { cover_url: 'https://example.com/a.jpg', reason: 'uji URL eksternal' });
+  check('penggantian artwork dengan URL eksternal ditolak (400)', badReplace.status === 400, badReplace.status);
 
   // B7 — rilis tidak boleh memakai URL audio eksternal
   const ART = (await login(SEED.emails.artist)).access_token;

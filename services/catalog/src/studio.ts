@@ -31,6 +31,7 @@ import { imageSize, UPLOAD_DIR, uploadsBytes, wavInfo } from './storage.js';
 import { ffmpegPath, initialTranscodeStatus, probeAudio } from './audio.js';
 import { AUDIO_UPLOAD_TYPES, type AudioMeta } from '@rave/domain/audio';
 import { publishArtist } from './artists.js';
+import { normalizeArtistLinks } from './artist-links.js';
 import { formatIsrc, ISRC_MAX_DESIGNATION, normalizeIsrc, normalizeRegistrant, normalizeUpc } from './codes.js';
 
 const trackInput = z.object({
@@ -210,6 +211,34 @@ async function assertOwnAudioUpload(q: { query: (sql: string, params: unknown[])
   if (u.transcode_status === 'failed') throw unprocessable('Pengolahan audio file ini gagal — unggah ulang file master');
 }
 
+/** Info pengajuan sampul (khusus Studio/back office — tidak ditampilkan di API publik). */
+export async function withCoverReview(q: { query: (sql: string, params: unknown[]) => Promise<any> }, out: any) {
+  if (!out) return out;
+  const res = await q.query(`SELECT pending_cover_url, pending_cover_at, cover_review_note FROM releases WHERE id = $1`, [out.id]);
+  const r = Array.isArray(res) ? res[0] : res.rows[0];
+  out.pending_cover = r?.pending_cover_url ? { url: r.pending_cover_url, submitted_at: r.pending_cover_at } : null;
+  out.cover_review_note = r?.cover_review_note ?? null;
+  return out;
+}
+
+/**
+ * Sampul rilis harus artwork yang diunggah lewat Artist Studio oleh artis/pengelola rilis ini (bukan URL eksternal /
+ * berkas milik orang lain). `null` = hapus sampul (hanya draf).
+ */
+async function assertOwnArtworkUpload(
+  q: { query: (sql: string, params: unknown[]) => Promise<any> },
+  userId: string,
+  url: string | null | undefined,
+  message = 'Sampul harus berupa gambar (JPG/PNG) yang Anda unggah lewat Artist Studio',
+) {
+  if (url == null) return;
+  const name = storedNameOf(url);
+  const res = name ? await q.query(`SELECT user_id, kind, completed_at, purpose FROM uploads WHERE stored_name = $1`, [name]) : null;
+  const u = res ? (Array.isArray(res) ? res[0] : res.rows[0]) : null;
+  if (!u || u.kind !== 'artwork' || !u.completed_at || u.user_id !== userId || u.purpose === 'playlist')
+    throw unprocessable(message);
+}
+
 /** Durasi lagu kosong (0) diisi dari metadata master yang terbaca server — browser tidak bisa membaca durasi AIFF/ALAC dll. */
 async function syncAudioDurations(q: { query: (sql: string, params: unknown[]) => Promise<unknown> }, releaseId: string) {
   await q.query(
@@ -277,7 +306,7 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       for (const { id } of ids) {
         const r = await releaseFull(db, id);
         delete r.artist_id;
-        data.push(r);
+        data.push(await withCoverReview(db, r));
       }
       return { data };
     });
@@ -290,21 +319,35 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
           bio: z.string().max(5000).nullable().optional(),
           image_url: z.string().max(1000).nullable().optional(),
           cover_url: z.string().max(1000).nullable().optional(),
-          city: z.string().max(80).nullable().optional(),
-          genres: z.array(z.string().max(40)).max(10).optional(),
+          city: z.string().trim().max(80).nullable().optional(),
+          genres: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
+          links: z.array(z.object({ platform: z.string().max(30), url: z.string().max(1000) })).max(20).optional(),
         })
         .parse(req.body);
+      const patch: Record<string, unknown> = { ...b };
+      if (b.genres) patch.genres = [...new Set(b.genres)];
+      if (b.links) {
+        const r = normalizeArtistLinks(b.links);
+        if (!r.ok) throw unprocessable(r.error, { field: `links.${r.index}` });
+        patch.links = JSON.stringify(r.links);
+      }
       return db.tx(async (tx) => {
+        const cur = await tx.query(`SELECT image_url, cover_url FROM artists WHERE id = $1 FOR UPDATE`, [artistId]);
+        if (!cur.rowCount) throw notFound('Artis');
+        // Foto & banner hanya dari unggahan artwork Studio milik pengguna ini; nilai lama (mis. demo-art seed) tetap sah bila tidak diubah.
+        for (const k of ['image_url', 'cover_url'] as const) {
+          if (b[k] !== undefined && b[k] !== cur.rows[0][k])
+            await assertOwnArtworkUpload(tx, req.user!.sub, b[k], 'Foto profil & banner harus berupa gambar (JPG/PNG) yang Anda unggah lewat Artist Studio');
+        }
         const sets: string[] = [];
         const vals: unknown[] = [];
-        for (const [k, v] of Object.entries(b)) {
+        for (const [k, v] of Object.entries(patch)) {
           vals.push(v);
-          sets.push(`${k} = $${vals.length}`);
+          sets.push(k === 'links' ? `links = $${vals.length}::jsonb` : `${k} = $${vals.length}`);
         }
         if (!sets.length) throw badRequest('Tidak ada perubahan');
         vals.push(artistId);
-        const r = await tx.query(`UPDATE artists SET ${sets.join(', ')}, updated_at = now() WHERE id = $${vals.length} RETURNING id`, vals);
-        if (!r.rowCount) throw notFound('Artis');
+        await tx.query(`UPDATE artists SET ${sets.join(', ')}, updated_at = now() WHERE id = $${vals.length}`, vals);
         await audit(tx, { actorId: req.user!.sub, action: 'artist.update', entity: 'artist', entityId: artistId, data: b, ip: req.ip });
         return publishArtist(tx, artistId);
       });
@@ -313,6 +356,7 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
     s.post('/v1/studio/releases', async (req, reply) => {
       const b = releaseInput.parse(req.body);
       assertArtist(req, b.artist_id);
+      await assertOwnArtworkUpload(db, req.user!.sub, b.cover_url);
       return idempotent(
         db,
         req,
@@ -342,6 +386,7 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       const r = await loadRelease(req, id);
       if (!EDITABLE.includes(r.status)) throw conflict(`Rilis berstatus ${r.status} tidak dapat diubah`);
       const b = releaseInput.omit({ artist_id: true, tracks: true }).partial().parse(req.body);
+      if (b.cover_url !== undefined && b.cover_url !== r.cover_url) await assertOwnArtworkUpload(db, req.user!.sub, b.cover_url);
       return db.tx(async (tx) => {
         const sets: string[] = [];
         const vals: unknown[] = [];
@@ -357,6 +402,47 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
         delete out.artist_id;
         return out;
       });
+    });
+
+    /**
+     * Ganti sampul rilis (semua status kecuali diturunkan). DRAFT/REJECTED/IN_REVIEW → langsung diganti.
+     * SCHEDULED/LIVE → masuk antrean tinjauan QC; sampul lama tetap tayang sampai disetujui (mencegah penukaran artwork
+     * setelah lolos QC). Mengajukan lagi menggantikan pengajuan sebelumnya.
+     */
+    s.put('/v1/studio/releases/:id/cover', async (req) => {
+      const { id } = req.params as { id: string };
+      const r = await loadRelease(req, id);
+      const { cover_url } = z.object({ cover_url: z.string().max(1000) }).parse(req.body);
+      if (r.status === 'TAKEN_DOWN') throw conflict('Rilis yang diturunkan tidak dapat diubah');
+      await assertOwnArtworkUpload(db, req.user!.sub, cover_url);
+      return db.tx(async (tx) => {
+        const live = r.status === 'LIVE' || r.status === 'SCHEDULED';
+        if (live) {
+          await tx.query(
+            `UPDATE releases SET pending_cover_url = $2, pending_cover_at = now(), pending_cover_by = $3, cover_review_note = NULL, updated_at = now() WHERE id = $1`,
+            [id, cover_url, req.user!.sub],
+          );
+          await publish(tx, 'catalog.release.cover_submitted', id, { releaseId: id, artistId: r.artist_id, title: r.title });
+        } else {
+          await tx.query(`UPDATE releases SET cover_url = $2, pending_cover_url = NULL, pending_cover_at = NULL, pending_cover_by = NULL, updated_at = now() WHERE id = $1`, [id, cover_url]);
+        }
+        await audit(tx, { actorId: req.user!.sub, action: live ? 'release.cover_submit' : 'release.cover_update', entity: 'release', entityId: id, data: { cover_url }, ip: req.ip });
+        const out = await releaseFull(tx, id);
+        delete out.artist_id;
+        return withCoverReview(tx, out);
+      });
+    });
+
+    /** Batalkan pengajuan sampul yang belum ditinjau. */
+    s.delete('/v1/studio/releases/:id/cover/pending', async (req) => {
+      const { id } = req.params as { id: string };
+      const r = await loadRelease(req, id);
+      if (!r.pending_cover_url) throw conflict('Tidak ada pengajuan sampul yang menunggu');
+      await db.query(`UPDATE releases SET pending_cover_url = NULL, pending_cover_at = NULL, pending_cover_by = NULL, updated_at = now() WHERE id = $1`, [id]);
+      await audit(db, { actorId: req.user!.sub, action: 'release.cover_withdraw', entity: 'release', entityId: id, ip: req.ip });
+      const out = await releaseFull(db, id);
+      delete out.artist_id;
+      return withCoverReview(db, out);
     });
 
     // Aditif: kelola lagu dalam rilis.
@@ -636,10 +722,18 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
           for (const x of list) {
             // Pihak tanpa email = org artis/pengelola sendiri → otomatis disetujui oleh pengubah. Lainnya menunggu persetujuan.
             const self = !x.email || x.email.toLowerCase() === req.user!.email?.toLowerCase();
+            const splitId = uuidv7();
             await tx.query(
               `INSERT INTO rights_shares (id, track_id, type, party_name, email, pct, invite_token, approved_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-              [uuidv7(), id, type, x.party_name, x.email ?? null, x.pct, self ? null : uuidv7(), self ? new Date() : null],
+              [splitId, id, type, x.party_name, x.email ?? null, x.pct, self ? null : uuidv7(), self ? new Date() : null],
             );
+            // Undangan persetujuan dikirim ke email pihak (sebelumnya token dibuat tapi tidak pernah dikirim — audit go-live).
+            if (!self && x.email) {
+              const info = (await tx.query(`SELECT t.title, a.name FROM tracks t JOIN artists a ON a.id = t.artist_id WHERE t.id = $1`, [id])).rows[0];
+              await publish(tx, 'catalog.split.invited', splitId, {
+                splitId, trackId: id, trackTitle: info?.title ?? '', artistName: info?.name ?? '', email: x.email.toLowerCase(), type, pct: x.pct, invitedBy: req.user!.name ?? req.user!.email ?? 'Artist Studio',
+              });
+            }
           }
         }
         await audit(tx, { actorId: req.user!.sub, action: 'splits.update', entity: 'track', entityId: id, data: b, ip: req.ip });

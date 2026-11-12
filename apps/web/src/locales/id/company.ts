@@ -16,7 +16,7 @@ const company = {
       alt: 'Musisi tampil di panggung dengan mikrofon',
       epk: 'EPK · pendengar per kota',
       feeTitle: 'Fee cair',
-      feeSub: 'H+1 setelah show',
+      feeSub: 'masuk wallet H+1 setelah show',
       contract: 'Kontrak · Pensi Kampus',
       signed: 'Ditandatangani · OTP',
     },
@@ -377,7 +377,7 @@ const company = {
       { title: 'Rate card', body: 'Tentukan kisaran fee per jenis acara dan kota, agar inquiry yang masuk sudah sesuai harapanmu.' },
       { title: 'Kalender anti-bentrok', body: 'Satu kalender untuk artis dan manajemen. Tanggal yang sudah ter-booking otomatis terkunci.' },
       { title: 'Kontrak elektronik', body: 'Negosiasi terstruktur hingga kontrak digital — klausul pembatalan dan pembayaran tertulis jelas sejak awal.' },
-      { title: 'Dana aman & split otomatis', body: 'Fee ditahan di rekening bersama sebelum show, lalu cair dan terbagi otomatis ke seluruh tim setelah acara.' },
+      { title: 'Dana aman & terbagi sesuai split', body: 'Fee ditahan escrow sebelum show, lalu masuk saldo wallet seluruh tim sesuai split setelah acara. Penarikan ke rekening diproses setelah verifikasi KYC.' },
       { title: 'Live streaming', body: 'Siarkan konser atau sesi akustik dari OBS atau langsung dari browser, gratis maupun bertiket.' },
     ],
     flowHeading: { kicker: 'Alur booking', title: 'Dari inquiry sampai dana cair.' },
@@ -547,7 +547,7 @@ const company = {
         faqs: [
           { q: 'Bagaimana merilis lagu?', a: 'Masuk sebagai Artis, buka Artist Studio → Rilis baru. Unggah master, isi metadata & split hak, lalu ajukan untuk ditinjau.' },
           { q: 'Bagaimana royalti dihitung?', a: 'Model user-centric: langganan & iklan tiap pendengar dibagi ke artis yang benar-benar ia dengarkan. Laporan royalti di Studio sedang disiapkan dan akan diumumkan saat tersedia.' },
-          { q: 'Kapan fee manggung cair?', a: 'Dana booking ditahan di rekening bersama dan cair H+1 setelah show selesai, terbagi otomatis ke tim sesuai split.' },
+          { q: 'Kapan fee manggung cair?', a: 'Dana booking ditahan escrow dan masuk saldo wallet H+1 setelah show selesai (bila tidak ada dispute), terbagi ke tim sesuai split. Penarikan ke rekening diajukan dari Artist Studio dan diproses tim finance RAVE.' },
         ],
       },
       promotor: {
@@ -708,7 +708,7 @@ const company = {
       },
       booking: {
         title: 'Booking off-air',
-        p: 'Booking artis dilakukan lewat kontrak elektronik yang ditandatangani dengan OTP. Dana DP dan pelunasan ditahan di rekening bersama (escrow) mitra berizin, lalu dicairkan H+1 setelah pertunjukan selesai dan terbagi otomatis sesuai split tim.',
+        p: 'Booking artis dilakukan lewat kontrak elektronik yang ditandatangani dengan OTP. Dana DP dan pelunasan ditahan di rekening bersama (escrow) mitra berizin, lalu masuk saldo wallet tim H+1 setelah pertunjukan selesai (bila tidak ada sengketa) sesuai split yang disepakati; penarikan ke rekening diproses setelah verifikasi.',
         items: [
           'Komisi platform dan service fee ditampilkan di kontrak sebelum ditandatangani.',
           'Sengketa diajukan paling lambat 24 jam setelah acara; dana dibekukan selama mediasi tim RAVE (maks. 14 hari kerja).',

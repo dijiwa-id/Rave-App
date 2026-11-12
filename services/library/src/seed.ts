@@ -1,11 +1,11 @@
-import { SEED, SEED_RELEASES, SEED_TRACKS, seedId } from '@rave/domain';
+import { SEED, SEED_RELEASES, SEED_TRACKS, seedId, demoArt } from '@rave/domain';
 import type { ServiceContext } from '@rave/service-kit';
 
 const byArtist = (slug: string) => {
   const a = SEED.artists.find((x) => x.slug === slug)!;
   return SEED_TRACKS.filter((t) => t.artistId === a.id).map((t) => t.id);
 };
-const cover = (s: string) => `https://picsum.photos/seed/rave-pl-${s}/640/640`;
+const cover = (s: string) => demoArt(`pl-${s}`, 640);
 const pick = (arr: string[], n: number, off = 0) => Array.from({ length: Math.min(n, arr.length) }, (_, i) => arr[(i + off) % arr.length]);
 const all = SEED_TRACKS.map((t) => t.id);
 const singles = SEED_RELEASES.filter((r) => r.type === 'SINGLE').flatMap((r) => r.tracks.map((t) => t.id));

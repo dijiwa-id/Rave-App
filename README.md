@@ -80,7 +80,7 @@ npm install
 cp .env.example .env          # ubah RAVE_PGPORT + DATABASE_URL bila port 55432 bentrok
 
 # 3. Jalankan semuanya: Postgres → migrasi → seed demo (bila DB kosong) → 11 service + gateway + web
-./rave start
+./rave dev                    # foreground + auto-reload (Ctrl+C untuk berhenti); atau `./rave start` di background
 
 # 4. Cek kesehatan, lalu buka http://localhost:5173 dan login dengan akun demo (lihat di bawah)
 ./rave status
@@ -96,24 +96,33 @@ npm run dev           # 11 service + gateway (:8080) + web (:5173) di foreground
 
 **Perintah harian (`./rave`, alias `scripts/rave.sh`)**
 
+`./rave` memuat `~/.rave/env.sh` (Node & PostgreSQL user-local) dengan sendirinya — tidak perlu `source` manual.
+
 ```bash
-./rave start            # jalankan di background (seed otomatis bila DB kosong)
+./rave dev              # foreground, log berwarna di terminal, auto-reload web + service (Ctrl+C untuk berhenti)
+./rave start            # sama, di background (seed otomatis bila DB kosong)
 ./rave status           # cek Postgres, 11 service, gateway, web
 ./rave logs             # ikuti log (~/.rave/logs/rave.log)
 ./rave stop             # hentikan service + web (`stop --all` ikut mematikan Postgres)
 ./rave restart          # stop lalu start
-./rave dev              # seperti start, tetapi di foreground (Ctrl+C untuk berhenti)
-./rave restart-web      # restart Vite saja — di /mnt/* Vite tidak hot-reload
-./rave restart-svc iam  # restart satu service setelah mengedit kodenya
+./rave restart-web      # restart Vite saja (jarang perlu — lihat auto-reload)
+./rave restart-svc iam  # restart satu service secara manual
 ./rave seed             # seed ulang data demo (idempoten)
 ```
 
 `npm start`, `npm stop`, `npm run status` dan `npm run logs` memanggil perintah yang sama.
 Reset total DB dev: `./rave stop --all && npm run db:reset && ./rave start`.
 
+**Auto-reload** (aktif pada `./rave dev` dan `./rave start`):
+
+| Bagian | Cara kerja | Pengaturan |
+|---|---|---|
+| Web (Vite) | HMR; di `/mnt/*` (drvfs WSL, tanpa inotify) otomatis memakai polling 500 ms | `CHOKIDAR_USEPOLLING=false` untuk mematikan polling |
+| Service + gateway | `services/<nama>/src` atau `migrations` berubah → service itu di-restart; `packages/*/src` berubah → semua service di-restart | `RAVE_WATCH=0` mematikan, `RAVE_WATCH_INTERVAL=3000` memperlambat polling (ms) |
+
 **Alur kerja pengembangan**
 
-1. Ubah kode → service yang diedit: `./rave restart-svc <nama>`; web di `/mnt/*`: `./rave restart-web`.
+1. Ubah kode → simpan; web & service yang terdampak memuat ulang sendiri (lihat **Auto-reload**).
 2. Migrasi baru di service → `npm run migrate` (juga otomatis saat service start).
 3. Sebelum commit: `npm run typecheck && npm test`, lalu `npm run e2e:isolated` (lihat [Pengujian](#pengujian)).
 
@@ -198,8 +207,9 @@ Detail topologi, backup & pemulihan, dan skala: [`docs/DEPLOYMENT.md`](docs/DEPL
 | Gejala | Penyebab & solusi |
 |---|---|
 | `port 55432 sudah dipakai proses lain` | Set `RAVE_PGPORT` dan `DATABASE_URL` di `.env` ke port lain. |
-| `PostgreSQL tidak ditemukan` | Set `PGBIN` ke folder berisi `initdb`/`pg_ctl`. |
-| Perubahan web tidak muncul (proyek di `/mnt/*`) | `./rave restart-web` — file watcher tidak jalan di NTFS. |
+| `PostgreSQL tidak ditemukan` | Pastikan `~/.rave/env.sh` ada (dimuat otomatis oleh `./rave`) atau set `PGBIN` ke folder berisi `initdb`/`pg_ctl`. |
+| Perubahan web/service tidak muncul | Pastikan dijalankan lewat `./rave dev`/`./rave start` (polling aktif otomatis di `/mnt/*`); darurat: `./rave restart-web` / `./rave restart-svc <nama>`. |
+| CPU tinggi saat idle | Polling di drvfs — naikkan `RAVE_WATCH_INTERVAL` atau set `RAVE_WATCH=0`. |
 | Login ditolak setelah banyak percobaan | Batas OTP 5 permintaan / 15 menit per email; tunggu atau hapus `iam.otp_codes` di DB dev. |
 | PDF kontrak gagal dibuat | Chromium tidak ditemukan — pasang Chromium atau set `CHROMIUM_PATH`. |
 | `prod:preflight` gagal | Ikuti pesan BLOCKER: secret kosong/terlalu pendek/sama dengan nilai dev, password DB lemah, `PUBLIC_WEB_URL` belum diisi. |

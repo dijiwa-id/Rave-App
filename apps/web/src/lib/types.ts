@@ -111,10 +111,21 @@ export interface Release extends ReleaseSummary {
   explicit: boolean;
   tracks: Track[];
   qc_reason: string | null;
+  /** Studio: sampul baru yang menunggu tinjauan QC (rilis LIVE/SCHEDULED). */
+  pending_cover?: { url: string; submitted_at: string } | null;
+  /** Studio: alasan penolakan pengajuan sampul terakhir. */
+  cover_review_note?: string | null;
+}
+export type ArtistLinkPlatform = 'instagram' | 'tiktok' | 'youtube' | 'spotify' | 'apple_music' | 'soundcloud' | 'bandcamp' | 'x' | 'facebook' | 'website';
+export interface ArtistLink {
+  platform: ArtistLinkPlatform;
+  url: string;
 }
 export interface Artist extends ArtistSummary {
   bio: string | null;
   cover_url: string | null;
+  /** Tautan sosial/streaming (https) — kosong untuk artis lama. */
+  links?: ArtistLink[];
   followers: number;
   top_tracks: Track[];
   releases: ReleaseSummary[];

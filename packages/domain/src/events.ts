@@ -14,6 +14,12 @@ export interface DomainEvents {
   'catalog.release.submitted': { releaseId: string; artistId: string; title: string };
   'catalog.release.published': { releaseId: string; artistId: string; title: string; trackIds: string[] };
   'catalog.release.rejected': { releaseId: string; artistId: string; reason: string };
+  // Ganti sampul rilis yang sudah tayang: diajukan artis → ditinjau QC.
+  'catalog.release.cover_submitted': { releaseId: string; artistId: string; title: string };
+  'catalog.release.cover_curated': { releaseId: string; artistId: string; title: string; action: 'replaced' | 'change_requested'; reason: string };
+  'catalog.release.cover_reviewed': { releaseId: string; artistId: string; title: string; approved: boolean; reason: string | null };
+  // Undangan persetujuan split hak (REQ-STU-02): dikirim ke email pihak yang diundang.
+  'catalog.split.invited': { splitId: string; trackId: string; trackTitle: string; artistName: string; email: string; type: 'MASTER' | 'PUBLISHING'; pct: number; invitedBy: string };
   'catalog.artist.upserted': { artistId: string; name: string; slug: string; city: string | null; genres: string[]; orgId: string | null; imageUrl: string | null };
 
   // Library
@@ -29,6 +35,8 @@ export interface DomainEvents {
   'booking.inquiry.created': { bookingId: string; artistId: string; promotorOrgId: string; eventDate: string; city: string; budget: number };
   'booking.offer.sent': { bookingId: string; artistId: string; promotorOrgId: string; byParty: 'promotor' | 'management'; fee: number };
   'booking.status.changed': { bookingId: string; artistId: string; promotorOrgId: string; from: string; to: string; fee: number; eventDate: string };
+  // Satu pihak sudah menandatangani; giliran pihak berikutnya (notifikasi agar kontrak tidak menggantung).
+  'booking.contract.sign_requested': { bookingId: string; contractId: string; artistId: string; promotorOrgId: string; signedBy: string; nextParty: 'promotor' | 'management' | 'artist'; eventName?: string };
   'booking.contract.signed': {
     bookingId: string; contractId: string; fee: number; dpAmount: number; settlementAmount: number; serviceFee: number;
     promotorOrgId: string; artistId: string; managementOrgId: string | null;

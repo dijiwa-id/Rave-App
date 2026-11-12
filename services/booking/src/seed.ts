@@ -1,4 +1,4 @@
-import { SEED, SEED_ARTIST_IMAGE, seedId } from '@rave/domain';
+import { SEED, SEED_ARTIST_IMAGE, seedId, demoArt } from '@rave/domain';
 import { encryptField, maskField, publish, uuidv7, type Client, type ServiceContext } from '@rave/service-kit';
 import { renderContract, TEMPLATE_VERSION } from './contract.js';
 import type { BookingRow } from './common.js';
@@ -83,7 +83,7 @@ export async function seed({ db, log }: ServiceContext) {
         JSON.stringify({
           bio_short: `${a.name} — ${a.genres.join(' / ')} dari ${a.city}.`,
           bio_long: `${a.name} adalah unit ${a.genres[0]} asal ${a.city} yang tumbuh dari panggung kampus dan kolektif lokal. Dikenal lewat penampilan live yang hangat dan lirik berbahasa Indonesia yang dekat dengan keseharian, mereka rutin mengisi pensi, festival kampus, dan showcase di berbagai kota.`,
-          press_photos: [1, 2, 3].map((n) => `https://picsum.photos/seed/rave-press-${a.slug}-${n}/1200/800`),
+          press_photos: [1, 2, 3].map((n) => demoArt(`press-${a.slug}-${n}`, 1200, 800)),
           videos: [],
           press_quotes: [
             { quote: 'Salah satu penampil paling konsisten di sirkuit panggung kampus tahun ini.', source: 'Catatan Panggung' },

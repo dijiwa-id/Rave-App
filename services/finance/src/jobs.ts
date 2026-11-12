@@ -73,6 +73,12 @@ export const expiryJob: Job = {
   everyMs: 30_000,
   async run({ db }) {
     await db.query(`UPDATE invoices SET status='EXPIRED' WHERE status='PENDING' AND purpose='TICKET_ORDER' AND due_at < now()`);
+    // DP booking tidak dibayar sampai jatuh tempo → EXPIRED + event agar booking dibatalkan & kalender dibebaskan.
+    await db.tx(async (c) => {
+      const rows = (await c.query(`UPDATE invoices SET status='EXPIRED' WHERE status='PENDING' AND purpose='BOOKING_DP' AND due_at < now() RETURNING *`)).rows;
+      for (const inv of rows)
+        await publish(c, 'finance.payment.failed', inv.reference_id, { intentId: inv.id, purpose: inv.purpose, referenceId: inv.reference_id, payerUserId: inv.payer_user_id, amount: Number(inv.amount) });
+    });
   },
 };
 

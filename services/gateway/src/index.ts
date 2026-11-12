@@ -35,6 +35,7 @@ export const ROUTES: [prefix: string, upstream: Upstream][] = [
   ['/v1/catalog', 'catalog'],
   ['/v1/studio', 'catalog'],
   ['/v1/admin/qc', 'catalog'],
+  ['/v1/admin/artwork', 'catalog'],
   ['/v1/library', 'library'],
   ['/v1/playback', 'playback'],
   ['/v1/events/play', 'playback'],

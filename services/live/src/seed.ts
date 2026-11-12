@@ -1,4 +1,4 @@
-import { SEED, seedId, seedSchedule } from '@rave/domain';
+import { SEED, demoArt, seedId, seedSchedule } from '@rave/domain';
 import type { ServiceContext } from '@rave/service-kit';
 import { keyHash, newStreamKey } from './manager.js';
 
@@ -11,7 +11,7 @@ const senja = SEED.artists[0];
  * kanal demo mendapat kunci baru dari server setiap start.
  */
 export async function seed({ db, log }: ServiceContext) {
-  const artist = [senja.id, senja.name, senja.slug, 'https://picsum.photos/seed/rave-artist-senja-kolektif/600/600'];
+  const artist = [senja.id, senja.name, senja.slug, demoArt('artist-senja-kolektif', 600)];
   const rows: unknown[][] = [
     [
       L.demo, senja.orgId, 'Senja Kolektif', 'ARTIST', ...artist,

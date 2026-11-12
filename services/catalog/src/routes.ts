@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { forbidden, isAdmin, isPublicMediaFile, managedArtistIds, notFound, reqLocale, verifyMediaSig, z, type AuthUser, type ServiceContext } from '@rave/service-kit';
 import { ARTIST_SUMMARY_COLS, EPISODE_COLS, RELEASE_SUMMARY_SELECT, SHOW_COLS, TRACK_SELECT, isUuid, releaseFull } from './queries.js';
 import { UPLOAD_DIR } from './storage.js';
+import { demoArtFile } from './demo-art.js';
 
 export function canManageArtist(u: AuthUser | null, artistId: string) {
   // Admin back office tidak mengelola karya artis (audit go-live A1); moderasi lewat /v1/admin/* (qc.review).
@@ -150,7 +151,7 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
   app.get('/v1/catalog/artists/:idOrSlug', async (req) => {
     const { idOrSlug } = req.params as { idOrSlug: string };
     const a = await db.one(
-      `SELECT ${ARTIST_SUMMARY_COLS}, a.bio, a.cover_url, a.followers, a.org_id FROM artists a WHERE ${isUuid(idOrSlug) ? 'a.id' : 'a.slug'} = $1`,
+      `SELECT ${ARTIST_SUMMARY_COLS}, a.bio, a.cover_url, a.followers, a.org_id, a.links FROM artists a WHERE ${isUuid(idOrSlug) ? 'a.id' : 'a.slug'} = $1`,
       [idOrSlug],
     );
     if (!a) throw notFound('Artis');
@@ -227,6 +228,15 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
     if (!e) throw notFound('Episode');
     e.show = await db.one(`SELECT ${SHOW_COLS} FROM shows s WHERE s.id = $1`, [e.show_id]);
     return e;
+  });
+
+  // ---------- Karya demo lokal untuk data seed (pengganti host gambar eksternal) ----------
+  app.get('/v1/catalog/demo-art/:file', async (req, reply) => {
+    const { file } = req.params as { file: string };
+    const path = await demoArtFile(file);
+    if (!path) throw notFound('Gambar');
+    reply.header('content-type', 'image/jpeg').header('cache-control', 'public, max-age=31536000, immutable');
+    return reply.send(createReadStream(path));
   });
 
   // ---------- Media hasil upload (dev; produksi: CDN/object storage) ----------

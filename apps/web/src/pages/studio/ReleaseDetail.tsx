@@ -70,6 +70,65 @@ function TrackPreview({ trackId }: { trackId: string }) {
 }
 
 /** Tombol pilih file + upload (audio/artwork) → public_url. */
+/** Sampul rilis + ganti sampul (semua status kecuali diturunkan). Rilis LIVE/SCHEDULED → menunggu tinjauan QC. */
+function ReleaseCover({ r }: { r: Release }) {
+  const t = useDict('b2b').studio.release;
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const live = r.status === 'LIVE' || r.status === 'SCHEDULED';
+  const canChange = r.status !== 'TAKEN_DOWN';
+  async function submit(url: string, file: File) {
+    // Peringatan kualitas di sisi klien (server tetap memvalidasi berkas & kepemilikan).
+    const dims = await new Promise<{ w: number; h: number } | null>((res) => {
+      const img = new Image();
+      img.onload = () => res({ w: img.naturalWidth, h: img.naturalHeight });
+      img.onerror = () => res(null);
+      img.src = URL.createObjectURL(file);
+    });
+    await api(`/v1/studio/releases/${r.id}/cover`, { method: 'PUT', body: { cover_url: url } });
+    qc.invalidateQueries({ queryKey: ['studio-releases'] });
+    qc.invalidateQueries();
+    toast.success(live ? t.coverSubmitted : t.coverUpdated);
+    if (dims && (dims.w !== dims.h || dims.w < 3000)) toast.info(t.coverQualityHint(dims.w, dims.h));
+  }
+  async function withdraw() {
+    setBusy(true);
+    try {
+      await api(`/v1/studio/releases/${r.id}/cover/pending`, { method: 'DELETE' });
+      qc.invalidateQueries();
+      toast.success(t.coverWithdrawn);
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="group relative size-36 shrink-0">
+        {r.cover_url ? <img src={r.cover_url} alt={t.coverAlt} className="size-36 rounded-none object-cover shadow" /> : <div className="grid size-36 place-items-center rounded-none bg-b2b-bg text-xs text-b2b-muted">{t.noCover}</div>}
+        {r.pending_cover && (
+          <span className="absolute -right-2 -bottom-2 border-2 border-b2b-card bg-amber-400 px-1.5 py-0.5 text-[10px] font-bold text-black">{t.coverPendingBadge}</span>
+        )}
+      </div>
+      {canChange && <UploadButton kind="artwork" label={r.cover_url ? t.changeCover : t.uploadCover} onUploaded={submit} />}
+      {live && canChange && <p className="max-w-36 text-[11px] leading-snug text-b2b-muted">{t.coverLiveHint}</p>}
+      {r.pending_cover && (
+        <div className="max-w-xs border border-amber-400/60 bg-amber-50 p-2 text-xs text-amber-900">
+          <div className="flex items-center gap-2">
+            <img src={r.pending_cover.url} alt="" className="size-10 object-cover" />
+            <span className="font-bold">{t.coverPending(fmt.dateTime(r.pending_cover.submitted_at))}</span>
+          </div>
+          <button type="button" disabled={busy} onClick={withdraw} className="mt-1 font-bold underline underline-offset-2 disabled:opacity-50">
+            {t.coverWithdraw}
+          </button>
+        </div>
+      )}
+      {!r.pending_cover && r.cover_review_note && <p className="max-w-xs border border-red-200 bg-red-50 p-2 text-xs text-red-700">{t.coverRejected(r.cover_review_note)}</p>}
+    </div>
+  );
+}
+
 function UploadButton({ kind, label, onUploaded }: { kind: 'audio' | 'artwork'; label: string; onUploaded: (url: string, file: File) => Promise<void> | void }) {
   const [busy, setBusy] = useState(false);
   const t = useDict('b2b').studio.release;
@@ -437,7 +496,7 @@ export default function ReleaseDetail() {
         ) : (
           <>
             <div className="mb-6 flex flex-wrap items-end gap-5">
-              {r.cover_url ? <img src={r.cover_url} alt="" className="size-36 rounded-none object-cover shadow" /> : <div className="size-36 rounded-none bg-b2b-bg" />}
+              <ReleaseCover r={r} />
               <div className="flex-1">
                 <PageHeader title={r.title} subtitle={`${r.type} · ${r.genre ?? ''} · ${t.releaseOn(fmt.date(r.release_date))}${r.label ? ' · ' + r.label : ''}`} />
                 <div className="-mt-4 flex flex-wrap items-center gap-2">

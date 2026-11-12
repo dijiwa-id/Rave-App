@@ -1,6 +1,40 @@
 import type { FastifyInstance } from 'fastify';
-import { audit, conflict, forbidden, notFound, publish, requirePermission, unauthorized, z, type Client, type Job, type ServiceContext } from '@rave/service-kit';
+import { audit, badRequest, conflict, requireSuperAdmin, forbidden, notFound, publish, requirePermission, unauthorized, z, type Client, type Job, type ServiceContext } from '@rave/service-kit';
 import { isUuid, releaseFull } from './queries.js';
+import { open as fsOpen } from 'node:fs/promises';
+import { join } from 'node:path';
+import { imageSize, UPLOAD_DIR } from './storage.js';
+
+/** Dimensi artwork dari header berkas lokal (tanpa memuat seluruh gambar). null = eksternal / tidak terbaca. */
+async function artworkSize(url: string | null): Promise<{ width: number; height: number; bytes: number } | null> {
+  const m = url ? /^\/v1\/catalog\/media\/([\w.-]+\.(?:jpe?g|png|webp))$/i.exec(url) : null;
+  if (!m) return null;
+  let fh;
+  try {
+    fh = await fsOpen(join(UPLOAD_DIR, m[1]!), 'r');
+    const st = await fh.stat();
+    const buf = Buffer.alloc(Math.min(st.size, 256 * 1024));
+    await fh.read(buf, 0, buf.length, 0);
+    const d = imageSize(buf);
+    return d ? { ...d, bytes: st.size } : null;
+  } catch {
+    return null;
+  } finally {
+    await fh?.close();
+  }
+}
+
+/** Masalah kualitas artwork untuk kurasi. */
+function artworkIssues(url: string | null, size: { width: number; height: number } | null): string[] {
+  if (!url) return ['missing'];
+  const out: string[] = [];
+  if (!url.startsWith('/v1/catalog/')) out.push('external');
+  if (size) {
+    if (size.width !== size.height) out.push('not_square');
+    if (Math.min(size.width, size.height) < 3000) out.push('low_res');
+  }
+  return out;
+}
 
 /** Tanggal hari ini di WIB (rilis default 00:00 WIB, §7.4). */
 const todayWib = () => new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
@@ -45,10 +79,110 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
         r.qc_warnings = (r.tracks as { title: string; isrc: string | null }[])
           .filter((t) => !t.isrc)
           .map((t) => `"${t.title}": ISRC kosong`);
+        const pendingSplits = await db.query(
+          `SELECT t.title, rs.party_name, rs.type FROM rights_shares rs JOIN tracks t ON t.id = rs.track_id WHERE t.release_id = $1 AND rs.approved_at IS NULL`,
+          [id],
+        );
+        for (const p of pendingSplits) r.qc_warnings.push(`"${p.title}": split ${p.type} ${p.party_name} belum disetujui (rilis tidak dapat disetujui)`);
         delete r.artist_id;
         data.push(r);
       }
       return { data };
+    });
+
+    // ---- Kurasi artwork (Super Admin): galeri semua sampul + ganti / minta ganti ----
+    s.get('/v1/admin/artwork', { preHandler: requireSuperAdmin }, async (req) => {
+      const q = z
+        .object({ filter: z.enum(['all', 'pending', 'issues']).default('all'), q: z.string().trim().max(100).optional(), status: z.string().max(20).optional() })
+        .parse(req.query);
+      const params: unknown[] = [];
+      const where: string[] = [];
+      if (q.filter === 'pending') where.push('r.pending_cover_url IS NOT NULL');
+      if (q.status) where.push(`r.status = $${params.push(q.status)}`);
+      if (q.q) where.push(`(r.title ILIKE $${params.push(`%${q.q}%`)} OR a.name ILIKE $${params.length})`);
+      const rows = await db.query(
+        `SELECT r.id, r.title, r.status, r.cover_url, r.pending_cover_url, r.pending_cover_at, r.cover_review_note, r.updated_at, a.name AS artist_name, a.id AS artist_id
+           FROM releases r JOIN artists a ON a.id = r.artist_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+          ORDER BY (r.pending_cover_url IS NOT NULL) DESC, r.updated_at DESC LIMIT 120`,
+        params,
+      );
+      const data = [];
+      for (const r of rows) {
+        const size = await artworkSize(r.cover_url);
+        const issues = artworkIssues(r.cover_url, size);
+        if (q.filter === 'issues' && !issues.length) continue;
+        data.push({
+          id: r.id, title: r.title, status: r.status, artist_name: r.artist_name, artist_id: r.artist_id,
+          cover_url: r.cover_url, size, issues,
+          pending_cover: r.pending_cover_url ? { url: r.pending_cover_url, submitted_at: r.pending_cover_at, size: await artworkSize(r.pending_cover_url) } : null,
+          review_note: r.cover_review_note, updated_at: r.updated_at,
+        });
+      }
+      return { data };
+    });
+
+    /** Super Admin mengganti artwork langsung (mis. melanggar pedoman, kualitas buruk, salah unggah). Wajib beralasan; artis dinotifikasi. */
+    s.post('/v1/admin/artwork/:id/replace', { preHandler: requireSuperAdmin }, async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isUuid(id)) throw notFound('Rilis');
+      const b = z.object({ cover_url: z.string().max(1000), reason: z.string().trim().min(5, 'Alasan minimal 5 karakter').max(1000) }).parse(req.body);
+      const name = /^\/v1\/catalog\/media\/([\w.-]+)$/.exec(b.cover_url)?.[1];
+      const up = name ? await db.one(`SELECT kind, completed_at, purpose FROM uploads WHERE stored_name = $1`, [name]) : null;
+      if (!up || up.kind !== 'artwork' || !up.completed_at || up.purpose === 'playlist') throw badRequest('Artwork harus berupa gambar yang sudah diunggah (JPG/PNG)');
+      return db.tx(async (tx) => {
+        const r = (await tx.query(`SELECT id, title, artist_id, cover_url FROM releases WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+        if (!r) throw notFound('Rilis');
+        await tx.query(
+          `UPDATE releases SET cover_url = $2, pending_cover_url = NULL, pending_cover_at = NULL, pending_cover_by = NULL, cover_review_note = $3, updated_at = now() WHERE id = $1`,
+          [id, b.cover_url, `Diganti tim kurasi RAVE: ${b.reason}`],
+        );
+        await publish(tx, 'catalog.release.cover_curated', id, { releaseId: id, artistId: r.artist_id, title: r.title, action: 'replaced', reason: b.reason });
+        await audit(tx, { actorId: req.user!.sub, action: 'artwork.replace', entity: 'release', entityId: id, data: { from: r.cover_url, to: b.cover_url, reason: b.reason }, ip: req.ip });
+        return { id, cover_url: b.cover_url };
+      });
+    });
+
+    /** Minta artis/manajemen mengganti artwork (sampul lama tetap tayang sampai artis mengajukan yang baru). */
+    s.post('/v1/admin/artwork/:id/request-change', { preHandler: requireSuperAdmin }, async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isUuid(id)) throw notFound('Rilis');
+      const b = z.object({ reason: z.string().trim().min(5, 'Alasan minimal 5 karakter').max(1000) }).parse(req.body);
+      return db.tx(async (tx) => {
+        const r = (await tx.query(`SELECT id, title, artist_id FROM releases WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+        if (!r) throw notFound('Rilis');
+        await tx.query(`UPDATE releases SET cover_review_note = $2, updated_at = now() WHERE id = $1`, [id, `Diminta ganti oleh tim kurasi RAVE: ${b.reason}`]);
+        await publish(tx, 'catalog.release.cover_curated', id, { releaseId: id, artistId: r.artist_id, title: r.title, action: 'change_requested', reason: b.reason });
+        await audit(tx, { actorId: req.user!.sub, action: 'artwork.request_change', entity: 'release', entityId: id, data: b, ip: req.ip });
+        return { id, requested: true };
+      });
+    });
+
+    // ---- Pengajuan ganti sampul rilis yang sudah tayang ----
+    s.get('/v1/admin/qc/covers', async () => {
+      const rows = await db.query(
+        `SELECT r.id, r.title, r.status, r.cover_url, r.pending_cover_url, r.pending_cover_at, a.name AS artist_name
+           FROM releases r JOIN artists a ON a.id = r.artist_id WHERE r.pending_cover_url IS NOT NULL ORDER BY r.pending_cover_at`,
+      );
+      return { data: rows.map((r: any) => ({ id: r.id, title: r.title, status: r.status, artist_name: r.artist_name, current_cover: r.cover_url, pending_cover: r.pending_cover_url, submitted_at: r.pending_cover_at })) };
+    });
+
+    s.post('/v1/admin/qc/covers/:id/decision', async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isUuid(id)) throw notFound('Rilis');
+      const b = z.object({ approve: z.boolean(), reason: z.string().trim().max(1000).optional() }).parse(req.body);
+      if (!b.approve && (b.reason ?? '').length < 5) throw badRequest('Alasan penolakan sampul wajib diisi (min. 5 karakter)');
+      return db.tx(async (tx) => {
+        const r = (await tx.query(`SELECT id, title, artist_id, pending_cover_url FROM releases WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+        if (!r) throw notFound('Rilis');
+        if (!r.pending_cover_url) throw conflict('Tidak ada pengajuan sampul untuk rilis ini');
+        if (b.approve)
+          await tx.query(`UPDATE releases SET cover_url = pending_cover_url, pending_cover_url = NULL, pending_cover_at = NULL, pending_cover_by = NULL, cover_review_note = NULL, updated_at = now() WHERE id = $1`, [id]);
+        else
+          await tx.query(`UPDATE releases SET pending_cover_url = NULL, pending_cover_at = NULL, pending_cover_by = NULL, cover_review_note = $2, updated_at = now() WHERE id = $1`, [id, b.reason]);
+        await publish(tx, 'catalog.release.cover_reviewed', id, { releaseId: id, artistId: r.artist_id, title: r.title, approved: b.approve, reason: b.approve ? null : b.reason! });
+        await audit(tx, { actorId: req.user!.sub, action: b.approve ? 'qc.cover_approve' : 'qc.cover_reject', entity: 'release', entityId: id, data: b, ip: req.ip });
+        return { id, approved: b.approve };
+      });
     });
 
     s.post('/v1/admin/qc/releases/:id/decision', async (req) => {
@@ -60,6 +194,11 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
         if (!cur) throw notFound('Rilis');
         if (cur.status !== 'IN_REVIEW') throw conflict(`Rilis berstatus ${cur.status}, bukan IN_REVIEW`);
         if (b.approve) {
+          // Semua pihak split hak harus sudah menyetujui bagiannya sebelum rilis tayang (REQ-STU-02, audit go-live).
+          const pending = (
+            await tx.query(`SELECT count(*)::int AS n FROM rights_shares rs JOIN tracks t ON t.id = rs.track_id WHERE t.release_id = $1 AND rs.approved_at IS NULL`, [id])
+          ).rows[0].n;
+          if (pending > 0) throw conflict(`Masih ada ${pending} pihak split yang belum menyetujui bagiannya — rilis belum dapat disetujui`);
           if (cur.d > todayWib()) await tx.query(`UPDATE releases SET status = 'SCHEDULED', qc_reason = NULL, updated_at = now() WHERE id = $1`, [id]);
           else await goLive(tx, id);
         } else {

@@ -114,6 +114,8 @@ const fan: Shape<typeof id> = {
     discography: 'Discography',
     gigs: 'Upcoming gigs',
     noGigs: 'No upcoming gigs yet.',
+    links: 'Artist links',
+    openLink: (p: string) => `Open ${p} (new tab)`,
   },
   track: {
     plays: (n) => `${n} plays`,

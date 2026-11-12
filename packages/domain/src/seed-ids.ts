@@ -70,7 +70,9 @@ export const SEED_CITIES = ['Jakarta', 'Bandung', 'Yogyakarta', 'Surabaya', 'Mal
 // ---------------- Katalog demo deterministik ----------------
 // Audio demo: SoundHelix (CC, contoh publik). Produksi: rendisi HLS/DASH ber-DRM dari CDN.
 const audio = (n: number) => `https://www.soundhelix.com/examples/mp3/SoundHelix-Song-${((n - 1) % 16) + 1}.mp3`;
-const img = (seed: string, size = 640) => `https://picsum.photos/seed/rave-${seed}/${size}/${size}`;
+/** Karya demo lokal (service catalog) — bukan host pihak ketiga yang bisa tidak terjangkau. */
+export const demoArt = (seed: string, w = 640, h = w) => `/v1/catalog/demo-art/rave-${seed}-${w}x${h}.jpg`;
+const img = (seed: string, size = 640) => demoArt(seed, size);
 
 const TITLES: Record<string, { ep: string; single: string; tracks: string[] }> = {
   'senja-kolektif': { ep: 'Pulang ke Utara', single: 'Hujan di Dago', tracks: ['Pulang ke Utara', 'Kopi Pukul Dua', 'Lampu Kota', 'Surat yang Tak Terkirim', 'Hujan di Dago'] },
@@ -148,4 +150,4 @@ export const SEED_RELEASES: SeedRelease[] = SEED.artists.flatMap((a, ai) => {
 export const SEED_TRACKS = SEED_RELEASES.flatMap((r) => r.tracks.map((t) => ({ ...t, releaseId: r.id, artistId: r.artistId })));
 
 export const SEED_ARTIST_IMAGE = (slug: string) => img(`artist-${slug}`, 640);
-export const SEED_ARTIST_COVER = (slug: string) => `https://picsum.photos/seed/rave-cover-${slug}/1600/600`;
+export const SEED_ARTIST_COVER = (slug: string) => demoArt(`cover-${slug}`, 1600, 600);

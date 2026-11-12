@@ -57,6 +57,11 @@ export const SETTING_GROUPS = {
   ads: { label: 'Iklan', description: 'Kebijakan penayangan iklan untuk pengguna Gratis: ad load, frequency cap, masa bebas iklan, dan kategori.' },
   commission: { label: 'Komisi & Biaya', description: 'Take rate off-air (Bab 4.1, keputusan D-02).' },
   booking: { label: 'Booking Off-Air', description: 'Parameter saga booking & escrow (§7.1–7.3).' },
+  legal: {
+    label: 'Legalitas & Dokumen',
+    description:
+      'Identitas badan hukum platform & tanda legalitas yang dicetak di kontrak (SPK) dan halaman verifikasi publik. Hanya kolom yang terisi yang ditampilkan — isi HANYA dengan data resmi yang sudah terbit (jangan nomor/logo contoh).',
+  },
   payout: { label: 'Payout', description: 'Penarikan saldo wallet ke rekening bank: batas, kontrol ganda, dan jadwal pemrosesan.' },
   royalty: { label: 'Royalti', description: 'Perhitungan & statement royalti bulanan dari stream qualified (model user-centric, BRD §6.3).' },
   subscription: { label: 'Langganan Premium', description: 'Harga paket, masa coba, masa tenggang, dan RAVE Pro (REQ-PAY-03).' },
@@ -104,6 +109,19 @@ export const SETTINGS: SettingDef[] = [
     consumers: ['web', 'notification'],
   },
   { key: 'general.registrations_open', group: 'general', label: 'Pendaftaran akun baru dibuka', description: 'Bila mati, OTP hanya untuk akun yang sudah ada.', type: 'boolean', default: true, public: true, consumers: ['iam', 'web'] },
+
+  // ---- Legalitas & Dokumen (kontrak SPK + halaman verifikasi). Kosong = tidak ditampilkan; tidak ada nilai contoh. ----
+  // Catatan: entri gambar memakai slot branding 'partner' (aturan file sama: SVG/PNG, tinggi ≥ 32 px) dan sengaja
+  // diletakkan SEBELUM `content.partners` agar definisi slot tersebut tetap milik partner landing.
+  { key: 'legal.entity_name', group: 'legal', label: 'Nama badan hukum platform', description: 'Nama resmi sesuai akta (mis. "PT … "). Dicetak sebagai Platform Fasilitator di kontrak. Kosong = kontrak menampilkan penanda "[Nama badan hukum belum diatur]".', type: 'string', default: '', public: true, consumers: ['booking', 'web'] },
+  { key: 'legal.nib', group: 'legal', label: 'NIB', description: 'Nomor Induk Berusaha (OSS). Kosong = tidak ditampilkan.', type: 'string', default: '', public: true, consumers: ['booking', 'web'] },
+  { key: 'legal.npwp', group: 'legal', label: 'NPWP badan', description: 'NPWP badan hukum platform. Kosong = tidak ditampilkan.', type: 'string', default: '', public: true, consumers: ['booking', 'web'] },
+  { key: 'legal.address', group: 'legal', label: 'Alamat terdaftar', description: 'Alamat domisili badan hukum sesuai akta/NIB. Kosong = tidak ditampilkan.', type: 'text', default: '', public: true, consumers: ['booking', 'web'] },
+  { key: 'legal.pse_registration', group: 'legal', label: 'Nomor tanda daftar PSE', description: 'Nomor pendaftaran Penyelenggara Sistem Elektronik Lingkup Privat (Komdigi). Isi hanya bila sudah terbit. Kosong = tidak ditampilkan.', type: 'string', default: '', public: true, consumers: ['booking', 'web'] },
+  { key: 'legal.pse_logo', group: 'legal', label: 'Logo tanda terdaftar PSE', description: 'Unggah hanya bila platform sudah terdaftar dan berhak memakai logo tersebut. Kosong = tidak ditampilkan.', type: 'image', default: '', image: { slot: 'partner', minPx: 32, background: 'light' }, public: true, consumers: ['booking', 'web'] },
+  { key: 'legal.psre_name', group: 'legal', label: 'Nama PSrE mitra', description: 'Penyelenggara Sertifikasi Elektronik yang bekerja sama (bila sudah ada perjanjian). Tanda tangan saat ini tetap OTP native RAVE; kolom ini hanya identitas mitra. Kosong = tidak ditampilkan.', type: 'string', default: '', public: true, consumers: ['booking', 'web'] },
+  { key: 'legal.psre_logo', group: 'legal', label: 'Logo PSrE mitra', description: 'Logo PSrE mitra (dengan izin pemakaian). Kosong = tidak ditampilkan.', type: 'image', default: '', image: { slot: 'partner', minPx: 32, background: 'light' }, public: true, consumers: ['booking', 'web'] },
+  { key: 'legal.emeterai_logo', group: 'legal', label: 'Logo mitra e-Meterai', description: 'Logo distributor/penyedia e-Meterai resmi (dengan izin). Hanya tampil pada kontrak yang wajib e-Meterai, sebagai identitas penyedia — BUKAN pengganti pembubuhan e-Meterai. Kosong = tidak ditampilkan.', type: 'image', default: '', image: { slot: 'partner', minPx: 32, background: 'light' }, public: true, consumers: ['booking'] },
 
   // ---- Konten Landing (CMS) ----
   {
@@ -276,6 +294,7 @@ export const SETTINGS: SettingDef[] = [
   { key: 'booking.default_dp_pct', group: 'booking', label: 'DP default', description: 'Persentase down payment saat kontrak ditandatangani.', type: 'number', default: 50, min: 10, max: 100, step: 5, unit: '%', consumers: ['booking'] },
   { key: 'booking.settlement_days_before', group: 'booking', label: 'Pelunasan sebelum hari-H', description: 'Batas pelunasan default (H-n).', type: 'number', default: 7, min: 1, max: 60, step: 1, unit: 'hari', consumers: ['booking'] },
   { key: 'booking.hold_hours', group: 'booking', label: 'Masa berlaku hold', description: 'Hold tanggal kedaluwarsa otomatis setelah ini.', type: 'number', default: 72, min: 1, max: 336, unit: 'jam', consumers: ['booking'] },
+  { key: 'booking.inquiry_ttl_days', group: 'booking', label: 'Inquiry tanpa respons kedaluwarsa', description: 'Inquiry/negosiasi tanpa hold tanggal yang tidak berubah selama ini otomatis kedaluwarsa (mencegah status menggantung).', type: 'number', default: 14, min: 1, max: 90, unit: 'hari', consumers: ['booking'] },
   { key: 'booking.dispute_window_hours', group: 'booking', label: 'Jendela dispute', description: 'Dana ditahan selama jendela ini setelah COMPLETED sebelum dicairkan.', type: 'number', default: 24, min: 1, max: 336, unit: 'jam', consumers: ['finance'] },
   { key: 'contract.pph21_pct', group: 'booking', label: 'Tarif PPh 21 kontrak', description: 'Dipotong dari fee bila penerima orang pribadi (disederhanakan; konfirmasi konsultan pajak).', type: 'number', default: 2.5, min: 0, max: 30, step: 0.1, unit: '%', consumers: ['booking'] },
   { key: 'contract.pph23_pct', group: 'booking', label: 'Tarif PPh 23 kontrak', description: 'Dipotong dari fee bila penerima badan usaha.', type: 'number', default: 2, min: 0, max: 30, step: 0.1, unit: '%', consumers: ['booking'] },
