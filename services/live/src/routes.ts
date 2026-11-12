@@ -64,7 +64,14 @@ const viewerCounts = new Map<string, number>(); // streamId → penonton aktif (
 const newViews = new Map<string, number>(); // streamId → penonton unik baru sejak flush terakhir
 
 /** Hitung penonton aktif per siaran, perbarui peak_viewers & total_views (batch). */
+let lastIdleFlush = 0;
 export async function flushViewers(db: Db) {
+  // Idle (tidak ada penonton aktif & tidak ada penonton baru): cukup periksa tiap 15 dtk, bukan tiap 5 dtk.
+  // Penonton pertama yang bergabung masuk `newViews` → hitungan langsung diperbarui pada tick berikutnya.
+  if (!viewerCounts.size && !newViews.size) {
+    if (Date.now() - lastIdleFlush < 15_000) return;
+    lastIdleFlush = Date.now();
+  }
   const rows = await db.query<{ stream_id: string; n: number }>(
     `SELECT v.stream_id, count(*)::int AS n FROM viewers v JOIN streams s ON s.id = v.stream_id
       WHERE s.status IN ('LIVE','INTERRUPTED') AND v.last_seen > now() - interval '30 seconds' GROUP BY 1`,

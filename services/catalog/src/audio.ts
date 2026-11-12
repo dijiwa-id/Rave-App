@@ -16,7 +16,7 @@ import {
   type RenditionQuality,
   type Renditions,
 } from '@rave/domain/audio';
-import { settings, type Job } from '@rave/service-kit';
+import { settings, wakeJob, type Job } from '@rave/service-kit';
 import { UPLOAD_DIR } from './storage.js';
 
 const require = createRequire(import.meta.url);
@@ -132,7 +132,8 @@ const STALE_MIN = 20;
  */
 export const transcodeJob: Job = {
   name: 'audio-transcode',
-  everyMs: 3_000,
+  everyMs: 15_000,
+  wake: true,
   async run({ db, log }) {
     if (!settings.bool('transcoding.enabled') || !ffmpegPath()) return;
     const limit = Math.max(1, Math.min(16, settings.num('transcoding.max_concurrent_jobs') || 2));
@@ -174,6 +175,8 @@ export const transcodeJob: Job = {
         }
       }),
     );
+    // Slot penuh → kemungkinan masih ada antrean; ambil batch berikutnya segera.
+    if (jobs.length === limit) await wakeJob(db, 'audio-transcode');
   },
 };
 

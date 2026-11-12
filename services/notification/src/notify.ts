@@ -1,5 +1,5 @@
 import type { Client, Job } from '@rave/service-kit';
-import { uuidv7 } from '@rave/service-kit';
+import { uuidv7, wakeJob } from '@rave/service-kit';
 
 export interface NewNotification {
   category: 'booking' | 'payment' | 'event' | 'release' | 'system' | 'social';
@@ -58,6 +58,7 @@ export async function notifyUsers(tx: Client, userIds: string[], sourceEventId: 
     unique.map(() => uuidv7()),
     unique,
   ]);
+  await wakeJob(tx, 'deliveries');
 }
 
 /**
@@ -72,6 +73,7 @@ export async function notifyFollowers(tx: Client, filter: { artistIds: string[];
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (source_event_id) DO NOTHING`,
     [sourceEventId, filter.artistIds, 'city' in filter, filter.city ?? null, n.category, n.title, n.body, n.link ?? null],
   );
+  await wakeJob(tx, 'follower-fanout');
 }
 
 /** Satu potongan fan-out (keyset user_id, memakai PK (artist_id, user_id)); mengembalikan kursor berikutnya atau null bila selesai. */
@@ -99,10 +101,17 @@ async function fanoutChunk(tx: Client, job: any): Promise<string | null> {
  */
 export const fanoutJob: Job = {
   name: 'follower-fanout',
-  everyMs: 2000,
+  everyMs: 15_000,
+  wake: true,
   async run({ db }) {
     const deadline = Date.now() + 1500;
-    while (Date.now() < deadline) {
+    let did = 0;
+    let more = false;
+    while (true) {
+      if (Date.now() >= deadline) {
+        more = true; // waktu habis tetapi mungkin masih ada sisa → lanjut segera di putaran berikutnya
+        break;
+      }
       const progressed = await db.tx(async (tx) => {
         const job = (await tx.query(`SELECT * FROM fanout_jobs WHERE done_at IS NULL ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`)).rows[0];
         if (!job) return false;
@@ -114,7 +123,10 @@ export const fanoutJob: Job = {
         return true;
       });
       if (!progressed) break;
+      did++;
     }
+    if (did) await wakeJob(db, 'deliveries'); // potongan fan-out menulis antrean pengiriman
+    if (more && did) await wakeJob(db, 'follower-fanout');
     // Pekerjaan selesai disimpan 7 hari untuk diagnosis.
     await db.query(`DELETE FROM fanout_jobs WHERE done_at < now() - interval '7 days'`);
   },

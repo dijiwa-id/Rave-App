@@ -2,7 +2,7 @@
 // Satu sumber kebenaran: dipakai service `platform` untuk validasi, service lain untuk default,
 // dan frontend Super Admin untuk merender form. Menambah kunci = menambah entri di sini.
 
-import { coerceLanding, LANDING_DEFAULT } from './landing';
+import { coerceLanding, LANDING_DEFAULT } from './landing.js';
 
 export type SettingType = 'boolean' | 'number' | 'string' | 'text' | 'enum' | 'list' | 'image' | 'partners' | 'landing';
 

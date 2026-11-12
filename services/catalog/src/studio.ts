@@ -24,6 +24,7 @@ import {
   hasPermission,
   signMediaUrl,
   MEDIA_PREFIX,
+  wakeJob,
 } from '@rave/service-kit';
 import { isUuid, releaseFull, releasesFull } from './queries.js';
 import { canManageArtist } from './routes.js';
@@ -783,6 +784,7 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
               audioMeta ? JSON.stringify(audioMeta) : null,
               transcode,
             ]);
+            if (transcode === 'pending') await wakeJob(db, 'audio-transcode');
             return { public_url: `/v1/catalog/media/${u.stored_name}`, meta, warnings, transcode_status: transcode };
           } catch (e) {
             // Body belum habis dibaca (ditolak lebih awal) → tutup koneksi setelah respons, jangan menguras sisa upload.

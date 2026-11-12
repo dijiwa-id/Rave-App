@@ -24,6 +24,11 @@ x-svc: &svc
   logging: *logging
   security_opt: ['no-new-privileges:true']
   stop_grace_period: 30s
+  # Batas sumber daya per service (pemakaian normal ±45 MB, <5% CPU) — mencegah satu service yang macet/bocor
+  # menghabiskan CPU/RAM seluruh server. Diatur lewat env; service berat (ffmpeg/Chromium) mendapat jatah lebih.
+  cpus: ${SVC_CPUS:-1.0}
+  mem_limit: ${SVC_MEM:-512m}
+  pids_limit: 512
   env_file: ['${RAVE_ENV_FILE:-.env.production}']
   depends_on:
     postgres: { condition: service_healthy }
@@ -87,6 +92,8 @@ services:
     image: ${RAVE_REGISTRY:-rave}/rave-catalog:${RAVE_VERSION}
     build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: catalog } }
     volumes: [storage:/data]
+    cpus: ${CATALOG_CPUS:-2.0} # transcoding audio (ffmpeg)
+    mem_limit: ${CATALOG_MEM:-1g}
   library:
     <<: *svc
     image: ${RAVE_REGISTRY:-rave}/rave-library:${RAVE_VERSION}
@@ -101,6 +108,8 @@ services:
     build: { context: ., dockerfile: infra/docker/Dockerfile.service, target: runtime, args: { <<: *build-args, SERVICE: booking } }
     volumes: [storage:/data]
     shm_size: 256mb # Chromium (PDF kontrak)
+    cpus: ${BOOKING_CPUS:-1.5}
+    mem_limit: ${BOOKING_MEM:-1g}
   finance:
     <<: *svc
     image: ${RAVE_REGISTRY:-rave}/rave-finance:${RAVE_VERSION}
@@ -124,6 +133,8 @@ services:
     environment: { <<: *env, LIVE_INTERNAL_URL: 'http://live:4010' }
     ports: ['${LIVE_RTMP_BIND:-1935}:1935']
     volumes: [storage:/data]
+    cpus: ${LIVE_CPUS:-2.0} # transcoder HLS (ffmpeg) per siaran
+    mem_limit: ${LIVE_MEM:-1g}
   gateway:
     <<: *svc
     image: ${RAVE_REGISTRY:-rave}/rave-gateway:${RAVE_VERSION}

@@ -161,11 +161,16 @@ export class Transcoder {
 export function hlsStats(id: string): { last_segment_at: string | null; segment_age_s: number | null; bitrate_kbps: number | null } {
   const dir = streamDir(id);
   if (!existsSync(dir)) return { last_segment_at: null, segment_age_s: null, bitrate_kbps: null };
+  // ffmpeg (hls_flags delete_segments) bisa menghapus segmen lama di antara readdir & stat → lewati, jangan gagal.
   const segs = readdirSync(dir)
     .filter((f) => /^seg\d+\.ts$/.test(f))
-    .map((f) => {
-      const st = statSync(join(dir, f));
-      return { size: st.size, mtime: st.mtimeMs };
+    .flatMap((f) => {
+      try {
+        const st = statSync(join(dir, f));
+        return [{ size: st.size, mtime: st.mtimeMs }];
+      } catch {
+        return [];
+      }
     })
     .sort((a, b) => b.mtime - a.mtime);
   if (!segs.length) return { last_segment_at: null, segment_age_s: null, bitrate_kbps: null };

@@ -14,7 +14,66 @@ export type Consumers = { [K in Topic]?: Handler<K> };
 export async function publish<T extends Topic>(tx: Client, topic: T, key: string, payload: DomainEvents[T]): Promise<string> {
   const id = uuidv7();
   await tx.query(`INSERT INTO outbox (id, topic, key, payload) VALUES ($1,$2,$3,$4)`, [id, topic, key, JSON.stringify(payload)]);
+  // Bangunkan relay service ini tepat saat transaksi commit (NOTIFY transaksional; duplikat dalam satu transaksi
+  // digabung Postgres). Menggantikan polling outbox tiap 250 ms di setiap service.
+  if (outboxChannel) await tx.query(`SELECT pg_notify($1, '')`, [outboxChannel]);
   return id;
+}
+
+/** Saluran NOTIFY outbox milik service di proses ini (diisi createBus). */
+let outboxChannel: string | null = null;
+
+/**
+ * Satu koneksi LISTEN per proses untuk semua saluran (relay outbox, bus). Putus (mis. Postgres restart) → sambung
+ * ulang dengan backoff; setelah tersambung semua handler dipanggil sekali untuk mengejar sinyal yang terlewat.
+ */
+function createListener(log: (o: object, m: string) => void) {
+  const handlers = new Map<string, Set<() => void>>();
+  let client: pg.Client | null = null;
+  let closed = false;
+  let reconnectMs = 1000;
+  let connecting: Promise<void> | null = null;
+  const fireAll = () => handlers.forEach((set) => set.forEach((h) => h()));
+
+  async function connect(): Promise<void> {
+    if (client || closed) return;
+    const c = new pg.Client({ connectionString: config.databaseUrl, application_name: 'rave-listen' });
+    const lost = (err?: Error) => {
+      if (client !== c) return;
+      client = null;
+      if (closed) return;
+      log({ err: err?.message }, 'koneksi LISTEN terputus — menyambung ulang');
+      setTimeout(() => void ensure(), reconnectMs).unref();
+      reconnectMs = Math.min(reconnectMs * 2, 30_000);
+    };
+    c.on('error', lost);
+    c.on('end', () => lost());
+    c.on('notification', (n) => handlers.get(n.channel)?.forEach((h) => h()));
+    client = c;
+    try {
+      await c.connect();
+      for (const ch of handlers.keys()) await c.query(`LISTEN ${pg.escapeIdentifier(ch)}`);
+      reconnectMs = 1000;
+      fireAll();
+    } catch (e: any) {
+      lost(e);
+    }
+  }
+  const ensure = () => (connecting ??= connect().finally(() => (connecting = null)));
+
+  return {
+    async on(channel: string, fn: () => void) {
+      const isNew = !handlers.has(channel);
+      if (isNew) handlers.set(channel, new Set());
+      handlers.get(channel)!.add(fn);
+      if (client && isNew) await client.query(`LISTEN ${pg.escapeIdentifier(channel)}`).catch(() => {});
+      else await ensure();
+    },
+    async close() {
+      closed = true;
+      await client?.end().catch(() => {});
+    },
+  };
 }
 
 interface Driver {
@@ -31,38 +90,9 @@ function isTransient(e: any): boolean {
 }
 
 // ---------- Driver PG: log append-only bus.events + offset per consumer group ----------
-function pgDriver(db: Db, log: (o: object, m: string) => void): Driver {
-  const listeners: (() => void)[] = [];
-  let listenClient: pg.Client | null = null;
+function pgDriver(db: Db, log: (o: object, m: string) => void, listener: ReturnType<typeof createListener>): Driver {
   const timers: NodeJS.Timeout[] = [];
   let closed = false;
-
-  let reconnectMs = 1000;
-  async function ensureListen(): Promise<void> {
-    if (listenClient || closed) return;
-    const c = new pg.Client({ connectionString: config.databaseUrl });
-    // Koneksi LISTEN putus (mis. Postgres restart) → sambung ulang dengan backoff; sementara itu interval drain tetap jalan.
-    const lost = (err?: Error) => {
-      if (listenClient !== c) return;
-      listenClient = null;
-      if (closed) return;
-      log({ err: err?.message }, 'koneksi LISTEN bus terputus — menyambung ulang');
-      setTimeout(() => void ensureListen().catch(() => {}), reconnectMs).unref();
-      reconnectMs = Math.min(reconnectMs * 2, 30_000);
-    };
-    c.on('error', lost);
-    c.on('end', () => lost());
-    c.on('notification', () => listeners.forEach((l) => l()));
-    listenClient = c;
-    try {
-      await c.connect();
-      await c.query('LISTEN rave_bus');
-      reconnectMs = 1000;
-      listeners.forEach((l) => l()); // kejar event yang terlewat selama terputus
-    } catch (e: any) {
-      lost(e);
-    }
-  }
 
   return {
     async publish(c, envs) {
@@ -80,7 +110,6 @@ function pgDriver(db: Db, log: (o: object, m: string) => void): Driver {
       if (envs.length) await c.query(`SELECT pg_notify('rave_bus', '')`);
     },
     async subscribe(group, topics, onEvent) {
-      await ensureListen();
       for (const t of topics) {
         await db.query(`INSERT INTO bus.consumer_offsets (group_id, topic, last_seq) VALUES ($1,$2,0) ON CONFLICT DO NOTHING`, [group, t]);
       }
@@ -190,15 +219,14 @@ function pgDriver(db: Db, log: (o: object, m: string) => void): Driver {
           running = false;
         }
       };
-      listeners.push(() => void drain());
       // LISTEN/NOTIFY membangunkan drain secara real-time; interval hanya jaring pengaman (NOTIFY terlewat, retry dead letter).
-      timers.push(setInterval(() => void drain(), 5000));
+      await listener.on('rave_bus', () => void drain());
+      timers.push(setInterval(() => void drain(), Number(process.env.BUS_DRAIN_POLL_MS) || 10_000));
       void drain();
     },
     async close() {
       closed = true;
       timers.forEach(clearInterval);
-      await listenClient?.end().catch(() => {});
     },
   };
 }
@@ -251,19 +279,38 @@ function kafkaDriver(db: Db, service: string, log: (o: object, m: string) => voi
 
 /** Relay outbox → bus, plus registrasi konsumen. */
 export function createBus(db: Db, service: string, log: (o: object, m: string) => void) {
-  const driver = config.busDriver === 'kafka' ? kafkaDriver(db, service, log) : pgDriver(db, log);
+  const listener = createListener(log);
+  const driver = config.busDriver === 'kafka' ? kafkaDriver(db, service, log) : pgDriver(db, log, listener);
+  outboxChannel = `rave_outbox_${service}`.replace(/[^a-z0-9_]/gi, '_');
   let timer: NodeJS.Timeout | null = null;
   let relaying = false;
+  let again = false;
 
-  async function relayOnce() {
-    if (relaying) return;
+  async function relayOnce(): Promise<void> {
+    if (relaying) {
+      again = true; // sinyal datang saat relay berjalan → ulangi setelah selesai, jangan sampai terlewat
+      return;
+    }
     relaying = true;
     try {
-      // Cek murah via indeks parsial outbox_unpublished_idx — relay jalan tiap 250 ms di setiap service.
-      if (!(await db.one(`SELECT 1 AS x FROM outbox WHERE published_at IS NULL LIMIT 1`))) return;
-      await db.tx(async (c) => {
+      do {
+        again = false;
+        // Cek murah via indeks parsial outbox_unpublished_idx.
+        if (!(await db.one(`SELECT 1 AS x FROM outbox WHERE published_at IS NULL LIMIT 1`))) continue;
+        const n = await relayBatch();
+        if (n === 100) again = true; // masih ada antrean
+      } while (again);
+    } catch (e: any) {
+      log({ err: e?.message }, 'outbox relay error');
+    } finally {
+      relaying = false;
+    }
+  }
+
+  async function relayBatch(): Promise<number> {
+    return db.tx(async (c) => {
         const r = await c.query(`SELECT * FROM outbox WHERE published_at IS NULL ORDER BY occurred_at, id LIMIT 100 FOR UPDATE SKIP LOCKED`);
-        if (!r.rows.length) return;
+        if (!r.rows.length) return 0;
         const envs: EventEnvelope[] = r.rows.map((row) => ({
           id: row.id,
           topic: row.topic,
@@ -274,18 +321,22 @@ export function createBus(db: Db, service: string, log: (o: object, m: string) =
         }));
         await driver.publish(c, envs);
         await c.query(`UPDATE outbox SET published_at = now() WHERE id = ANY($1)`, [envs.map((e) => e.id)]);
-      });
-    } catch (e: any) {
-      log({ err: e?.message }, 'outbox relay error');
-    } finally {
-      relaying = false;
-    }
+        return envs.length;
+    });
   }
 
   return {
     relayOnce,
-    startRelay(everyMs = 250) {
-      timer = setInterval(() => void relayOnce(), everyMs);
+    /** Dengarkan saluran NOTIFY lewat koneksi LISTEN bersama proses ini. */
+    listen: (channel: string, fn: () => void) => listener.on(channel, fn),
+    /**
+     * Relay dibangunkan NOTIFY dari publish() (latensi ≈ 0); polling hanya jaring pengaman untuk baris outbox yang
+     * ditulis tanpa publish() atau sinyal yang terlewat saat koneksi LISTEN tersambung ulang.
+     */
+    async startRelay(fallbackMs = Number(process.env.BUS_RELAY_POLL_MS) || 2000) {
+      await listener.on(outboxChannel!, () => void relayOnce());
+      timer = setInterval(() => void relayOnce(), fallbackMs);
+      void relayOnce();
     },
     async consume(consumers: Consumers) {
       const topics = Object.keys(consumers) as Topic[];
@@ -298,6 +349,7 @@ export function createBus(db: Db, service: string, log: (o: object, m: string) =
     async close() {
       if (timer) clearInterval(timer);
       await driver.close();
+      await listener.close();
     },
   };
 }

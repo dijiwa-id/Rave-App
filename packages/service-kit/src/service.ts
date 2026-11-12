@@ -16,9 +16,19 @@ export interface ServiceContext {
   bus: ReturnType<typeof createBus>;
 }
 
+/** Saluran NOTIFY job. */
+export const jobChannel = (name: string) => `rave_job_${name}`.replace(/[^a-z0-9_]/gi, '_');
+/** Bangunkan job ber-`wake` (setelah enqueue). Di dalam transaksi: terkirim saat commit. */
+export async function wakeJob(q: { query: (sql: string, params?: unknown[]) => Promise<unknown> }, name: string) {
+  await q.query(`SELECT pg_notify($1, '')`, [jobChannel(name)]);
+}
+
 export interface Job {
   name: string;
+  /** Interval polling. Untuk job ber-`wake` ini hanya jaring pengaman (retry, pekerjaan macet, sinyal terlewat). */
   everyMs: number;
+  /** Bangunkan job segera lewat NOTIFY `rave_job_<name>` — produsen memanggil `wakeJob(q, name)` setelah enqueue. */
+  wake?: boolean;
   run: (ctx: ServiceContext) => Promise<void>;
 }
 
@@ -133,7 +143,7 @@ export function createService(def: ServiceDefinition) {
       await def.routes(scoped, ctx);
     });
     await app.listen({ port: def.port, host: process.env.HOST ?? '0.0.0.0' });
-    bus.startRelay();
+    await bus.startRelay();
     // Pengaturan platform: snapshot awal + LISTEN/NOTIFY `rave_settings` (setiap replika, termasuk platform —
     // platform memuat dari DB lewat setSettingsLoader) + event bus + refresh berkala sebagai jaring pengaman.
     await refreshSettings(def.name);
@@ -148,17 +158,27 @@ export function createService(def: ServiceDefinition) {
       },
     });
     for (const j of def.jobs ?? []) {
-      // Satu job tidak pernah berjalan tumpang tindih: tick dilewati bila run sebelumnya belum selesai (DB lambat).
+      // Satu job tidak pernah berjalan tumpang tindih. Sinyal yang datang saat job berjalan dicatat lalu dijalankan
+      // sekali lagi setelahnya (bukan dibuang) agar pekerjaan baru tidak menunggu interval berikutnya.
       let running = false;
-      timers.push(
-        setInterval(() => {
-          if (running || stopping) return;
-          running = true;
-          j.run(ctx)
-            .catch((e) => log.error({ err: e?.message, job: j.name }, 'job gagal'))
-            .finally(() => (running = false));
-        }, j.everyMs),
-      );
+      let again = false;
+      const tick = () => {
+        if (stopping) return;
+        if (running) {
+          again = true;
+          return;
+        }
+        running = true;
+        again = false;
+        j.run(ctx)
+          .catch((e) => log.error({ err: e?.message, job: j.name }, 'job gagal'))
+          .finally(() => {
+            running = false;
+            if (again) tick();
+          });
+      };
+      timers.push(setInterval(tick, j.everyMs));
+      if (j.wake) await bus.listen(jobChannel(j.name), tick);
     }
     log.info({ port: def.port, bus: config.busDriver, instance: INSTANCE_ID }, `${def.name} siap`);
   }

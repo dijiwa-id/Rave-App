@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONTRACT_STATUS_LABEL, type ContractStatus } from '@rave/domain';
 import { BRANDING_PUBLIC_PREFIX } from '@rave/domain/settings';
-import { settings, type Client, type Job } from '@rave/service-kit';
+import { settings, wakeJob, type Client, type Job } from '@rave/service-kit';
 import type { ContractData } from './contract-data.js';
 import {
   qrSvg,
@@ -94,6 +94,7 @@ export function contractStatusLabel(status: string): string {
 
 export async function enqueueContractJob(c: Client, contractId: string, kind: 'RENDER_DRAFT' | 'RENDER_FINAL' | 'DISTRIBUTE') {
   await c.query(`INSERT INTO contract_jobs (contract_id, kind) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [contractId, kind]);
+  await wakeJob(c, 'contract-jobs');
 }
 
 /** Render draf PDF dari snapshot tersimpan (deterministik: snapshot + templat berversi). */
@@ -222,7 +223,8 @@ const MAX_ATTEMPTS = 5;
 /** Antrean job kontrak berbasis Postgres (FOR UPDATE SKIP LOCKED) — aman untuk banyak replika. */
 export const contractJobs: Job = {
   name: 'contract-jobs',
-  everyMs: 3_000,
+  everyMs: 15_000,
+  wake: true,
   async run({ db, log }) {
     for (let i = 0; i < 5; i++) {
       const job = await db.one<{ id: string; contract_id: string; kind: string; attempts: number }>(
@@ -247,5 +249,7 @@ export const contractJobs: Job = {
         );
       }
     }
+    // 5 job diproses → kemungkinan masih ada antrean; lanjutkan segera.
+    await wakeJob(db, 'contract-jobs');
   },
 };

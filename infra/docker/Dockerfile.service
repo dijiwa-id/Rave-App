@@ -1,11 +1,12 @@
 # syntax=docker/dockerfile:1.7
-# Image microservice RAVE (monorepo, runtime tsx — tanpa langkah kompilasi).
+# Image microservice RAVE (monorepo). TypeScript ditranspile ke JavaScript saat build (scripts/build-js.mjs) —
+# runtime memakai `node` biasa: start lebih cepat, memori lebih kecil, tanpa kompilasi di produksi.
 #
 #   Produksi : docker build -f infra/docker/Dockerfile.service --target runtime --build-arg SERVICE=booking -t rave/booking .
 #
 # Lapisan sebelum `ARG SERVICE` identik untuk semua service → BuildKit membangunnya sekali dan dipakai bersama.
 ARG NODE_VERSION=22
-ARG TSX_VERSION=4.23.15
+ARG ESBUILD_VERSION=0.28.2
 
 # ---- 1. Manifest saja (cache npm ci hanya pecah bila dependensi berubah) ----
 FROM node:${NODE_VERSION}-alpine AS manifests
@@ -24,20 +25,30 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
       $(for d in packages/* services/*; do printf -- '--workspace=%s ' "$d"; done)
 
-# ---- 3. Runtime produksi ----
+# ---- 3. Transpile TypeScript → JavaScript (per berkas, di samping .ts; exports workspace → .js) ----
+FROM node:${NODE_VERSION}-alpine AS transpile
+ARG ESBUILD_VERSION
+WORKDIR /tools
+RUN --mount=type=cache,target=/root/.npm npm init -y >/dev/null && npm install --no-audit --no-fund esbuild@${ESBUILD_VERSION}
+COPY scripts/build-js.mjs /tools/build-js.mjs
+WORKDIR /src
+COPY packages ./packages
+COPY services ./services
+RUN node /tools/build-js.mjs /src --rewrite-exports
+
+# ---- 4. Runtime produksi ----
 FROM node:${NODE_VERSION}-alpine AS runtime-base
-ARG TSX_VERSION
-RUN apk add --no-cache tini && npm install -g tsx@${TSX_VERSION} && npm cache clean --force
+RUN apk add --no-cache tini
 WORKDIR /repo
 COPY --from=deps-prod /repo ./
 COPY package.json tsconfig.base.json tsconfig.json ./
-COPY packages ./packages
-COPY services ./services
-COPY infra/docker/healthcheck.mjs /usr/local/lib/rave/healthcheck.mjs
+COPY --from=transpile /src/packages ./packages
+COPY --from=transpile /src/services ./services
+COPY infra/docker/healthcheck.sh /usr/local/lib/rave/healthcheck.sh
 
 FROM runtime-base AS runtime
 ARG SERVICE
-RUN test -n "$SERVICE" && test -f "services/$SERVICE/src/index.ts" || (echo "build-arg SERVICE tidak valid: '$SERVICE'" >&2; exit 1)
+RUN test -n "$SERVICE" && test -f "services/$SERVICE/src/index.js" || (echo "build-arg SERVICE tidak valid: '$SERVICE'" >&2; exit 1)
 # Kebutuhan sistem per service: platform → pg_dump (backup, versi ≥ server), live → ffmpeg (HLS), catalog → ffmpeg (probe & transcoding audio), booking → Chromium (PDF kontrak).
 RUN case "$SERVICE" in \
       platform) apk add --no-cache postgresql16-client ;; \
@@ -54,12 +65,12 @@ LABEL org.opencontainers.image.title="rave-${SERVICE}" \
       org.opencontainers.image.revision="${GIT_SHA}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.source="https://github.com/rave/rave"
-ENV NODE_ENV=production SERVICE=${SERVICE} APP_VERSION=${APP_VERSION} GIT_SHA=${GIT_SHA} BUILD_DATE=${BUILD_DATE} \
+ENV NODE_ENV=production NODE_OPTIONS=--enable-source-maps SERVICE=${SERVICE} APP_VERSION=${APP_VERSION} GIT_SHA=${GIT_SHA} BUILD_DATE=${BUILD_DATE} \
     UPLOAD_DIR=/data/uploads BACKUP_DIR=/data/backups LIVE_DIR=/data/live CONTRACT_DIR=/data/contracts BRANDING_DIR=/data/branding \
     CHROMIUM_PATH=/usr/bin/chromium FFMPEG_PATH=/usr/bin/ffmpeg PG_DUMP=/usr/bin/pg_dump
 USER node
 WORKDIR /repo/services/${SERVICE}
-HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=3 CMD ["node", "/usr/local/lib/rave/healthcheck.mjs"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=3s --retries=3 CMD ["sh", "/usr/local/lib/rave/healthcheck.sh"]
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["tsx", "src/index.ts"]
+CMD ["node", "src/index.js"]

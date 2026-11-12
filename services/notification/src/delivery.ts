@@ -1,4 +1,4 @@
-import { brandedEmail, callService, DeliveryError, sendEmail, sendWhatsApp, type Job } from '@rave/service-kit';
+import { brandedEmail, callService, DeliveryError, sendEmail, sendWhatsApp, wakeJob, type Job } from '@rave/service-kit';
 
 /**
  * Worker kanal luar (REQ-NTF-01: pesan transaksional terkirim ≤ 60 detik).
@@ -18,7 +18,8 @@ type Contact = { email: string | null; phone: string | null; suspended: boolean 
 
 export const deliveryJob: Job = {
   name: 'deliveries',
-  everyMs: 3000,
+  everyMs: 15_000,
+  wake: true,
   async run({ db, log }) {
     // Worker yang mati di tengah pengiriman meninggalkan SENDING → kembalikan ke antrean.
     await db.query(`UPDATE deliveries SET status='PENDING', claimed_at=NULL WHERE status='SENDING' AND claimed_at < now() - make_interval(mins => $1)`, [STALE_SENDING_MIN]);
@@ -86,5 +87,7 @@ export const deliveryJob: Job = {
         else await finish(d.id, 'FAILED', { error: String(e?.message ?? e).slice(0, 500) });
       }
     }
+    // Batch penuh → kemungkinan masih ada antrean; lanjutkan segera tanpa menunggu interval cadangan.
+    if (rows.length === BATCH) await wakeJob(db, 'deliveries');
   },
 };
