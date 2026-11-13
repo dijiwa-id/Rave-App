@@ -184,6 +184,11 @@ console.log('\n▶ Master multi-format & rendisi (Artist Studio)');
     const qcList = await call(admin.access_token, 'GET', '/v1/admin/qc/releases');
     const qcRow = qcList.data?.data?.find((r: any) => r.id === rel.data?.id);
     check('QC melihat peringatan split belum disetujui', qcRow?.qc_warnings?.some((w: string) => /belum disetujui/.test(w)), qcRow?.qc_warnings);
+    // Sejak b1c14de persetujuan split opsional (`catalog.qc_require_split_approval`, default mati) — uji mode wajib.
+    const saSplit = await login(SEED.emails.superadmin);
+    const reqOn = await call(saSplit.access_token, 'PUT', '/v1/admin/platform/settings', { changes: { 'catalog.qc_require_split_approval': true }, reason: 'uji e2e split wajib' });
+    check('pengaturan: persetujuan split wajib diaktifkan', reqOn.status === 200, [reqOn.status, reqOn.data?.detail]);
+    await new Promise((r) => setTimeout(r, 2000)); // propagasi pengaturan (LISTEN/NOTIFY) ke catalog
     const blocked = await call(admin.access_token, 'POST', `/v1/admin/qc/releases/${rel.data?.id}/decision`, { approve: true });
     check('QC tidak bisa menyetujui rilis sebelum semua split disetujui (409)', blocked.status === 409, blocked.status);
     const inv = await login(invitee);
@@ -193,6 +198,7 @@ console.log('\n▶ Master multi-format & rendisi (Artist Studio)');
     check('pihak yang diundang menyetujui bagiannya', ok.status === 200, [pend.status, ok.status]);
     const approved = await call(admin.access_token, 'POST', `/v1/admin/qc/releases/${rel.data?.id}/decision`, { approve: true });
     check('setelah semua split disetujui, QC menyetujui rilis', approved.status === 200 && ['LIVE', 'SCHEDULED'].includes(approved.data?.status), [approved.status, approved.data?.status]);
+    await call(saSplit.access_token, 'POST', '/v1/admin/platform/settings/reset', { keys: ['catalog.qc_require_split_approval'], reason: 'selesai uji e2e split' });
     // Ganti sampul: rilis LIVE → menunggu QC (sampul lama tetap tayang); URL eksternal ditolak.
     const ext = await call(AT, 'PUT', `/v1/studio/releases/${rel.data?.id}/cover`, { cover_url: 'https://example.com/x.jpg' });
     check('sampul dari URL eksternal ditolak (422)', ext.status === 422, ext.status);

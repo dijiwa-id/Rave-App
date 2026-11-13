@@ -293,6 +293,8 @@ for (const [prefix, upstream] of ROUTES) {
     prefix,
     rewritePrefix: prefix,
     http2: false,
+    // Upstream macet tidak boleh menahan koneksi klien bermenit-menit (bawaan undici 300 dtk) → 504 via onError.
+    undici: { headersTimeout: Number(process.env.GATEWAY_UPSTREAM_HEADERS_TIMEOUT_MS ?? 60_000) },
     replyOptions: {
       // `Expect: 100-continue` (dikirim curl/klien mobile untuk body besar) tidak didukung undici → 500.
       // Node sudah menjawab 100 Continue ke klien, jadi header ini tidak perlu diteruskan ke upstream.

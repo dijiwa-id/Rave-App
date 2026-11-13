@@ -81,7 +81,13 @@ export function errorHandler(err: FastifyError | Error, req: FastifyRequest, rep
     // Detail Postgres ("Key (email)=(x) already exists") tidak dikirim ke klien — bisa membocorkan data.
     status = 409;
     body = { type: 'https://rave.id/problems/duplicate', title: 'Duplikat', status, detail: 'Data yang sama sudah ada' };
-  } else if (['22P02', '22007', '22008', '22003'].includes((err as any).code)) {
+  } else if ((err as any).code === '23503' || (err as any).code === '23514') {
+    // foreign_key / check_violation: data rujukan tidak ada atau nilai di luar aturan — kesalahan permintaan.
+    status = 409;
+    body = { type: 'https://rave.id/problems/constraint', title: 'Data tidak memenuhi aturan', status, detail: 'Data rujukan tidak ditemukan atau nilai tidak diizinkan' };
+  } else if (typeof (err as any).code === 'string' && /^22[0-9A-Z]{3}$/.test((err as any).code)) {
+    // Kelas 22 (data_exception): format salah, NUL byte (22021), LIMIT negatif (2201W), teks terlalu panjang (22001)…
+    // selalu akibat input klien → 400, bukan 500.
     // Parameter salah format (mis. UUID/tanggal tidak valid) adalah kesalahan klien, bukan 500.
     status = 400;
     body = { type: 'https://rave.id/problems/validation', title: 'Parameter tidak valid', status, detail: 'Format parameter tidak valid' };
