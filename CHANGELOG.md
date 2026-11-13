@@ -5,6 +5,45 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-11-13
+
+### Fitur
+
+- **web:** mode karaoke — lockup logo RAVE + KARAOKE, grafis orbit planet (84b6270)
+- **catalog:** persetujuan rilis fase awal cukup admin RAVE / Super Admin (b1c14de)
+- **iam:** jenis member per akun diatur Super Admin; dev: Super Admin bebas batas OTP (a068296)
+- **studio:** edit rilis lewat QC, pengaturan lirik; audit kebersihan & performa (201378d)
+- batch 2 go-live, profil artis, sampul & kurasi artwork, dev auto-reload (b2d9746)
+- kesiapan go-live — integrasi email & Midtrans, kontrol payout, backup off-site, monitoring (6967ca8)
+- audio multi-format + HQ/Lossless khusus Premium, sampul playlist, audit stabilitas (bf5a54c)
+- **contract:** Tahap 3 — templat spk-v2, PDF Puppeteer, QR, hash, storage privat, verifikasi publik (27a2ee3)
+- **contract:** fondasi Generated Contract — state machine kontrak, termin/pajak/split, skema berversi, dokumen asumsi (ce2746b)
+- **platform:** fondasi Super Admin — registri pengaturan, klien settings, stats internal, retry dead letter, kontrak API §9 (766140f)
+- platform GEMA — 8 microservice, gateway, web (landing, fan app, studio, promotor hub, back office) (496aa6b)
+- **domain:** katalog seed deterministik (2277964)
+
+### Perbaikan
+
+- **go-live:** batch 1 — hak admin, master audio, refund booking, payout, KYC, kontrak, force majeure (ca1e07e)
+- **domain:** ekspor modul contract dari index (f90e67f)
+- scripts sebagai ES module (8888e99)
+
+### Performa
+
+- bus & job berbasis sinyal, image produksi JavaScript, healthcheck ringan, batas sumber daya (91915aa)
+
+### Dokumentasi
+
+- audit go-live ulang terhadap BRD/TDD v3.0 (34012c0)
+
+### Lain-lain
+
+- **dev:** ./rave demo — backend demo stabil untuk aplikasi desktop & mobile (6c7266c)
+- sertakan seluruh perubahan kerja lokal (live, ads, platform, web, pengaturan kontrak) (62ebf75)
+- fondasi monorepo GEMA (service-kit, domain, gateway, notification, web shell) (514c486)
+
+### Catatan rilis
+
 - Rebranding penuh GEMA → RAVE di kode, konfigurasi, skrip, dan dokumen (paket `@rave/*`, env `RAVE_*`, DB `rave`).
   **Breaking (dev):** sesi login lama tidak berlaku (issuer JWT & kunci localStorage berganti); `./gema` → `./rave`;
   `GEMA_PGPORT` → `RAVE_PGPORT`. Data dev lama dipindahkan otomatis oleh `scripts/dev-db.sh`.
