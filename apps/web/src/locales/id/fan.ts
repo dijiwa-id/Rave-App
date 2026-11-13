@@ -128,6 +128,7 @@ const fan = {
     shareLine: 'Bagikan baris lirik',
     license: 'Lirik ditampilkan berdasarkan lisensi publisher.',
     karaokeSticker: 'Karaoke!',
+    karaokeTitle: 'Karaoke',
     exitKaraoke: 'Keluar karaoke',
     getReady: 'Siap-siap…',
     instrumental: 'Jeda instrumental',

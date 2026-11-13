@@ -132,6 +132,7 @@ const fan: Shape<typeof id> = {
     shareLine: 'Share lyric line',
     license: 'Lyrics shown under publisher license.',
     karaokeSticker: 'Karaoke!',
+    karaokeTitle: 'Karaoke',
     exitKaraoke: 'Exit karaoke',
     getReady: 'Get ready…',
     instrumental: 'Instrumental break',
