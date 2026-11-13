@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import net from 'node:net';
 import { dirname, join } from 'node:path';
@@ -321,6 +321,41 @@ export async function startRtmp(h: RtmpHandlers, log: Log): Promise<{ ok: boolea
 // ---------------------------------------------------------------------------------------------
 // Kanal demo: visual gradien + gelombang suara dari melodi sintetis → RTMP lokal
 // ---------------------------------------------------------------------------------------------
+const DEMO_LOOP_SECONDS = 32; // = 2 putaran progresi akor 16 dtk; kelipatan GOP 2 dtk
+const DEMO_LOOP = join(LIVE_DIR, '.demo-loop-v1.flv'); // berkas (bukan folder) → tidak disapu pruneLiveStorage
+
+/** Argumen ffmpeg sinyal demo (visual gradien + gelombang suara dari melodi sintetis), tanpa keluaran. */
+function demoEncodeArgs(pre: string[]): string[] {
+  // Progresi akor I–V–vi–IV (C–G–Am–F, rasio frekuensi dari C) + arpeggio, 4 dtk per akor.
+  const f = "if(lt(mod(t,16),4),1,if(lt(mod(t,16),8),1.4983,if(lt(mod(t,16),12),1.6818,1.3348)))";
+  const arp = "if(lt(mod(t*4,4),1),1,if(lt(mod(t*4,4),2),1.2599,if(lt(mod(t*4,4),3),1.4983,2)))";
+  const audio = `aevalsrc='0.12*sin(2*PI*t*130.81*${f})+0.08*sin(2*PI*t*261.63*${f}*${arp})*exp(-3*mod(t,0.25))+0.05*sin(2*PI*t*196*${f})':s=44100:c=stereo`;
+  const filter =
+    '[0:v]format=rgba[bg];' +
+    '[1:a]asplit=2[a1][aout];' +
+    '[a1]showwaves=s=854x160:mode=cline:rate=30:colors=white|white:draw=full,format=rgba,colorchannelmixer=aa=0.85[w];' +
+    '[bg][w]overlay=0:H-h-40,format=yuv420p[v]';
+  return [
+    '-hide_banner', '-loglevel', 'error', '-nostdin', ...pre,
+    '-f', 'lavfi', '-i', 'gradients=s=854x480:r=30:c0=0x1e1b4b:c1=0x7c3aed:c2=0x1ed760:c3=0x0f172a:n=4:speed=0.015',
+    '-f', 'lavfi', '-i', audio,
+    '-filter_complex', filter, '-map', '[v]', '-map', '[aout]',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-pix_fmt', 'yuv420p', '-b:v', '1200k', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
+    '-c:a', 'aac', '-b:a', '128k',
+  ];
+}
+
+/** ffmpeg yang sedang menulis ke RTMP kadang mengabaikan SIGTERM pertama → SIGKILL bila belum keluar dalam 2 dtk. */
+function terminate(p: ChildProcess) {
+  if (p.exitCode !== null || p.signalCode !== null) return;
+  p.kill('SIGTERM');
+  const t = setTimeout(() => {
+    if (p.exitCode === null && p.signalCode === null) p.kill('SIGKILL');
+  }, 2000);
+  t.unref();
+  p.once('exit', () => clearTimeout(t));
+}
+
 export class DemoPublisher {
   private proc: ChildProcess | null = null;
   private stopped = true;
@@ -338,24 +373,12 @@ export class DemoPublisher {
     this.stopped = false;
     const spawnOnce = () => {
       if (this.stopped) return;
-      // Progresi akor I–V–vi–IV (C–G–Am–F, rasio frekuensi dari C) + arpeggio, 4 dtk per akor.
-      const f = "if(lt(mod(t,16),4),1,if(lt(mod(t,16),8),1.4983,if(lt(mod(t,16),12),1.6818,1.3348)))";
-      const arp = "if(lt(mod(t*4,4),1),1,if(lt(mod(t*4,4),2),1.2599,if(lt(mod(t*4,4),3),1.4983,2)))";
-      const audio = `aevalsrc='0.12*sin(2*PI*t*130.81*${f})+0.08*sin(2*PI*t*261.63*${f}*${arp})*exp(-3*mod(t,0.25))+0.05*sin(2*PI*t*196*${f})':s=44100:c=stereo`;
-      const filter =
-        '[0:v]format=rgba[bg];' +
-        '[1:a]asplit=2[a1][aout];' +
-        '[a1]showwaves=s=854x160:mode=cline:rate=30:colors=white|white:draw=full,format=rgba,colorchannelmixer=aa=0.85[w];' +
-        '[bg][w]overlay=0:H-h-40,format=yuv420p[v]';
-      const args = [
-        '-hide_banner', '-loglevel', 'error', '-nostdin', '-re',
-        '-f', 'lavfi', '-i', 'gradients=s=854x480:r=30:c0=0x1e1b4b:c1=0x7c3aed:c2=0x1ed760:c3=0x0f172a:n=4:speed=0.015',
-        '-f', 'lavfi', '-i', audio,
-        '-filter_complex', filter, '-map', '[v]', '-map', '[aout]',
-        '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-pix_fmt', 'yuv420p', '-b:v', '1200k', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
-        '-c:a', 'aac', '-b:a', '128k',
-        '-f', 'flv', `rtmp://127.0.0.1:${RTMP_PORT}/live/${key}`,
-      ];
+      // Loop sudah dirender → siarkan ulang tanpa encode (≈1% CPU). Belum → encode langsung sambil merender loop.
+      const looped = existsSync(DEMO_LOOP);
+      const args = looped
+        ? ['-hide_banner', '-loglevel', 'error', '-nostdin', '-re', '-stream_loop', '-1', '-i', DEMO_LOOP, '-c', 'copy', '-f', 'flv', `rtmp://127.0.0.1:${RTMP_PORT}/live/${key}`]
+        : [...demoEncodeArgs(['-re']), '-f', 'flv', `rtmp://127.0.0.1:${RTMP_PORT}/live/${key}`];
+      if (!looped) this.renderLoop(bin);
       const p = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'] });
       this.proc = p;
       let err = '';
@@ -375,10 +398,33 @@ export class DemoPublisher {
     spawnOnce();
   }
 
+  /** Render sekali loop demo ke berkas (tanpa -re, beberapa detik); setelahnya publisher memakai `-c copy`. */
+  private rendering = false;
+  private renderLoop(bin: string) {
+    if (this.rendering) return;
+    this.rendering = true;
+    const tmp = `${DEMO_LOOP}.${process.pid}.tmp.flv`;
+    const p = spawn(bin, [...demoEncodeArgs([]), '-t', String(DEMO_LOOP_SECONDS), '-y', '-f', 'flv', tmp], { stdio: 'ignore' });
+    const done = (ok: boolean) => {
+      this.rendering = false;
+      try {
+        if (ok) renameSync(tmp, DEMO_LOOP);
+        else rmSync(tmp, { force: true });
+      } catch {
+        /* replika lain sudah menulis berkas yang sama */
+      }
+      if (!ok || this.stopped) return;
+      this.log.info({ file: DEMO_LOOP }, 'loop demo dirender — publisher beralih ke mode salin');
+      if (this.proc) terminate(this.proc); // restart otomatis (3 dtk) memakai loop
+    };
+    p.on('exit', (code) => done(code === 0));
+    p.on('error', () => done(false));
+  }
+
   stop() {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
-    this.proc?.kill('SIGTERM');
+    if (this.proc) terminate(this.proc);
     this.proc = null;
   }
 }
