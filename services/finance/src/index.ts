@@ -2,6 +2,7 @@ import { createService, config } from '@rave/service-kit';
 import { consumers } from './consumers.js';
 import { expiryJob, payoutJob, refundDispatchJob, releaseJob, sandboxRefundSettleJob } from './jobs.js';
 import { paymentSettings } from './providers.js';
+import { reportRoutes } from './reports.js';
 import { routes } from './routes.js';
 import { seed } from './seed.js';
 
@@ -10,7 +11,10 @@ const svc = createService({
   schema: 'finance',
   port: config.ports.finance,
   migrationsDir: new URL('../migrations/', import.meta.url),
-  routes,
+  routes: async (app, ctx) => {
+    await routes(app, ctx);
+    await reportRoutes(app, ctx);
+  },
   consumers,
   jobs: [releaseJob, payoutJob, expiryJob, refundDispatchJob, sandboxRefundSettleJob],
   stats: async ({ db }) => (await db.one(

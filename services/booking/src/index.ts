@@ -7,6 +7,7 @@ import { adminRoutes } from './routes-admin.js';
 import { artistRoutes } from './routes-artist.js';
 import { bookingRoutes } from './routes-bookings.js';
 import { contractRoutes } from './routes-contracts.js';
+import { reportRoutes } from './reports.js';
 import { seed } from './seed.js';
 
 const svc = createService({
@@ -18,6 +19,7 @@ const svc = createService({
     await artistRoutes(app, ctx);
     await adminRoutes(app, ctx);
     await contractRoutes(app, ctx);
+    await reportRoutes(app, ctx);
     // bookingRoutes memasang preHandler requireAuth → daftarkan di scope terpisah.
     await app.register(async (s) => bookingRoutes(s, ctx));
   },

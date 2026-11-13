@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { LiveManager, ME } from './manager.js';
 import { pruneLiveStorage } from './media.js';
 import { flushViewers, routes } from './routes.js';
+import { reportRoutes } from './reports.js';
 import { seed } from './seed.js';
 
 /** Service Live — siaran langsung: ingest RTMP/browser → ffmpeg → HLS, chat, penonton (docs/API.md §10). */
@@ -17,6 +18,7 @@ const svc = createService({
     mgr = new LiveManager(ctx);
     await mgr.init();
     await routes(app, ctx, mgr);
+    await reportRoutes(app, ctx);
   },
   jobs: [
     // Registri instance (multi-replika): heartbeat terpisah dari watchdog agar tick lambat tidak membuat instance "mati".

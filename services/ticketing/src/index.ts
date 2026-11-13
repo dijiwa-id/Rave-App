@@ -1,5 +1,6 @@
 import { createService, config } from '@rave/service-kit';
 import { completeEventsJob, consumers, expireJob, refundCancelledJob } from './consumers.js';
+import { reportRoutes } from './reports.js';
 import { routes } from './routes.js';
 import { seed } from './seed.js';
 
@@ -8,7 +9,10 @@ const svc = createService({
   schema: 'ticketing',
   port: config.ports.ticketing,
   migrationsDir: new URL('../migrations/', import.meta.url),
-  routes,
+  routes: async (app, ctx) => {
+    await routes(app, ctx);
+    await reportRoutes(app, ctx);
+  },
   consumers,
   jobs: [expireJob, completeEventsJob, refundCancelledJob],
   stats: async ({ db }) => (await db.one(

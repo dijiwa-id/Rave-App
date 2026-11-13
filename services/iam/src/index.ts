@@ -1,6 +1,7 @@
 import { createService, config } from '@rave/service-kit';
 import { routes } from './routes.js';
 import { adminRoutes } from './admin.js';
+import { reportRoutes } from './reports.js';
 import { seed } from './seed.js';
 
 const svc = createService({
@@ -11,6 +12,7 @@ const svc = createService({
   routes: async (app, ctx) => {
     await routes(app, ctx);
     await adminRoutes(app, ctx);
+    await reportRoutes(app, ctx);
   },
   jobs: [
     {

@@ -16,6 +16,7 @@
     "./ads": "./src/ads.ts",
     "./landing": "./src/landing.ts",
     "./audio": "./src/audio.ts",
-    "./integrations": "./src/integrations.ts"
+    "./integrations": "./src/integrations.ts",
+    "./reports": "./src/reports.ts"
   }
 }

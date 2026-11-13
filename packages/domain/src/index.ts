@@ -11,3 +11,4 @@ export * from './ads.js';
 export * from './contract.js';
 export * from './audio.js';
 export * from './integrations.js';
+export * from './reports.js';
