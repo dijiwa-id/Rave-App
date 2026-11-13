@@ -380,6 +380,16 @@ export const SETTINGS: SettingDef[] = [
   { key: 'transcoding.min_sample_rate_hz', group: 'transcoding', label: 'Sample rate master minimum', description: 'Master di bawah standar CD (44.100 Hz) ditolak saat QC teknis.', type: 'number', default: 44_100, min: 22_050, max: 192_000, unit: 'Hz', consumers: ['catalog'] },
   { key: 'transcoding.min_bit_depth', group: 'transcoding', label: 'Bit depth master minimum', description: 'Berlaku untuk master lossless (WAV/FLAC).', type: 'number', default: 16, min: 16, max: 32, step: 8, unit: 'bit', consumers: ['catalog'] },
   { key: 'transcoding.max_concurrent_jobs', group: 'transcoding', label: 'Job paralel', description: 'Jumlah transcoding yang berjalan bersamaan per instance worker.', type: 'number', default: 2, min: 1, max: 16, unit: 'job', consumers: ['catalog'] },
+  {
+    key: 'catalog.qc_require_split_approval',
+    group: 'transcoding',
+    label: 'Rilis wajib menunggu persetujuan split',
+    description:
+      'Aktif = QC baru bisa menyetujui rilis setelah semua pihak split MASTER/PUBLISHING menyetujui bagiannya (REQ-STU-02). Mati (fase awal) = persetujuan admin RAVE / Super Admin di QC sudah cukup; split yang belum disetujui tetap tercatat & bisa disetujui pihaknya kemudian.',
+    type: 'boolean',
+    default: false,
+    consumers: ['catalog'],
+  },
   { key: 'catalog.isrc_registrant_code', group: 'transcoding', label: 'Kode pendaftar ISRC RAVE', description: 'Format CC-XXX (kode negara + kode pendaftar dari agensi ISRC nasional, mis. PAPPRI/IFPI). Bila diisi, lagu tanpa ISRC otomatis diberi CC-XXX-YY-NNNNN dengan nomor urut per tahun (tidak berulang). Kosong = tidak ada ISRC otomatis; artis/label wajib mengisi ISRC sendiri dan QC melihat "ISRC kosong".', type: 'string', default: '', consumers: ['catalog'] },
 
   // ---- Streaming ----

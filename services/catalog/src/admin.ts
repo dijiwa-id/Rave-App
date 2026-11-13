@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { audit, badRequest, conflict, requireSuperAdmin, forbidden, notFound, publish, requirePermission, unauthorized, z, type Client, type Job, type ServiceContext } from '@rave/service-kit';
+import { audit, badRequest, config, conflict, isSuperAdmin, requireSuperAdmin, forbidden, notFound, publish, requirePermission, settings, unauthorized, z, type Client, type Job, type ServiceContext } from '@rave/service-kit';
 import { isUuid, releaseFull, releasesFull } from './queries.js';
 import { open as fsOpen } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -35,6 +35,16 @@ function artworkIssues(url: string | null, size: { width: number; height: number
   }
   return out;
 }
+
+/**
+ * Persetujuan split sebagai syarat QC diatur pengaturan `catalog.qc_require_split_approval`:
+ * - mati (default, fase awal): persetujuan admin RAVE / Super Admin di QC sudah cukup — split tertunda TIDAK diubah
+ *   (tetap tercatat, pihaknya bisa menyetujui kemudian) & jumlahnya dicatat di audit (`splits_pending`);
+ * - aktif (REQ-STU-02): wajib menunggu semua pihak, kecuali Super Admin di lingkungan dev (NODE_ENV ≠ production) —
+ *   split tertunda ditandai disetujui & dicatat di audit (`dev_split_bypass`).
+ */
+const splitsRequired = () => settings.bool('catalog.qc_require_split_approval');
+const devSplitBypass = (u: Parameters<typeof isSuperAdmin>[0]) => config.isDev && isSuperAdmin(u);
 
 /** Tanggal hari ini di WIB (rilis default 00:00 WIB, §7.4). */
 const todayWib = () => new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
@@ -90,7 +100,13 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
           `SELECT t.title, rs.party_name, rs.type FROM rights_shares rs JOIN tracks t ON t.id = rs.track_id WHERE t.release_id = $1 AND rs.approved_at IS NULL`,
           [id],
         );
-        for (const p of pendingSplits) r.qc_warnings.push(`"${p.title}": split ${p.type} ${p.party_name} belum disetujui (rilis tidak dapat disetujui)`);
+        // Dev saja: Super Admin boleh melewati persetujuan split (lihat devSplitBypass di bawah).
+        const note = !splitsRequired()
+          ? 'tidak menghalangi persetujuan — fase awal: persetujuan admin RAVE cukup'
+          : devSplitBypass(req.user)
+            ? 'dev: Super Admin dapat menyetujui — split ditandai disetujui otomatis'
+            : 'rilis tidak dapat disetujui';
+        for (const p of pendingSplits) r.qc_warnings.push(`"${p.title}": split ${p.type} ${p.party_name} belum disetujui (${note})`);
         delete r.artist_id;
         data.push(r);
       }
@@ -254,16 +270,27 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
       const { id } = req.params as { id: string };
       if (!isUuid(id)) throw notFound('Rilis');
       const b = z.object({ approve: z.boolean(), reason: z.string().max(1000).optional() }).parse(req.body);
+      let devBypassed = 0;
+      let splitsPending = 0;
       return db.tx(async (tx) => {
         const cur = (await tx.query(`SELECT id, status, artist_id, title, to_char(release_date,'YYYY-MM-DD') AS d FROM releases WHERE id = $1 FOR UPDATE`, [id])).rows[0];
         if (!cur) throw notFound('Rilis');
         if (cur.status !== 'IN_REVIEW') throw conflict(`Rilis berstatus ${cur.status}, bukan IN_REVIEW`);
         if (b.approve) {
-          // Semua pihak split hak harus sudah menyetujui bagiannya sebelum rilis tayang (REQ-STU-02, audit go-live).
+          // Split hak: wajib disetujui semua pihak hanya bila catalog.qc_require_split_approval aktif (REQ-STU-02); fase awal cukup admin.
           const pending = (
             await tx.query(`SELECT count(*)::int AS n FROM rights_shares rs JOIN tracks t ON t.id = rs.track_id WHERE t.release_id = $1 AND rs.approved_at IS NULL`, [id])
           ).rows[0].n;
-          if (pending > 0) throw conflict(`Masih ada ${pending} pihak split yang belum menyetujui bagiannya — rilis belum dapat disetujui`);
+          if (pending > 0 && !splitsRequired()) splitsPending = pending;
+          else if (pending > 0) {
+            if (!devSplitBypass(req.user)) throw conflict(`Masih ada ${pending} pihak split yang belum menyetujui bagiannya — rilis belum dapat disetujui`);
+            // Lingkungan dev: undangan split (MASTER/PUBLISHING) tidak perlu ditunggu agar rilis demo bisa diuji ujung-ke-ujung.
+            await tx.query(
+              `UPDATE rights_shares rs SET approved_at = now() FROM tracks t WHERE t.id = rs.track_id AND t.release_id = $1 AND rs.approved_at IS NULL`,
+              [id],
+            );
+            devBypassed = pending;
+          }
           if (cur.d > todayWib()) await tx.query(`UPDATE releases SET status = 'SCHEDULED', qc_reason = NULL, updated_at = now() WHERE id = $1`, [id]);
           else await goLive(tx, id);
         } else {
@@ -271,9 +298,10 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
           await tx.query(`UPDATE releases SET status = 'REJECTED', qc_reason = $2, updated_at = now() WHERE id = $1`, [id, reason]);
           await publish(tx, 'catalog.release.rejected', id, { releaseId: id, artistId: cur.artist_id, reason });
         }
-        await audit(tx, { actorId: req.user!.sub, action: b.approve ? 'qc.approve' : 'qc.reject', entity: 'release', entityId: id, data: b, ip: req.ip });
+        await audit(tx, { actorId: req.user!.sub, action: b.approve ? 'qc.approve' : 'qc.reject', entity: 'release', entityId: id, data: { ...b, ...(devBypassed ? { dev_split_bypass: devBypassed } : {}), ...(splitsPending ? { splits_pending: splitsPending } : {}) }, ip: req.ip });
         const out = await releaseFull(tx, id);
         delete out.artist_id;
+        if (devBypassed) out.dev_split_bypass = devBypassed;
         return out;
       });
     });
