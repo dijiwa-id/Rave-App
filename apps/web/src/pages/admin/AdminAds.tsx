@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, ClipboardCheck, FlaskConical, Lock, Megaphone, Pause, Pencil, Play, Plus, Send, ShieldCheck, Trash2, X } from 'lucide-react';
 import { AD_CATEGORIES, AD_CATEGORY_KEYS, categoryViolation, type AdCategory, type AdCategoryTier } from '@rave/domain/ads';
 import { SETTINGS, SETTINGS_BY_KEY } from '@rave/domain/settings';
+import { serviceHref } from '@/lib/raveServices';
 import { api, ApiError, fmt } from '@/lib/api';
 import { dict, useDict } from '@/lib/i18n';
 import type { AdsOverview, AdSimulateInput, AdSimulateResult, Campaign, CampaignInput, CampaignStatus, Me, SettingsResponse } from '@/lib/types';
@@ -924,7 +925,7 @@ function Policy() {
           }
           action={
             sup ? (
-              <Button size="sm" variant="outline-ink" onClick={() => nav('/admin/platform/settings?group=ads')} className="h-7 px-3 text-xs">
+              <Button size="sm" variant="outline-ink" onClick={() => nav(serviceHref('ads'))} className="h-7 px-3 text-xs">
                 {t.changeInSettings}
               </Button>
             ) : (

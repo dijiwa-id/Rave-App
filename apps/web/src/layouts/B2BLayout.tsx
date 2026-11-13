@@ -22,6 +22,8 @@ export interface B2BNavItem {
   end?: boolean;
   /** Judul seksi yang dirender di atas item ini (opsional; item tanpa `section` mengikuti seksi sebelumnya). */
   section?: string;
+  /** Label kecil di kanan item (mis. "Segera" untuk layanan yang belum siap). */
+  badge?: string;
 }
 
 /** Sidebar diciutkan (desktop) — diingat per perangkat. */
@@ -333,6 +335,9 @@ export function B2BLayout({ product, accent, nav, context, roleLabel }: { produc
                   )}
                   <n.icon className="size-[18px] shrink-0" />
                   {!rail && <span className="truncate">{n.label}</span>}
+                  {!rail && n.badge && (
+                    <span className={cx('ml-auto shrink-0 px-1.5 py-px text-[9px] font-black tracking-wider uppercase', isActive ? 'bg-rave-mustard text-rave-ink' : 'bg-amber-100 text-amber-800')}>{n.badge}</span>
+                  )}
                 </>
               )}
             </NavLink>

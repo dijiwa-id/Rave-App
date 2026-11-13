@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ComponentType } from 'react';
-import type { RouteObject } from 'react-router-dom';
+import { Navigate, type RouteObject } from 'react-router-dom';
 import type { AdminPermission } from '@rave/domain/settings';
 import { RequireAdminAccess, RequireAuth, RequireRole } from '@/components/guards';
 import { PageLoader } from '@/components/ui';
@@ -59,6 +59,8 @@ const platform = {
   landing: () => import('@/pages/admin/PlatformLanding'),
   integrations: () => import('@/pages/admin/PlatformIntegrations'),
   artwork: () => import('@/pages/admin/PlatformArtwork'),
+  categories: () => import('@/pages/admin/PlatformCategories'),
+  service: () => import('@/pages/admin/PlatformService'),
 };
 const access = (perms: AdminPermission[], children: RouteObject[]): RouteObject => ({ element: <RequireAdminAccess perms={perms} />, children });
 
@@ -137,6 +139,13 @@ export const b2bRoutes: RouteObject[] = [
               access(['audit.view'], [{ path: 'audit', element: named(admin, 'AdminAudit') }]),
               // Iklan tier Gratis (docs/API.md §11) — tab via ?tab=overview|campaigns|policy.
               access(['ads.manage', 'ads.review'], [{ path: 'ads', element: named(adminAds, 'AdminAds') }]),
+              // Kurasi katalog (izin catalog.curate): kategori Jelajahi & artwork rilis. URL lama /admin/platform/* dialihkan.
+              access(['catalog.curate'], [
+                { path: 'categories', element: named(platform.categories, 'PlatformCategories') },
+                { path: 'artwork', element: named(platform.artwork, 'PlatformArtwork') },
+              ]),
+              { path: 'platform/artwork', element: <Navigate to="/admin/artwork" replace /> },
+              { path: 'platform/categories', element: <Navigate to="/admin/categories" replace /> },
               {
                 element: <RequireAdminAccess superOnly />,
                 children: [
@@ -147,7 +156,7 @@ export const b2bRoutes: RouteObject[] = [
                   { path: 'platform/storage', element: named(platform.storage, 'PlatformStorage') },
                   { path: 'platform/backups', element: named(platform.storage, 'PlatformBackups') },
                   { path: 'platform/integrations', element: named(platform.integrations, 'PlatformIntegrations') },
-                  { path: 'platform/artwork', element: named(platform.artwork, 'PlatformArtwork') },
+                  { path: 'platform/services/:id', element: named(platform.service, 'PlatformService') },
                   { path: 'platform/bus', element: named(platform.main, 'PlatformBus') },
                   { path: 'platform/admins', element: named(platform.main, 'PlatformAdmins') },
                 ],

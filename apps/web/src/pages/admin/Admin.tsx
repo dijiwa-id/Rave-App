@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, ArrowRight, Images, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow } from 'lucide-react';
-import { ADMIN_ROLE_LABEL, type AdminPermission, type AdminRole } from '@rave/domain/settings';
+import { Activity, ArrowRight, Images, Shapes, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow } from 'lucide-react';
+import { ADMIN_PERMISSIONS, ADMIN_ROLE_LABEL, type AdminPermission, type AdminRole } from '@rave/domain/settings';
 import { can, isSuperAdmin, useAuth } from '@/stores/auth';
 import { B2BLayout, type B2BNavItem } from '@/layouts/B2BLayout';
 import { api, fmt } from '@/lib/api';
 import { WEB_VERSION } from '@/lib/version';
+import { RAVE_SERVICES, SERVICE_TYPES, serviceHref } from '@/lib/raveServices';
 import { useDict } from '@/lib/i18n';
 import type { AdminPayoutRow, AdminRefundRow, Dispute, Me, MemberType, PayoutStatus, Release, TicketRefundReason } from '@/lib/types';
 import { Badge, Button, Card, cx, Field, Input, Modal, PageHeader, Select, Stat, Textarea, toast } from '@/components/ui';
@@ -15,29 +16,63 @@ import { ReleaseStatusBadge } from '../studio/Releases';
 
 type AdminNavItem = B2BNavItem & { perms?: AdminPermission[]; superOnly?: boolean };
 
+/** Saring menu sesuai izin; judul seksi pindah ke item pertama yang tersisa (seksi kosong hilang). */
+function visibleNav(items: AdminNavItem[], allowed: (n: AdminNavItem) => boolean): AdminNavItem[] {
+  const out: AdminNavItem[] = [];
+  let pending: string | undefined;
+  for (const it of items) {
+    if (it.section) pending = it.section;
+    if (!allowed(it)) continue;
+    out.push({ ...it, section: pending });
+    pending = undefined;
+  }
+  return out;
+}
+
 export function AdminLayout() {
   const user = useAuth((s) => s.user);
   const n = useDict('admin').nav;
   const cmsTitle = useDict('cms').title;
+  const svc = useDict('admin').services;
   // Menu mengikuti izin peran ("Peran & Akses"); halaman & API menegakkan hal yang sama.
+  // Sidebar per divisi = area izin di "Peran & Akses" (ADMIN_PERMISSIONS[*].area): menu & seksi mengikuti izin peran,
+  // seksi tanpa item yang boleh dibuka otomatis tersembunyi. Platform & pengaturan layanan khusus Super Admin.
+  const area = (p: AdminPermission) => n.areas[ADMIN_PERMISSIONS[p].area as keyof typeof n.areas] ?? ADMIN_PERMISSIONS[p].area;
   const NAV: AdminNavItem[] = [
-    { to: '/admin', label: n.dashboard, icon: LayoutDashboard, end: true },
-    { to: '/admin/qc', label: n.qc, icon: Disc3, perms: ['qc.review'] },
-    { to: '/admin/kyc', label: n.kyc, icon: IdCard, perms: ['kyc.review'] },
-    { to: '/admin/disputes', label: n.disputes, icon: Gavel, perms: ['dispute.resolve'] },
+    { to: '/admin', label: n.dashboard, icon: LayoutDashboard, end: true, section: n.overviewSection },
+    // Divisi Konten
+    { to: '/admin/qc', label: n.qc, icon: Disc3, perms: ['qc.review'], section: area('qc.review') },
+    { to: '/admin/categories', label: n.categories, icon: Shapes, perms: ['catalog.curate'] },
+    { to: '/admin/artwork', label: n.artwork, icon: Images, perms: ['catalog.curate'] },
     { to: '/admin/live', label: n.live, icon: Radio, perms: ['live.moderate'] },
-    { to: '/admin/finance', label: n.finance, icon: Scale, perms: ['finance.view', 'finance.refund', 'finance.payout'] },
-    { to: '/admin/users', label: n.users, icon: Users, perms: ['users.view'] },
+    // Divisi Iklan
+    { to: '/admin/ads', label: n.ads, icon: Megaphone, perms: ['ads.manage', 'ads.review'], section: area('ads.manage') },
+    // Divisi Kepercayaan
+    { to: '/admin/kyc', label: n.kyc, icon: IdCard, perms: ['kyc.review'], section: area('kyc.review') },
+    { to: '/admin/disputes', label: n.disputes, icon: Gavel, perms: ['dispute.resolve'] },
+    // Divisi Keuangan
+    { to: '/admin/finance', label: n.finance, icon: Scale, perms: ['finance.view', 'finance.refund', 'finance.payout'], section: area('finance.view') },
+    // Divisi Pengguna
+    { to: '/admin/users', label: n.users, icon: Users, perms: ['users.view'], section: area('users.view') },
     { to: '/admin/audit', label: n.audit, icon: FileClock, perms: ['audit.view'] },
-    { to: '/admin/ads', label: n.ads, icon: Megaphone, perms: ['ads.manage', 'ads.review'] },
-    // Platform (docs/API.md §9) — khusus Super Admin, termasuk membaca.
+    // Platform — tata kelola (khusus Super Admin, tidak dapat didelegasikan).
     { to: '/admin/platform', label: n.platformDashboard, icon: Gauge, end: true, section: n.platformSection, superOnly: true },
     { to: '/admin/platform/settings', label: n.settings, icon: SlidersHorizontal, superOnly: true },
-    { to: '/admin/platform/landing', label: cmsTitle, icon: PanelsTopLeft, superOnly: true },
-    { to: '/admin/platform/artwork', label: n.artwork, icon: Images, superOnly: true },
     { to: '/admin/platform/roles', label: n.roles, icon: KeyRound, superOnly: true },
     { to: '/admin/platform/admins', label: n.admins, icon: ShieldCheck, superOnly: true },
-    { to: '/admin/platform/storage', label: n.storage, icon: HardDrive, superOnly: true },
+    { to: '/admin/platform/landing', label: cmsTitle, icon: PanelsTopLeft, superOnly: true },
+    // Pengaturan layanan per jenis: siap → grup pengaturannya; belum siap → halaman "Dalam pengembangan" (badge Segera).
+    ...SERVICE_TYPES.flatMap((type) =>
+      RAVE_SERVICES.filter((s) => s.type === type && s.nav !== false).map((s, i) => ({
+        to: serviceHref(s),
+        label: svc.items[s.id as keyof typeof svc.items].name,
+        icon: s.icon,
+        section: i === 0 ? n.serviceTypes[type] : undefined,
+        badge: s.status === 'soon' ? svc.soonBadge : undefined,
+        superOnly: true,
+      })),
+    ),
+    { to: '/admin/platform/storage', label: n.storage, icon: HardDrive, section: n.infraSection, superOnly: true },
     { to: '/admin/platform/backups', label: n.backups, icon: DatabaseBackup, superOnly: true },
     { to: '/admin/platform/integrations', label: n.integrations, icon: PlugZap, superOnly: true },
     { to: '/admin/platform/bus', label: n.bus, icon: Workflow, superOnly: true },
@@ -48,7 +83,7 @@ export function AdminLayout() {
     <B2BLayout
       product={sup ? 'Super Admin' : 'Back Office'}
       accent="#1F5C52"
-      nav={NAV.filter((n) => (n.superOnly ? sup : !n.perms || can(user, ...n.perms)))}
+      nav={visibleNav(NAV, (n) => (n.superOnly ? sup : !n.perms || can(user, ...n.perms)))}
       roleLabel={(role && ADMIN_ROLE_LABEL[role]) ?? (sup ? 'Super Admin' : 'Admin')}
     />
   );
