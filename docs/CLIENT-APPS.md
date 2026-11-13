@@ -67,6 +67,10 @@ Di luar MVP: Artist Studio penuh & Promotor Hub penuh (tetap di web/desktop), un
 
 ## 3. Desktop — Tauri (Windows, macOS, Linux)
 
+> **Status 2026-11-13:** v0.1 dibangun sebagai proyek terpisah `../RAVE-Desktop-apps` (Tauri v2 + React, UI dengar
+> khusus desktop bergaya RAVE — bukan membungkus `apps/web`). Lihat README proyek itu. Prasyarat backend P-5:
+> tambahkan `tauri://localhost,http://tauri.localhost,https://tauri.localhost` ke `CORS_ORIGINS` produksi.
+
 **Pendekatan:** bungkus aplikasi web yang ada (`apps/web`, React + Vite) dengan **Tauri v2** — satu basis kode UI,
 menambah kemampuan native. Lokasi usulan: `apps/desktop/` (src-tauri) yang mem-build `apps/web` sebagai frontend.
 

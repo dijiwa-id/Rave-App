@@ -108,6 +108,8 @@ npm run dev           # 11 service + gateway (:8080) + web (:5173) di foreground
 ./rave restart-web      # restart Vite saja (jarang perlu — lihat auto-reload)
 ./rave restart-svc iam  # restart satu service secara manual
 ./rave seed             # seed ulang data demo (idempoten)
+./rave demo             # backend demo STABIL untuk uji aplikasi desktop/mobile (tanpa auto-reload, seed, cetak alamat LAN + akun)
+./rave demo --reset     # sama, DB dev dikosongkan dulu (cadangan otomatis di ~/.rave/backups) → data demo bersih
 ```
 
 `npm start`, `npm stop`, `npm run status` dan `npm run logs` memanggil perintah yang sama.
@@ -236,6 +238,13 @@ Login memakai OTP email; di mode development kode OTP ditampilkan di layar login
 | `promotor@rave.id` | Promotor — Pensi Nusantara (KYC ✓) | cari artis, inquiry, bayar escrow, event & check-in |
 | `admin@rave.id` | Admin (Operasional) | QC rilis, KYC, dispute, rekonsiliasi ledger, audit; panel Platform hanya-baca |
 | `superadmin@rave.id` | **Super Admin** | semua Back Office + `/admin/platform`: dasbor platform, pengaturan, storage server, backup, event bus, tim admin |
+
+> **Persetujuan rilis (fase awal, semua lingkungan termasuk produksi):** persetujuan admin RAVE / Super Admin di QC
+> sudah cukup — split hak (MASTER/PUBLISHING) yang belum disetujui pihaknya tidak menghalangi (tetap tercatat; audit
+> `splits_pending`). Aktifkan lagi syarat split (REQ-STU-02) lewat Pengaturan → `catalog.qc_require_split_approval`;
+> bila aktif, di dev Super Admin tetap dapat melewatinya (split ditandai disetujui, audit `dev_split_bypass`).
+> **Khusus dev:** Super Admin tidak terkena batas permintaan OTP per jendela (`security.otp_window_minutes`, default 15 menit) di dev;
+> batas salah tebak kode & rate limit gateway tetap berlaku.
 
 ### Panel Super Admin (`/admin/platform`)
 - **Dasbor Platform** — KPI lintas service, kesehatan & metrik tiap service, peringatan (disk, dead letter, backup, maintenance), ringkasan storage & event bus.

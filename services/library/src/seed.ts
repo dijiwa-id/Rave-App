@@ -59,6 +59,39 @@ export async function seed({ db, log }: ServiceContext) {
         for (let i = 0; i < p.tracks.length; i++)
           await tx.query(`INSERT INTO playlist_items (id, playlist_id, track_id, position, added_by) VALUES ($1,$2,$3,$4,$5)`, [seedId(601, p.n * 1000 + i), id, p.tracks[i], i + 1, fan]);
     }
+
+    // Akun Premium demo (Nadia, Yogyakarta, indie-rock/shoegaze) — pustaka berisi agar uji aplikasi tidak kosong.
+    const prem = SEED.users.premium;
+    const premTracks = [...byArtist('gelombang-pagi'), ...byArtist('lalu-lintas'), ...byArtist('dara-laut')];
+    for (const t of premTracks.slice(0, 6)) await tx.query(`INSERT INTO likes (user_id, track_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [prem, t]);
+    for (const a of [SEED.artists[5].id, SEED.artists[3].id, SEED.artists[4].id])
+      await tx.query(`INSERT INTO follows (user_id, artist_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [prem, a]);
+    for (const r of SEED_RELEASES.filter((x) => x.type !== 'SINGLE').slice(1, 3))
+      await tx.query(`INSERT INTO saved_releases (user_id, release_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [prem, r.id]);
+    {
+      const id = seedId(600, 201);
+      const r = await tx.query(
+        `INSERT INTO playlists (id, owner_id, owner_name, title, visibility) VALUES ($1,$2,'Nadia Premium',$3,'PRIVATE') ON CONFLICT (id) DO NOTHING`,
+        [id, prem, 'Shoegaze Malam'],
+      );
+      if (r.rowCount)
+        for (let i = 0; i < premTracks.length; i++)
+          await tx.query(`INSERT INTO playlist_items (id, playlist_id, track_id, position, added_by) VALUES ($1,$2,$3,$4,$5)`, [seedId(601, 201_000 + i), id, premTracks[i], i + 1, prem]);
+    }
+
+    // Riwayat dengar (rak "Diputar baru-baru ini" di web & aplikasi). event_id tetap → idempoten.
+    const artistOf = new Map(SEED_TRACKS.map((t) => [t.id, t.artistId]));
+    const history: [string, string[]][] = [
+      [fan, pick(all, 10, 4)],
+      [prem, premTracks.slice(0, 8)],
+    ];
+    for (const [k, [user, tracks]] of history.entries())
+      for (let i = 0; i < tracks.length; i++)
+        await tx.query(
+          `INSERT INTO listening_history (user_id, track_id, artist_id, played_at, event_id)
+           VALUES ($1,$2,$3, now() - make_interval(hours => $4), $5) ON CONFLICT (event_id) DO NOTHING`,
+          [user, tracks[i], artistOf.get(tracks[i]) ?? null, i * 3 + 1, seedId(602, k * 1000 + i)],
+        );
   });
-  log.info('seed library: 8 editorial, playlist & likes fan');
+  log.info('seed library: 8 editorial, playlist, likes & riwayat dengar (fan, premium)');
 }

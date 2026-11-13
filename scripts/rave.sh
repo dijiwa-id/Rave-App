@@ -11,6 +11,10 @@
 #   ./rave restart-web      # restart Vite saja (biasanya tidak perlu lagi — polling aktif otomatis di /mnt/*)
 #   ./rave restart-svc iam  # restart satu service
 #   ./rave seed             # jalankan seed data demo (idempoten)
+#   ./rave demo             # backend demo STABIL untuk uji aplikasi desktop/mobile: start tanpa auto-reload,
+#                           # seed demo, cek kesehatan, cetak alamat (localhost & LAN) + akun demo. Produksi tak disentuh.
+#   ./rave demo --reset     # sama, tetapi DB dev dikosongkan dulu (cadangan pg_dump otomatis) → data demo bersih
+#   ./rave demo-info        # cetak ulang alamat & akun demo
 set -euo pipefail
 
 # Toolchain user-local (Node/PostgreSQL tanpa sudo, lihat README) — dimuat otomatis agar tidak perlu `source` manual.
@@ -213,8 +217,72 @@ restart_one() {
   ok "$name di-restart (:$port) — log: $LOGDIR/$name.log"
 }
 
+lan_ip() { hostname -I 2>/dev/null | tr ' ' '\n' | grep -vE '^(127\.|169\.254\.|$)' | grep -E '^[0-9.]+$' | head -1 || true; }
+
+demo_info() {
+  local ip; ip="$(lan_ip)"
+  cat <<EOF
+
+  ${c_b}RAVE demo${c_0} — database dev (Postgres :$PGPORT), terpisah dari produksi Docker
+  ${c_b}Desktop${c_0}   http://127.0.0.1:8080
+  ${c_b}Mobile${c_0}    http://${ip:-<IP-LAN-PC>}:8080   ${c_dim}(ponsel & PC di Wi-Fi yang sama; emulator: http://10.0.2.2:8080)${c_0}
+  ${c_b}Web${c_0}       http://localhost:5173
+
+  ${c_b}Akun demo${c_0} (OTP: kode tampil langsung di layar masuk — mode demo, tanpa email)
+    fan@rave.id         Raka · Gratis (iklan, kualitas ≤ normal), playlist & suka
+    premium@rave.id     Nadia · Premium (HQ/Lossless, tanpa iklan)
+    artis@rave.id       Sekar · Artist Studio (Senja Kolektif)
+    superadmin@rave.id  Super Admin
+  ${c_dim}Tamu: langsung putar (pratinjau 30 dtk). Akun baru: daftar dengan email apa pun.${c_0}
+
+EOF
+}
+
+# Kosongkan DB dev lalu bangun ulang dari migrasi + seed demo (hanya Postgres dev lokal :$PGPORT, BUKAN produksi Docker).
+# Cadangan pg_dump dibuat dulu → bisa dipulihkan: pg_restore -h 127.0.0.1 -p $PGPORT -U rave -d rave --clean <file>
+demo_reset() {
+  if [ "${1:-}" != "--yes" ]; then
+    [ -t 0 ] || die "reset butuh konfirmasi: ./rave demo --reset --yes"
+    read -r -p "Hapus SEMUA data DB dev (:$PGPORT) dan isi ulang data demo? Ketik 'reset': " ans
+    [ "$ans" = reset ] || die "dibatalkan"
+  fi
+  [ -n "$(running_pid)" ] && cmd_stop
+  db_up
+  local bak="$STATE/backups/dev-$(date +%Y%m%d-%H%M%S).dump"
+  mkdir -p "$STATE/backups"
+  "$PGBIN/pg_dump" -h 127.0.0.1 -p "$PGPORT" -U rave -d rave -Fc -f "$bak" || die "cadangan gagal — reset dibatalkan"
+  ok "cadangan: $bak"
+  local schemas
+  schemas=$("$PGBIN/psql" -h 127.0.0.1 -p "$PGPORT" -U rave -d rave -tAc \
+    "SELECT string_agg(quote_ident(nspname), ',') FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname NOT IN ('information_schema','public')")
+  if [ -n "$schemas" ]; then
+    "$PGBIN/psql" -h 127.0.0.1 -p "$PGPORT" -U rave -d rave -qc "DROP SCHEMA $schemas CASCADE" >/dev/null || die "gagal mengosongkan DB"
+  fi
+  "$PGBIN/psql" -h 127.0.0.1 -p "$PGPORT" -U rave -d rave -qc "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public" >/dev/null
+  ok "DB dev dikosongkan"
+}
+
+cmd_demo() {
+  if [ "${1:-}" = --reset ]; then demo_reset "${2:-}"; fi
+  local pid; pid="$(running_pid || true)"
+  if [ -n "$pid" ] && tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | grep -qx 'RAVE_WATCH=1'; then
+    info "sesi berjalan memakai auto-reload — restart tanpa auto-reload agar stabil"
+    cmd_stop
+  fi
+  export RAVE_WATCH=0
+  cmd_start
+  info "seed data demo (idempoten — data uji yang sudah ada tidak ditimpa)"
+  SEED=1 db_prepare
+  local code; code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://127.0.0.1:8080/v1/catalog/home || true)"
+  [ "$code" = 200 ] || die "gateway belum melayani katalog (HTTP $code) — lihat $LOG"
+  ok "katalog demo siap"
+  demo_info
+}
+
 case "${1:-help}" in
   start) cmd_start ;;
+  demo) shift; cmd_demo "$@" ;;
+  demo-info) demo_info ;;
   dev) cmd_dev ;;
   stop) shift; cmd_stop "${1:-}" ;;
   restart) cmd_stop; cmd_start ;;
@@ -223,5 +291,5 @@ case "${1:-help}" in
   seed) preflight; db_up; SEED=1 db_prepare ;;
   restart-web) restart_one web ;;
   restart-svc) [ -n "${2:-}" ] || die "pakai: ./rave restart-svc <nama>"; restart_one "$2" ;;
-  *) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+  *) sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
 esac
