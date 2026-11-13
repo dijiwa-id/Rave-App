@@ -5,10 +5,12 @@ import { consumers, listenersDecayJob } from './consumers.js';
 import { publicRoutes } from './routes.js';
 import { reportRoutes } from './reports.js';
 import { seed } from './seed.js';
+import { syncGenres } from './genres-sync.js';
 import { studioRoutes } from './studio.js';
 import { transcodeJob } from './audio.js';
 
 async function routes(app: FastifyInstance, ctx: ServiceContext) {
+  await syncGenres(ctx);
   await publicRoutes(app, ctx);
   await studioRoutes(app, ctx);
   await adminRoutes(app, ctx);
