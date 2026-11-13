@@ -84,7 +84,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     // Batas & kebijakan dari pengaturan platform (Super Admin).
     const provider = b.channel === 'email' || dest.includes('@') ? 'email' : 'whatsapp';
     const existing = await db.one(
-      `SELECT u.suspended_at FROM identities i JOIN users u ON u.id = i.user_id WHERE i.provider = $1 AND i.subject = $2 AND u.deleted_at IS NULL`,
+      `SELECT u.suspended_at, u.admin_role FROM identities i JOIN users u ON u.id = i.user_id WHERE i.provider = $1 AND i.subject = $2 AND u.deleted_at IS NULL`,
       [provider, dest],
     );
     if (existing?.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan RAVE.');
@@ -95,7 +95,10 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     await db.tx(async (tx) => {
       await tx.query(`SELECT pg_advisory_xact_lock(hashtext('otp:' || $1::text))`, [dest]);
       const recent = (await tx.query(`SELECT count(*)::int AS n FROM otp_codes WHERE destination = $1 AND created_at > now() - make_interval(mins => $2)`, [dest, windowMin])).rows[0];
-      if ((recent?.n ?? 0) >= settings.num('security.otp_max_per_window'))
+      // Khusus dev (NODE_ENV ≠ production): Super Admin tidak terkena batas OTP per jendela (mis. 15 menit) agar uji
+      // Back Office tidak terkunci. Batas salah tebak kode (OTP_MAX_ATTEMPTS) & rate limit gateway tetap berlaku.
+      const devSuperAdmin = config.isDev && existing?.admin_role === 'SUPER_ADMIN';
+      if (!devSuperAdmin && (recent?.n ?? 0) >= settings.num('security.otp_max_per_window'))
         throw new HttpError(429, 'Too Many Requests', `Terlalu banyak permintaan OTP. Coba lagi dalam ${windowMin} menit.`);
       await tx.query(`INSERT INTO otp_codes (destination, channel, code_hash, expires_at) VALUES ($1,$2,$3, now() + make_interval(secs => $4))`, [
         dest,

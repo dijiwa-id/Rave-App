@@ -42,7 +42,7 @@ export async function seed({ db, log }: ServiceContext) {
     await user(tx, U.superadmin, E.superadmin, 'Super Admin RAVE', { city: 'Jakarta', onboarded: true, is_admin: true });
     // Fan Premium demo: kualitas tinggi (AAC 320) & Lossless (FLAC) hanya untuk pelanggan Premium.
     await user(tx, U.premium, E.premium, 'Nadia Premium', { city: 'Yogyakarta', genres: ['indie-rock', 'shoegaze'], onboarded: true, premium: true });
-    await tx.query(`UPDATE users SET premium = true WHERE id = $1 AND NOT premium`, [U.premium]);
+    await tx.query(`UPDATE users SET premium = true, member_type = 'INDIVIDUAL' WHERE id = $1 AND member_type = 'FREE'`, [U.premium]);
     await tx.query(`UPDATE users SET admin_role = 'OPS' WHERE id = $1 AND admin_role IS NULL`, [U.admin]);
     await tx.query(`UPDATE users SET admin_role = 'SUPER_ADMIN' WHERE id = $1`, [U.superadmin]);
 

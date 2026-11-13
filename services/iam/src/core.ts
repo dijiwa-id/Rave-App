@@ -90,6 +90,16 @@ export async function kycStatus(q: Q, userId: string): Promise<string> {
   return r.rows[0]?.status ?? 'NONE';
 }
 
+export const MEMBER_TYPES = ['FREE', 'INDIVIDUAL', 'STUDENT', 'DUO'] as const;
+export type MemberType = (typeof MEMBER_TYPES)[number];
+
+/** Premium efektif: jenis member berbayar yang belum kedaluwarsa (fallback kolom lama `premium`). */
+export function memberActive(u: { member_type?: string | null; member_until?: string | Date | null; premium?: boolean }): boolean {
+  const type = u.member_type ?? (u.premium ? 'INDIVIDUAL' : 'FREE');
+  if (type === 'FREE') return false;
+  return !u.member_until || new Date(u.member_until).getTime() > Date.now();
+}
+
 export async function buildMe(q: Q, userId: string) {
   const u = (await q.query(`SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL`, [userId])).rows[0];
   if (!u) return null;
@@ -109,7 +119,10 @@ export async function buildMe(q: Q, userId: string) {
     kyc_status: await kycStatus(q, userId),
     mfa_enabled: u.mfa_enabled,
     onboarded: u.onboarded,
-    premium: u.premium,
+    premium: memberActive(u),
+    /** Jenis member (diatur Super Admin): FREE | INDIVIDUAL | STUDENT | DUO; `member_until` null = tanpa batas. */
+    member_type: (u.member_type as MemberType | undefined) ?? (u.premium ? 'INDIVIDUAL' : 'FREE'),
+    member_until: (u.member_until as string | null) ?? null,
     admin_role: (u.admin_role as string | null) ?? null,
     /** Izin back office efektif (matriks "Peran & Akses", dibaca terkini) — untuk menu & halaman di web. */
     admin_permissions: adminPermissions(u.admin_role ?? (u.is_admin ? 'OPS' : null), (k) => settings.get(k)),

@@ -26,12 +26,16 @@ export interface Me {
   mfa_enabled: boolean;
   onboarded: boolean;
   premium: boolean;
+  /** Jenis member (diatur Super Admin): FREE | INDIVIDUAL | STUDENT | DUO; `member_until` null = tanpa batas. */
+  member_type?: MemberType;
+  member_until?: string | null;
   /** Peran internal back office (ADMIN_ROLES di @rave/domain/settings); null = bukan admin. */
   admin_role?: string | null;
   /** Izin back office efektif ("Peran & Akses"); Super Admin = semua. */
   admin_permissions?: AdminPermission[];
   created_at: string;
 }
+export type MemberType = 'FREE' | 'INDIVIDUAL' | 'STUDENT' | 'DUO';
 export interface TokenResponse {
   access_token: string;
   refresh_token: string;

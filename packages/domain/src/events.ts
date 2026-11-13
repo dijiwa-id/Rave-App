@@ -8,6 +8,8 @@ export interface DomainEvents {
   'iam.org.created': { orgId: string; type: OrgType; name: string; ownerUserId: string | null; artistId?: string | null };
   'iam.org.member_added': { orgId: string; type: OrgType; userId: string; role: string; artistId?: string | null };
   'iam.kyc.verified': { userId: string; orgId?: string | null; level: 'INDIVIDUAL' | 'BUSINESS' };
+  // Jenis member diubah Super Admin (Free/Individu/Pelajar/Duo); premium = efektif saat perubahan.
+  'iam.user.member_changed': { userId: string; memberType: 'FREE' | 'INDIVIDUAL' | 'STUDENT' | 'DUO'; memberUntil: string | null; premium: boolean };
   'iam.waitlist.joined': { email: string; segment: string; city?: string | null };
 
   // Catalog

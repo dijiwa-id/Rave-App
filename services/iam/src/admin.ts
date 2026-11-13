@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { ADMIN_ROLES } from '@rave/domain/settings';
 import { audit, badRequest, conflict, forbidden, nextCursor, notFound, pageParams, publish, requirePermission, requireRole, requireService, requireSuperAdmin, z, type ServiceContext } from '@rave/service-kit';
-import { buildMe } from './core.js';
+import { buildMe, MEMBER_TYPES, type MemberType } from './core.js';
 import { kycOut } from './routes.js';
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
@@ -110,6 +110,9 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
         .object({
           admin_role: z.enum(ADMIN_ROLES).nullable().optional(),
           suspended: z.boolean().optional(),
+          /** Jenis member (Free/Individu/Pelajar/Duo) + batas waktu opsional (ISO; null = tanpa batas). */
+          member_type: z.enum(MEMBER_TYPES).optional(),
+          member_until: z.string().datetime({ offset: true }).nullable().optional(),
           reason: z.string().trim().min(5, 'Alasan minimal 5 karakter').max(500),
         })
         .parse(req.body);
@@ -135,6 +138,29 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
           // Tangguhkan = cabut semua sesi; access token yang tersisa kedaluwarsa ≤ 15 menit.
           if (b.suspended) await tx.query(`UPDATE refresh_tokens SET revoked_at = coalesce(revoked_at, now()) WHERE user_id = $1`, [u.id]);
           await audit(tx, { actorId: req.user!.sub, action: b.suspended ? 'user.suspend' : 'user.unsuspend', entity: 'user', entityId: u.id, data: { reason: b.reason } });
+        }
+        if (b.member_type !== undefined || b.member_until !== undefined) {
+          const type = b.member_type ?? (u.member_type as MemberType);
+          // Free tidak punya masa berlaku; tanggal harus di masa depan.
+          const until = type === 'FREE' ? null : b.member_until !== undefined ? b.member_until : u.member_until;
+          if (until && new Date(until).getTime() <= Date.now()) throw badRequest('Tanggal berakhir member harus di masa depan');
+          const prevUntil = u.member_until ? new Date(u.member_until).toISOString() : null;
+          const nextUntil = until ? new Date(until).toISOString() : null;
+          if (type !== u.member_type || nextUntil !== prevUntil) {
+            await tx.query(
+              `UPDATE users SET member_type = $2, member_until = $3, premium = $2 <> 'FREE', member_updated_at = now(), member_updated_by = $4, updated_at = now() WHERE id = $1`,
+              [u.id, type, nextUntil, req.user!.sub],
+            );
+            await audit(tx, {
+              actorId: req.user!.sub,
+              action: 'user.member.change',
+              entity: 'user',
+              entityId: u.id,
+              data: { from: { type: u.member_type, until: prevUntil }, to: { type, until: nextUntil }, reason: b.reason },
+            });
+            // Token akses lama (≤ 15 mnt) masih membawa status lama; refresh berikutnya memakai jenis member baru.
+            await publish(tx, 'iam.user.member_changed', u.id, { userId: u.id, memberType: type, memberUntil: nextUntil, premium: type !== 'FREE' });
+          }
         }
         return buildMe(tx, u.id);
       });

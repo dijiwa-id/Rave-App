@@ -8,8 +8,8 @@ import { B2BLayout, type B2BNavItem } from '@/layouts/B2BLayout';
 import { api, fmt } from '@/lib/api';
 import { WEB_VERSION } from '@/lib/version';
 import { useDict } from '@/lib/i18n';
-import type { AdminPayoutRow, AdminRefundRow, Dispute, Me, PayoutStatus, Release, TicketRefundReason } from '@/lib/types';
-import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Stat, Textarea, toast } from '@/components/ui';
+import type { AdminPayoutRow, AdminRefundRow, Dispute, Me, MemberType, PayoutStatus, Release, TicketRefundReason } from '@/lib/types';
+import { Badge, Button, Card, cx, Field, Input, Modal, PageHeader, Select, Stat, Textarea, toast } from '@/components/ui';
 import { Empty, QueryState, Table } from '@/components/b2b/common';
 import { ReleaseStatusBadge } from '../studio/Releases';
 
@@ -984,10 +984,111 @@ export function AdminFinance() {
   );
 }
 
+const MEMBER_TYPES: MemberType[] = ['FREE', 'INDIVIDUAL', 'STUDENT', 'DUO'];
+const memberTone = (m: MemberType): 'neutral' | 'blue' | 'amber' | 'purple' => (m === 'FREE' ? 'neutral' : m === 'DUO' ? 'blue' : m === 'STUDENT' ? 'amber' : 'purple');
+
+/** Badge jenis member (+ masa berlaku). Paket berbayar yang sudah lewat tanggalnya = efektif Free. */
+function MemberBadge({ u }: { u: Me }) {
+  const t = useDict('admin').users;
+  const m = u.member_type ?? (u.premium ? 'INDIVIDUAL' : 'FREE');
+  const expired = m !== 'FREE' && !!u.member_until && new Date(u.member_until).getTime() <= Date.now();
+  return (
+    <div className="flex flex-col items-start gap-0.5">
+      <Badge tone={expired ? 'neutral' : memberTone(m)}>{t.member[m]}</Badge>
+      {m !== 'FREE' && u.member_until && <span className={cx('text-[11px]', expired ? 'text-red-600' : 'text-b2b-muted')}>{expired ? t.expired : t.until(fmt.date(u.member_until))}</span>}
+    </div>
+  );
+}
+
+/** Super Admin: ubah jenis member (Free/Individu/Pelajar/Duo) + masa berlaku opsional; alasan wajib (audit). */
+function MemberModal({ user, onClose }: { user: Me | null; onClose: () => void }) {
+  const t = useDict('admin').users;
+  const qc = useQueryClient();
+  const [type, setType] = useState<MemberType>('FREE');
+  const [until, setUntil] = useState('');
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [opened, setOpened] = useState<string | null>(null);
+  // Isi ulang form setiap kali modal dibuka untuk pengguna lain.
+  if (user && opened !== user.id) {
+    setOpened(user.id);
+    setType(user.member_type ?? (user.premium ? 'INDIVIDUAL' : 'FREE'));
+    setUntil(user.member_until ? user.member_until.slice(0, 10) : '');
+    setReason('');
+  }
+  const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  async function save() {
+    if (!user) return;
+    setSaving(true);
+    try {
+      // Tanggal = akhir hari itu (WIB) agar "berlaku sampai 31 Des" mencakup seluruh tanggal tersebut.
+      const member_until = type === 'FREE' || !until ? null : `${until}T23:59:59+07:00`;
+      await api(`/v1/admin/iam/users/${user.id}`, { method: 'PATCH', body: { member_type: type, member_until, reason: reason.trim() } });
+      toast.success(t.saved(user.display_name, t.member[type]));
+      qc.invalidateQueries({ queryKey: ['admin-users'] });
+      setOpened(null);
+      onClose();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <Modal open={!!user} onClose={() => { setOpened(null); onClose(); }} title={t.memberTitle}>
+      {user && (
+        <div className="space-y-4">
+          <p className="text-sm">
+            <strong>{user.display_name}</strong> <span className="text-b2b-muted">({user.email})</span>
+          </p>
+          <Field label={t.memberType}>
+            <div role="radiogroup" aria-label={t.memberType} className="grid grid-cols-2 gap-2">
+              {MEMBER_TYPES.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="radio"
+                  aria-checked={type === m}
+                  onClick={() => setType(m)}
+                  className={cx(
+                    'border px-3 py-2.5 text-left text-sm font-bold transition',
+                    type === m ? 'border-b2b-ink bg-b2b-ink text-white' : 'border-b2b-line bg-white hover:border-b2b-ink',
+                  )}
+                >
+                  {t.member[m]}
+                </button>
+              ))}
+            </div>
+          </Field>
+          {type !== 'FREE' && (
+            <Field label={t.memberUntil} hint={t.memberUntilHint}>
+              <Input type="date" min={tomorrow} value={until} onChange={(e) => setUntil(e.target.value)} className="max-w-xs" />
+            </Field>
+          )}
+          <Field label={t.reason} hint={t.reasonHint}>
+            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t.reasonPlaceholder} />
+          </Field>
+          <p className="text-xs text-b2b-muted">{t.memberNote}</p>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline-ink" onClick={() => { setOpened(null); onClose(); }}>
+              {t.cancel}
+            </Button>
+            <Button variant="ink" loading={saving} disabled={reason.trim().length < 5} onClick={save}>
+              {t.save}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export function AdminUsers() {
   const t = useDict('admin').users;
+  const sup = isSuperAdmin(useAuth((s) => s.user));
   const [qstr, setQ] = useState('');
   const [applied, setApplied] = useState('');
+  const [editing, setEditing] = useState<Me | null>(null);
   const q = useQuery({ queryKey: ['admin-users', applied], queryFn: () => api<{ data: Me[] }>('/v1/admin/iam/users', { query: { q: applied || undefined } }) });
   return (
     <div>
@@ -1005,11 +1106,14 @@ export function AdminUsers() {
         </Button>
       </form>
       <QueryState q={q}>
-        <Table head={[...t.head]}>
+        <Table head={sup ? [...t.head] : t.head.slice(0, -1)}>
           {q.data?.data.map((u) => (
             <tr key={u.id}>
               <td className="px-4 py-3 font-bold">{u.display_name}</td>
               <td className="px-4 py-3">{u.email}</td>
+              <td className="px-4 py-3">
+                <MemberBadge u={u} />
+              </td>
               <td className="px-4 py-3">
                 <div className="flex flex-wrap gap-1">
                   {u.roles.map((r) => (
@@ -1022,10 +1126,18 @@ export function AdminUsers() {
                 <Badge tone={u.kyc_status === 'VERIFIED' ? 'green' : u.kyc_status === 'PENDING' ? 'amber' : 'neutral'}>{u.kyc_status}</Badge>
               </td>
               <td className="px-4 py-3">{fmt.date(u.created_at)}</td>
+              {sup && (
+                <td className="px-4 py-3 text-right whitespace-nowrap">
+                  <Button size="sm" variant="outline-ink" onClick={() => setEditing(u)}>
+                    {t.editMember}
+                  </Button>
+                </td>
+              )}
             </tr>
           ))}
         </Table>
       </QueryState>
+      <MemberModal user={editing} onClose={() => setEditing(null)} />
     </div>
   );
 }
