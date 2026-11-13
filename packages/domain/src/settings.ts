@@ -445,6 +445,7 @@ export const ADMIN_ROLE_LABEL: Record<AdminRole, string> = {
 export const ADMIN_PERMISSIONS = {
   'qc.review': { label: 'Antrean QC & takedown rilis', area: 'Konten' },
   'live.moderate': { label: 'Moderasi live streaming', area: 'Konten' },
+  'catalog.curate': { label: 'Kurasi katalog: kategori Jelajahi & artwork rilis', area: 'Konten' },
   'ads.review': { label: 'Tinjau kampanye iklan', area: 'Iklan' },
   'ads.manage': { label: 'Buat & kelola kampanye iklan', area: 'Iklan' },
   'kyc.review': { label: 'Verifikasi KYC/KYB', area: 'Kepercayaan' },
@@ -464,11 +465,11 @@ export const CONFIGURABLE_ADMIN_ROLES = ADMIN_ROLES.filter((r) => r !== 'SUPER_A
 /** Default prinsip hak minimum: tiap peran hanya area kerjanya; pengeluaran uang (refund) hanya Finance. */
 export const DEFAULT_ROLE_PERMISSIONS: Record<Exclude<AdminRole, 'SUPER_ADMIN'>, AdminPermission[]> = {
   OPS: ['qc.review', 'live.moderate', 'ads.review', 'ads.manage', 'kyc.review', 'dispute.resolve', 'finance.view', 'users.view', 'audit.view'],
-  CONTENT_QC: ['qc.review', 'live.moderate', 'ads.review'],
+  CONTENT_QC: ['qc.review', 'live.moderate', 'catalog.curate', 'ads.review'],
   FINANCE: ['finance.view', 'finance.refund', 'finance.payout', 'kyc.review'],
   LEGAL: ['qc.review', 'kyc.review', 'dispute.resolve', 'audit.view'],
   SUPPORT: ['users.view', 'finance.view'],
-  EDITORIAL: ['live.moderate', 'ads.manage'],
+  EDITORIAL: ['live.moderate', 'catalog.curate', 'ads.manage'],
 };
 
 export const accessKey = (role: string) => `access.role.${role}`;

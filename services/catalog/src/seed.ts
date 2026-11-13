@@ -9,10 +9,12 @@ const SH = (n: number) => `https://www.soundhelix.com/examples/mp3/SoundHelix-So
 export async function seed({ db, log }: ServiceContext) {
   await db.tx(async (tx) => {
     for (const [id, name] of GENRES) await tx.query(`INSERT INTO genres (id, name) VALUES ($1,$2) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`, [id, name]);
-    for (const [i, c] of CATEGORIES.entries()) {
+    // Kategori dikelola Super Admin: seed hanya mengisi saat tabel kosong (kategori yang dihapus admin tidak muncul lagi).
+    const hasCategories = (await tx.query(`SELECT 1 FROM categories LIMIT 1`)).rowCount;
+    for (const [i, c] of hasCategories ? [] : CATEGORIES.entries()) {
       await tx.query(
         `INSERT INTO categories (id, name, color, image_url, href, genres, position) VALUES ($1,$2,$3,$4,$5,$6,$7)
-         ON CONFLICT (id) DO UPDATE SET name=$2, color=$3, image_url=$4, href=$5, genres=$6, position=$7`,
+         ON CONFLICT (id) DO NOTHING`, // kategori dikelola Super Admin — seed tidak menimpa perubahannya
         [c.id, c.name, c.color, demoArt(`cat-${c.id}`, 300), c.href, c.genres, i],
       );
     }

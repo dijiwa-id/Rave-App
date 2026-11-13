@@ -8,10 +8,10 @@ export const IMAGE_ACCEPT = 'image/png,image/jpeg,.png,.jpg,.jpeg';
 
 /**
  * Unggah berkas ke bucket uploads catalog (dua langkah: daftar → PUT biner) dan kembalikan URL publiknya.
- * `purpose: 'playlist'` = sampul playlist pengguna (≤ 8 MB, ≥ 300 px); default artwork/master rilis Artist Studio.
+ * `purpose: 'playlist'` = sampul playlist pengguna, `'category'` = gambar kategori Jelajahi (≤ 8 MB, ≥ 300 px); default artwork/master rilis Artist Studio.
  * Peringatan validasi dari server (mis. master lossy, gambar bukan persegi) ditampilkan sebagai toast info.
  */
-export async function uploadFile(file: File, kind: 'audio' | 'artwork', purpose: 'release' | 'playlist' = 'release'): Promise<string> {
+export async function uploadFile(file: File, kind: 'audio' | 'artwork', purpose: 'release' | 'playlist' | 'category' = 'release'): Promise<string> {
   const u = await api<{ upload_id: string; upload_url: string; public_url: string }>('/v1/studio/uploads', {
     // MIME kosong (umum untuk .flac/.aiff di Windows) → server menentukan dari ekstensi.
     body: { kind, purpose, filename: file.name, content_type: file.type || 'application/octet-stream', size: file.size },

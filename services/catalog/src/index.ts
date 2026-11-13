@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { adminRoutes, scheduledReleaseJob } from './admin.js';
 import { consumers, listenersDecayJob } from './consumers.js';
 import { publicRoutes } from './routes.js';
+import { reportRoutes } from './reports.js';
 import { seed } from './seed.js';
 import { studioRoutes } from './studio.js';
 import { transcodeJob } from './audio.js';
@@ -11,6 +12,7 @@ async function routes(app: FastifyInstance, ctx: ServiceContext) {
   await publicRoutes(app, ctx);
   await studioRoutes(app, ctx);
   await adminRoutes(app, ctx);
+  await reportRoutes(app, ctx);
 }
 
 const svc = createService({

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { audit, badRequest, config, conflict, isSuperAdmin, requireSuperAdmin, forbidden, notFound, publish, requirePermission, settings, unauthorized, z, type Client, type Job, type ServiceContext } from '@rave/service-kit';
+import { audit, badRequest, config, conflict, isSuperAdmin, forbidden, notFound, publish, requirePermission, settings, unauthorized, z, type Client, type Job, type ServiceContext } from '@rave/service-kit';
 import { isUuid, releaseFull, releasesFull } from './queries.js';
 import { open as fsOpen } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -67,7 +67,181 @@ export async function goLive(tx: Client, releaseId: string) {
   return true;
 }
 
+const CATEGORY_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const HEX = /^#[0-9a-fA-F]{6}$/;
+const categoryBody = z.object({
+  name: z.string().trim().min(1, 'Nama wajib diisi').max(40),
+  color: z.string().regex(HEX, 'Warna harus heks #RRGGBB'),
+  image_url: z.string().max(300).nullable().optional(),
+  /** Genre katalog yang mengisi halaman kategori (kosong = semua). */
+  genres: z.array(z.string().max(40)).max(20).default([]),
+  /** Tautan tile; kosong = halaman kategori `/app/genre/:id`. Khusus rute aplikasi (`/app…`). */
+  href: z
+    .string()
+    .trim()
+    .max(200)
+    .regex(/^\/app(\/|$|\?)/, 'Tautan harus rute aplikasi, mis. /app/podcasts')
+    .nullable()
+    .optional(),
+  reason: z.string().trim().max(300).optional(),
+});
+
+/** Gambar kategori: unggahan selesai (artwork) di bucket uploads, gambar demo bawaan, atau kosong. */
+async function assertCategoryImage(q: Client | ServiceContext['db'], url: string | null | undefined) {
+  if (!url) return;
+  if (url.startsWith('/v1/catalog/demo-art/')) return;
+  if (!url.startsWith('/v1/catalog/media/')) throw badRequest('Gambar kategori harus diunggah lewat dashboard (JPG/PNG)');
+  const name = url.split('/v1/catalog/media/')[1]!.split(/[?#]/)[0];
+  const res = await (q as Client).query(`SELECT kind, completed_at, purpose FROM uploads WHERE stored_name = $1`, [name]);
+  const up = (Array.isArray(res) ? res[0] : res.rows[0]) as { kind: string; completed_at: string | null; purpose: string } | undefined;
+  // Hanya gambar yang diunggah khusus untuk kategori — bukan sampul playlist pengguna atau artwork draf rilis.
+  if (!up || up.kind !== 'artwork' || !up.completed_at || up.purpose !== 'category') throw badRequest('Gambar kategori harus berupa gambar yang sudah diunggah (JPG/PNG)');
+}
+
 export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) {
+  // ---------- Kurasi katalog: kategori Jelajahi (tambah/ubah/hapus/urutkan + gambar) & artwork rilis ----------
+  // Izin `catalog.curate` (Peran & Akses → Konten; Super Admin selalu boleh).
+  app.register(async (s) => {
+    s.addHook('preHandler', requirePermission('catalog.curate'));
+    // ---- Kurasi artwork (izin catalog.curate): galeri semua sampul + ganti / minta ganti ----
+    s.get('/v1/admin/artwork', async (req) => {
+      const q = z
+        .object({ filter: z.enum(['all', 'pending', 'issues']).default('all'), q: z.string().trim().max(100).optional(), status: z.string().max(20).optional() })
+        .parse(req.query);
+      const params: unknown[] = [];
+      const where: string[] = [];
+      if (q.filter === 'pending') where.push('r.pending_cover_url IS NOT NULL');
+      if (q.status) where.push(`r.status = $${params.push(q.status)}`);
+      if (q.q) where.push(`(r.title ILIKE $${params.push(`%${q.q}%`)} OR a.name ILIKE $${params.length})`);
+      const rows = await db.query(
+        `SELECT r.id, r.title, r.status, r.cover_url, r.pending_cover_url, r.pending_cover_at, r.cover_review_note, r.updated_at, a.name AS artist_name, a.id AS artist_id
+           FROM releases r JOIN artists a ON a.id = r.artist_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+          ORDER BY (r.pending_cover_url IS NOT NULL) DESC, r.updated_at DESC LIMIT 120`,
+        params,
+      );
+      const data = [];
+      for (const r of rows) {
+        const size = await artworkSize(r.cover_url);
+        const issues = artworkIssues(r.cover_url, size);
+        if (q.filter === 'issues' && !issues.length) continue;
+        data.push({
+          id: r.id, title: r.title, status: r.status, artist_name: r.artist_name, artist_id: r.artist_id,
+          cover_url: r.cover_url, size, issues,
+          pending_cover: r.pending_cover_url ? { url: r.pending_cover_url, submitted_at: r.pending_cover_at, size: await artworkSize(r.pending_cover_url) } : null,
+          review_note: r.cover_review_note, updated_at: r.updated_at,
+        });
+      }
+      return { data };
+    });
+
+    /** Super Admin mengganti artwork langsung (mis. melanggar pedoman, kualitas buruk, salah unggah). Wajib beralasan; artis dinotifikasi. */
+    s.post('/v1/admin/artwork/:id/replace', async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isUuid(id)) throw notFound('Rilis');
+      const b = z.object({ cover_url: z.string().max(1000), reason: z.string().trim().min(5, 'Alasan minimal 5 karakter').max(1000) }).parse(req.body);
+      const name = /^\/v1\/catalog\/media\/([\w.-]+)$/.exec(b.cover_url)?.[1];
+      const up = name ? await db.one(`SELECT kind, completed_at, purpose FROM uploads WHERE stored_name = $1`, [name]) : null;
+      if (!up || up.kind !== 'artwork' || !up.completed_at || up.purpose !== 'release') throw badRequest('Artwork harus berupa gambar yang sudah diunggah (JPG/PNG)');
+      return db.tx(async (tx) => {
+        const r = (await tx.query(`SELECT id, title, artist_id, cover_url FROM releases WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+        if (!r) throw notFound('Rilis');
+        await tx.query(
+          `UPDATE releases SET cover_url = $2, pending_cover_url = NULL, pending_cover_at = NULL, pending_cover_by = NULL, cover_review_note = $3, updated_at = now() WHERE id = $1`,
+          [id, b.cover_url, `Diganti tim kurasi RAVE: ${b.reason}`],
+        );
+        await publish(tx, 'catalog.release.cover_curated', id, { releaseId: id, artistId: r.artist_id, title: r.title, action: 'replaced', reason: b.reason });
+        await audit(tx, { actorId: req.user!.sub, action: 'artwork.replace', entity: 'release', entityId: id, data: { from: r.cover_url, to: b.cover_url, reason: b.reason }, ip: req.ip });
+        return { id, cover_url: b.cover_url };
+      });
+    });
+
+    /** Minta artis/manajemen mengganti artwork (sampul lama tetap tayang sampai artis mengajukan yang baru). */
+    s.post('/v1/admin/artwork/:id/request-change', async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isUuid(id)) throw notFound('Rilis');
+      const b = z.object({ reason: z.string().trim().min(5, 'Alasan minimal 5 karakter').max(1000) }).parse(req.body);
+      return db.tx(async (tx) => {
+        const r = (await tx.query(`SELECT id, title, artist_id FROM releases WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+        if (!r) throw notFound('Rilis');
+        await tx.query(`UPDATE releases SET cover_review_note = $2, updated_at = now() WHERE id = $1`, [id, `Diminta ganti oleh tim kurasi RAVE: ${b.reason}`]);
+        await publish(tx, 'catalog.release.cover_curated', id, { releaseId: id, artistId: r.artist_id, title: r.title, action: 'change_requested', reason: b.reason });
+        await audit(tx, { actorId: req.user!.sub, action: 'artwork.request_change', entity: 'release', entityId: id, data: b, ip: req.ip });
+        return { id, requested: true };
+      });
+    });
+
+    const LIST = `SELECT id, name, color, image_url, href, genres, position, updated_at FROM categories ORDER BY position, name`;
+    const list = () => db.query(LIST);
+
+    s.get('/v1/admin/catalog/categories', async () => ({ data: await list() }));
+
+    s.post('/v1/admin/catalog/categories', async (req, reply) => {
+      const b = categoryBody.extend({ id: z.string().trim().toLowerCase().max(40).regex(CATEGORY_ID, 'ID huruf kecil/angka dipisah tanda hubung, mis. jazz-malam') }).parse(req.body);
+      await assertCategoryImage(db, b.image_url);
+      return db.tx(async (tx) => {
+        const pos = (await tx.query(`SELECT coalesce(max(position), -1) + 1 AS p FROM categories`)).rows[0].p;
+        const href = b.href || `/app/genre/${b.id}`;
+        // ON CONFLICT: dua permintaan bersamaan dengan id sama → yang kalah mendapat 409, bukan 500.
+        const ins = await tx.query(
+          `INSERT INTO categories (id, name, color, image_url, href, genres, position, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7, now()) ON CONFLICT (id) DO NOTHING`,
+          [b.id, b.name, b.color.toLowerCase(), b.image_url ?? null, href, b.genres, pos],
+        );
+        if (!ins.rowCount) throw conflict(`Kategori "${b.id}" sudah ada`);
+        await audit(tx, { actorId: req.user!.sub, action: 'category.create', entity: 'category', entityId: b.id, data: { ...b, href }, ip: req.ip });
+        reply.status(201);
+        return (await tx.query(`SELECT id, name, color, image_url, href, genres, position, updated_at FROM categories WHERE id = $1`, [b.id])).rows[0];
+      });
+    });
+
+    s.patch('/v1/admin/catalog/categories/:id', async (req) => {
+      const { id } = req.params as { id: string };
+      const b = categoryBody.partial().parse(req.body);
+      if (b.image_url !== undefined) await assertCategoryImage(db, b.image_url);
+      return db.tx(async (tx) => {
+        const cur = (await tx.query(`SELECT * FROM categories WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+        if (!cur) throw notFound('Kategori');
+        const next = {
+          name: b.name ?? cur.name,
+          color: (b.color ?? cur.color).toLowerCase(),
+          image_url: b.image_url !== undefined ? b.image_url : cur.image_url,
+          href: b.href !== undefined ? b.href || `/app/genre/${id}` : cur.href,
+          genres: b.genres ?? cur.genres,
+        };
+        await tx.query(`UPDATE categories SET name = $2, color = $3, image_url = $4, href = $5, genres = $6, updated_at = now() WHERE id = $1`, [
+          id, next.name, next.color, next.image_url, next.href, next.genres,
+        ]);
+        const { reason, ...changes } = b;
+        await audit(tx, { actorId: req.user!.sub, action: 'category.update', entity: 'category', entityId: id, data: { changes, reason }, ip: req.ip });
+        return (await tx.query(`SELECT id, name, color, image_url, href, genres, position, updated_at FROM categories WHERE id = $1`, [id])).rows[0];
+      });
+    });
+
+    s.delete('/v1/admin/catalog/categories/:id', async (req) => {
+      const { id } = req.params as { id: string };
+      return db.tx(async (tx) => {
+        const cur = (await tx.query(`DELETE FROM categories WHERE id = $1 RETURNING id, name, href, genres`, [id])).rows[0];
+        if (!cur) throw notFound('Kategori');
+        // Rapatkan urutan.
+        await tx.query(`UPDATE categories c SET position = o.rn - 1 FROM (SELECT id, row_number() OVER (ORDER BY position, name) AS rn FROM categories) o WHERE o.id = c.id`);
+        await audit(tx, { actorId: req.user!.sub, action: 'category.delete', entity: 'category', entityId: id, data: cur, ip: req.ip });
+        return { deleted: id };
+      });
+    });
+
+    /** Urutan tampil di Jelajahi (semua id, urutan baru). */
+    s.put('/v1/admin/catalog/categories/order', async (req) => {
+      const b = z.object({ ids: z.array(z.string().max(40)).min(1).max(200) }).parse(req.body);
+      return db.tx(async (tx) => {
+        const all = (await tx.query(`SELECT id FROM categories ORDER BY position FOR UPDATE`)).rows.map((x: { id: string }) => x.id);
+        if (all.length !== b.ids.length || new Set(b.ids).size !== b.ids.length || !b.ids.every((x) => all.includes(x)))
+          throw badRequest('Daftar urutan harus memuat semua kategori tepat sekali');
+        for (const [i, cid] of b.ids.entries()) await tx.query(`UPDATE categories SET position = $2 WHERE id = $1`, [cid, i]);
+        await audit(tx, { actorId: req.user!.sub, action: 'category.reorder', entity: 'category', entityId: null, data: { ids: b.ids }, ip: req.ip });
+        return { data: (await tx.query(LIST)).rows }; // dalam transaksi: urutan baru, bukan snapshot lama
+      });
+    });
+  });
+
   // ---------- QC konten (REQ-ADM-02) ----------
   app.register(async (s) => {
     s.addHook('preHandler', requirePermission('qc.review'));
@@ -111,73 +285,6 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
         data.push(r);
       }
       return { data };
-    });
-
-    // ---- Kurasi artwork (Super Admin): galeri semua sampul + ganti / minta ganti ----
-    s.get('/v1/admin/artwork', { preHandler: requireSuperAdmin }, async (req) => {
-      const q = z
-        .object({ filter: z.enum(['all', 'pending', 'issues']).default('all'), q: z.string().trim().max(100).optional(), status: z.string().max(20).optional() })
-        .parse(req.query);
-      const params: unknown[] = [];
-      const where: string[] = [];
-      if (q.filter === 'pending') where.push('r.pending_cover_url IS NOT NULL');
-      if (q.status) where.push(`r.status = $${params.push(q.status)}`);
-      if (q.q) where.push(`(r.title ILIKE $${params.push(`%${q.q}%`)} OR a.name ILIKE $${params.length})`);
-      const rows = await db.query(
-        `SELECT r.id, r.title, r.status, r.cover_url, r.pending_cover_url, r.pending_cover_at, r.cover_review_note, r.updated_at, a.name AS artist_name, a.id AS artist_id
-           FROM releases r JOIN artists a ON a.id = r.artist_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-          ORDER BY (r.pending_cover_url IS NOT NULL) DESC, r.updated_at DESC LIMIT 120`,
-        params,
-      );
-      const data = [];
-      for (const r of rows) {
-        const size = await artworkSize(r.cover_url);
-        const issues = artworkIssues(r.cover_url, size);
-        if (q.filter === 'issues' && !issues.length) continue;
-        data.push({
-          id: r.id, title: r.title, status: r.status, artist_name: r.artist_name, artist_id: r.artist_id,
-          cover_url: r.cover_url, size, issues,
-          pending_cover: r.pending_cover_url ? { url: r.pending_cover_url, submitted_at: r.pending_cover_at, size: await artworkSize(r.pending_cover_url) } : null,
-          review_note: r.cover_review_note, updated_at: r.updated_at,
-        });
-      }
-      return { data };
-    });
-
-    /** Super Admin mengganti artwork langsung (mis. melanggar pedoman, kualitas buruk, salah unggah). Wajib beralasan; artis dinotifikasi. */
-    s.post('/v1/admin/artwork/:id/replace', { preHandler: requireSuperAdmin }, async (req) => {
-      const { id } = req.params as { id: string };
-      if (!isUuid(id)) throw notFound('Rilis');
-      const b = z.object({ cover_url: z.string().max(1000), reason: z.string().trim().min(5, 'Alasan minimal 5 karakter').max(1000) }).parse(req.body);
-      const name = /^\/v1\/catalog\/media\/([\w.-]+)$/.exec(b.cover_url)?.[1];
-      const up = name ? await db.one(`SELECT kind, completed_at, purpose FROM uploads WHERE stored_name = $1`, [name]) : null;
-      if (!up || up.kind !== 'artwork' || !up.completed_at || up.purpose === 'playlist') throw badRequest('Artwork harus berupa gambar yang sudah diunggah (JPG/PNG)');
-      return db.tx(async (tx) => {
-        const r = (await tx.query(`SELECT id, title, artist_id, cover_url FROM releases WHERE id = $1 FOR UPDATE`, [id])).rows[0];
-        if (!r) throw notFound('Rilis');
-        await tx.query(
-          `UPDATE releases SET cover_url = $2, pending_cover_url = NULL, pending_cover_at = NULL, pending_cover_by = NULL, cover_review_note = $3, updated_at = now() WHERE id = $1`,
-          [id, b.cover_url, `Diganti tim kurasi RAVE: ${b.reason}`],
-        );
-        await publish(tx, 'catalog.release.cover_curated', id, { releaseId: id, artistId: r.artist_id, title: r.title, action: 'replaced', reason: b.reason });
-        await audit(tx, { actorId: req.user!.sub, action: 'artwork.replace', entity: 'release', entityId: id, data: { from: r.cover_url, to: b.cover_url, reason: b.reason }, ip: req.ip });
-        return { id, cover_url: b.cover_url };
-      });
-    });
-
-    /** Minta artis/manajemen mengganti artwork (sampul lama tetap tayang sampai artis mengajukan yang baru). */
-    s.post('/v1/admin/artwork/:id/request-change', { preHandler: requireSuperAdmin }, async (req) => {
-      const { id } = req.params as { id: string };
-      if (!isUuid(id)) throw notFound('Rilis');
-      const b = z.object({ reason: z.string().trim().min(5, 'Alasan minimal 5 karakter').max(1000) }).parse(req.body);
-      return db.tx(async (tx) => {
-        const r = (await tx.query(`SELECT id, title, artist_id FROM releases WHERE id = $1 FOR UPDATE`, [id])).rows[0];
-        if (!r) throw notFound('Rilis');
-        await tx.query(`UPDATE releases SET cover_review_note = $2, updated_at = now() WHERE id = $1`, [id, `Diminta ganti oleh tim kurasi RAVE: ${b.reason}`]);
-        await publish(tx, 'catalog.release.cover_curated', id, { releaseId: id, artistId: r.artist_id, title: r.title, action: 'change_requested', reason: b.reason });
-        await audit(tx, { actorId: req.user!.sub, action: 'artwork.request_change', entity: 'release', entityId: id, data: b, ip: req.ip });
-        return { id, requested: true };
-      });
     });
 
     // ---- Pengajuan ganti sampul rilis yang sudah tayang ----

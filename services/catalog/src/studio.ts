@@ -259,7 +259,7 @@ async function assertOwnArtworkUpload(
   const name = storedNameOf(url);
   const res = name ? await q.query(`SELECT user_id, kind, completed_at, purpose FROM uploads WHERE stored_name = $1`, [name]) : null;
   const u = res ? (Array.isArray(res) ? res[0] : res.rows[0]) : null;
-  if (!u || u.kind !== 'artwork' || !u.completed_at || u.user_id !== userId || u.purpose === 'playlist')
+  if (!u || u.kind !== 'artwork' || !u.completed_at || u.user_id !== userId || u.purpose !== 'release')
     throw unprocessable(message);
 }
 
@@ -664,8 +664,8 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       const b = z
         .object({
           kind: z.enum(['audio', 'artwork']),
-          /** playlist = sampul playlist pengguna (fan): gambar saja, ≤ 8 MB, ≥ 300 px. */
-          purpose: z.enum(['release', 'playlist']).default('release'),
+          /** playlist = sampul playlist pengguna (fan); category = gambar kategori Jelajahi (Super Admin). Gambar saja, ≤ 8 MB, ≥ 300 px. */
+          purpose: z.enum(['release', 'playlist', 'category']).default('release'),
           filename: z.string().min(1).max(200),
           // Boleh kosong: browser sering tidak mengenali .flac/.aiff → MIME ditentukan dari ekstensi di bawah.
           content_type: z.string().max(100),
@@ -678,9 +678,10 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
         // MIME tak baku/kosong dari browser (x-flac, x-aiff, x-m4a, octet-stream) → MIME standar menurut ekstensi.
         if (AUDIO_UPLOAD_TYPES[ext0] && (!ct.startsWith('audio/') || /^audio\/x-(flac|aiff|m4a)$/.test(ct))) b.content_type = AUDIO_UPLOAD_TYPES[ext0];
       }
-      if (b.purpose === 'playlist' && b.kind !== 'artwork') throw badRequest('Sampul playlist harus berupa gambar');
+      if (b.purpose !== 'release' && b.kind !== 'artwork') throw badRequest('Sampul harus berupa gambar');
+      if (b.purpose === 'category' && !hasPermission(req.user, 'catalog.curate')) throw forbidden('Gambar kategori memerlukan izin Kurasi katalog');
       // Kebijakan upload dari pengaturan platform (Super Admin → Storage & Retensi). Sampul playlist dibatasi lebih kecil.
-      const maxMb = b.purpose === 'playlist' ? Math.min(PLAYLIST_COVER_MAX_MB, settings.num('storage.max_upload_mb')) : settings.num('storage.max_upload_mb');
+      const maxMb = b.purpose !== 'release' ? Math.min(PLAYLIST_COVER_MAX_MB, settings.num('storage.max_upload_mb')) : settings.num('storage.max_upload_mb');
       if (b.size > maxMb * 1024 * 1024) throw unprocessable(`Ukuran file melebihi batas ${maxMb} MB`);
       const allowed = settings.get<string[]>(b.kind === 'audio' ? 'storage.allowed_audio_types' : 'storage.allowed_image_types');
       if (!allowed.includes(b.content_type.toLowerCase())) throw unprocessable(`Tipe file ${b.content_type} tidak diizinkan untuk ${b.kind} (diizinkan: ${allowed.join(', ')})`);
@@ -754,14 +755,14 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
             let audioMeta: AudioMeta | null = null;
             let size = 0;
             try {
-              const { bytes, head } = await receiveUpload(src, part, u.purpose === 'playlist' ? Math.min(PLAYLIST_COVER_MAX_MB, settings.num('storage.max_upload_mb')) : settings.num('storage.max_upload_mb'));
+              const { bytes, head } = await receiveUpload(src, part, u.purpose !== 'release' ? Math.min(PLAYLIST_COVER_MAX_MB, settings.num('storage.max_upload_mb')) : settings.num('storage.max_upload_mb'));
               size = bytes;
               if (!bytes) throw badRequest('Body biner kosong (kirim dengan content-type audio/* atau image/*)');
               if (u.kind === 'artwork') {
                 const dim = imageSize(head);
-                if (!dim) throw unprocessable(u.purpose === 'playlist' ? 'Sampul harus JPEG/PNG yang valid' : 'Artwork harus JPEG/PNG yang valid');
+                if (!dim) throw unprocessable(u.purpose !== 'release' ? 'Sampul harus JPEG/PNG yang valid' : 'Artwork harus JPEG/PNG yang valid');
                 meta = dim;
-                if (u.purpose === 'playlist') {
+                if (u.purpose !== 'release') {
                   if (Math.min(dim.width, dim.height) < PLAYLIST_COVER_MIN_PX) throw unprocessable(`Sampul minimal ${PLAYLIST_COVER_MIN_PX}×${PLAYLIST_COVER_MIN_PX} px (diterima ${dim.width}×${dim.height})`);
                   if (dim.width !== dim.height) warnings.push('Sampul bukan persegi — ditampilkan terpotong di tengah (1:1)');
                 } else {

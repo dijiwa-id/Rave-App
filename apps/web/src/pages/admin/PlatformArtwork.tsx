@@ -4,6 +4,7 @@ import { Check, ImageOff, MessageSquareWarning, RefreshCcw, Search, Upload, X } 
 import { api, fmt } from '@/lib/api';
 import { uploadFile } from '@/lib/upload';
 import { useDict } from '@/lib/i18n';
+import { can, useAuth } from '@/stores/auth';
 import { Badge, Button, cx, Field, Input, Modal, PageHeader, Textarea, toast } from '@/components/ui';
 import { Empty, QueryState } from '@/components/b2b/common';
 
@@ -31,6 +32,7 @@ const FILTERS = ['pending', 'issues', 'all'] as const;
 const dims = (s: Size) => (s ? `${s.width}×${s.height}` : '—');
 
 export function PlatformArtwork() {
+  const canDecide = can(useAuth((s) => s.user), 'qc.review');
   const t = useDict('admin').artwork;
   const common = useDict('admin').common;
   const qc = useQueryClient();
@@ -144,7 +146,8 @@ export function PlatformArtwork() {
                 )}
                 {r.review_note && <p className="text-xs text-b2b-muted italic">{r.review_note}</p>}
                 <div className="mt-auto flex flex-wrap gap-2 pt-1">
-                  {r.pending_cover && (
+                  {/* Setujui/tolak pengajuan sampul = keputusan QC (izin qc.review); kurator tanpa izin itu tetap bisa ganti/minta ganti. */}
+                  {r.pending_cover && canDecide && (
                     <>
                       <Button size="sm" variant="ink" icon={<Check className="size-3.5" />} onClick={() => approve(r)}>
                         {common.approve}
