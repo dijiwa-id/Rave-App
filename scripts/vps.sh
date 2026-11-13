@@ -38,7 +38,9 @@ cmd_bundle() {
   step "dump DB produksi lokal"
   docker exec rave-postgres-1 pg_dump -U rave -d rave --no-owner | gzip > "$BUNDLE/db.sql.gz"
   step "volume storage produksi lokal"
-  docker run --rm -v rave_storage:/s:ro -v "$PWD/$BUNDLE":/b alpine tar czf /b/storage.tar.gz -C /s --exclude='./live/*' --exclude='./backups/*' .
+  # Lewat stdout (bukan bind-mount): docker.exe Docker Desktop tidak bisa me-mount path WSL berspasi.
+  docker run --rm -v rave_storage:/s:ro alpine tar czf - -C /s --exclude='./live/*' --exclude='./backups/*' . > "$BUNDLE/storage.tar.gz"
+  tar tzf "$BUNDLE/storage.tar.gz" >/dev/null || die "arsip storage rusak"
   ls -lh "$BUNDLE"
   ok "bundle siap: $BUNDLE"
 }
@@ -68,30 +70,33 @@ EOF
 
 cmd_ship() {
   [ -f "$BUNDLE/images.tar.gz" ] || die "bundle belum ada — jalankan $0 bundle"
-  step "salin bundle ke $host:$VPS_DIR"
-  rsh "mkdir -p $VPS_DIR/bundle"
-  scp $SSH_OPTS "$BUNDLE"/{src.tar.gz,images.tar.gz,db.sql.gz,storage.tar.gz,GIT_SHA} "$host:$VPS_DIR/bundle/"
-  scp $SSH_OPTS "$VPS_ENV" "$host:$VPS_DIR/.env.production"
-  step "muat image, pulihkan data (bila DB kosong), jalankan stack TLS"
-  rsh "VPS_DIR=$VPS_DIR bash -s" <<'EOF'
+  # Skrip remote sebagai berkas (bukan `bash -s` dari stdin: `docker compose exec` akan menelan sisa skrip).
+  cat > "$BUNDLE/remote-ship.sh" <<'EOF'
 set -e
-cd "$VPS_DIR"
+cd "$(dirname "$0")/.."
+VPS_DIR="$PWD"
 tar xzf bundle/src.tar.gz
 chmod 600 .env.production
 export GIT_SHA="$(cat bundle/GIT_SHA)"
 gunzip -c bundle/images.tar.gz | docker load | tail -3
 dc() { docker compose -f docker-compose.prod.yml --env-file .env.production --profile tls "$@"; }
 dc up -d postgres
-for i in $(seq 60); do dc exec -T postgres pg_isready -U rave -d rave >/dev/null 2>&1 && break; sleep 2; done
-if [ "$(dc exec -T postgres psql -U rave -d rave -Atc "select count(*) from pg_namespace where nspname='catalog'")" = 0 ]; then
+for i in $(seq 60); do dc exec -T postgres pg_isready -U rave -d rave </dev/null >/dev/null 2>&1 && break; sleep 2; done
+if [ "$(dc exec -T postgres psql -U rave -d rave -Atc "select count(*) from pg_namespace where nspname='catalog'" </dev/null)" = 0 ]; then
   gunzip -c bundle/db.sql.gz | dc exec -T postgres psql -q -U rave -d rave -v ON_ERROR_STOP=1 >/dev/null && echo "✓ DB dipulihkan dari prod-lokal"
-  docker run --rm -v rave_storage:/s -v "$VPS_DIR/bundle":/b:ro alpine tar xzf /b/storage.tar.gz -C /s && echo "✓ storage dipulihkan"
-  docker run --rm -v rave_storage:/s alpine chown -R 1000:1000 /s
+  docker run --rm -i -v rave_storage:/s alpine tar xzf - -C /s < bundle/storage.tar.gz && echo "✓ storage dipulihkan"
+  docker run --rm -v rave_storage:/s alpine chown -R 1000:1000 /s </dev/null
 else
   echo "! DB sudah berisi data — tidak ditimpa (hapus volume rave_pgdata bila memang ingin memulihkan ulang)"
 fi
 PROFILES=tls ENV_FILE=.env.production bash scripts/prod.sh up
 EOF
+  step "salin bundle ke $host:$VPS_DIR"
+  rsh "mkdir -p $VPS_DIR/bundle"
+  scp $SSH_OPTS "$BUNDLE"/{src.tar.gz,images.tar.gz,db.sql.gz,storage.tar.gz,GIT_SHA,remote-ship.sh} "$host:$VPS_DIR/bundle/"
+  scp $SSH_OPTS "$VPS_ENV" "$host:$VPS_DIR/.env.production"
+  step "muat image, pulihkan data (bila DB kosong), jalankan stack TLS"
+  rsh "bash $VPS_DIR/bundle/remote-ship.sh"
   ok "RAVE berjalan di $host — https://$(grep -E '^RAVE_DOMAIN=' "$VPS_ENV" | cut -d= -f2)"
 }
 
