@@ -5,6 +5,29 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-13
+
+### Fitur
+
+- **web:** sidebar Back Office per divisi & jenis layanan, pengaturan per layanan (530005a)
+- **admin:** laporan per sub-layanan (KPI, tren 14 hari, tabel) (b38489e)
+- **catalog:** kelola kategori Jelajahi dari Back Office + izin Kurasi katalog (f29e676)
+- **contract:** Tahap 3 — templat spk-v2, PDF Puppeteer, QR, hash, storage privat, verifikasi publik (eb95613)
+- **contract:** fondasi Generated Contract — state machine kontrak, termin/pajak/split, skema berversi, dokumen asumsi (c4aeb0e)
+- **platform:** fondasi Super Admin — registri pengaturan, klien settings, stats internal, retry dead letter, kontrak API §9 (160f765)
+- platform GEMA — 8 microservice, gateway, web (landing, fan app, studio, promotor hub, back office) (eb6c91b)
+- **domain:** katalog seed deterministik (5bbad14)
+
+### Perbaikan
+
+- **domain:** ekspor modul contract dari index (cfe6fba)
+- scripts sebagai ES module (ba0d0ce)
+
+### Lain-lain
+
+- sertakan seluruh perubahan kerja lokal (live, ads, platform, web, pengaturan kontrak) (968ad36)
+- fondasi monorepo GEMA (service-kit, domain, gateway, notification, web shell) (0470811)
+
 ## [0.2.0] — 2026-11-13
 
 ### Fitur

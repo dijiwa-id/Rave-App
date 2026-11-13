@@ -1,7 +1,7 @@
 {
   "name": "rave",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "RAVE — Rolliemonkie Audio Visual Experiment: platform ekosistem musik DIY & indie (microservices monorepo)",
   "type": "module",
   "workspaces": [
