@@ -41,7 +41,9 @@ smoke() {
   local v; v="$(curl -fsS -m 5 "$base/v1/version")" || { echo "✗ /v1/version gagal"; return 1; }
   echo "  versi API: $v"
   local s; s="$(curl -fsS -m 10 "$base/v1/status")" || { echo "✗ /v1/status gagal"; return 1; }
-  node -e '
+  # Host VPS cukup Docker (tanpa Node): pakai node di dalam container gateway bila node host tidak ada.
+  local js=(node); command -v node >/dev/null 2>&1 || js=(docker compose -f docker-compose.prod.yml --env-file "$ENV_FILE" exec -T gateway node)
+  "${js[@]}" -e '
     const s = JSON.parse(process.argv[1]);
     for (const x of s.services) console.log(`  ${x.ok ? "✓" : "✗"} ${x.service.padEnd(13)} ${x.version ?? "-"} ${x.ms}ms`);
     if (s.version_drift?.length) console.log("  ! versi tidak seragam:", s.version_drift.join(", "));
