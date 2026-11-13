@@ -20,7 +20,7 @@ const admin: Shape<typeof id> = {
     audit: 'Audit Log',
     ads: 'Ads',
     overviewSection: 'Overview',
-    areas: { Konten: 'Content Division', Iklan: 'Ads Division', Kepercayaan: 'Trust Division', Keuangan: 'Finance Division', Pengguna: 'Users Division' },
+    areas: { Konten: 'Content', Iklan: 'Ads', Kepercayaan: 'Trust', Keuangan: 'Finance', Pengguna: 'Users' },
     serviceTypes: { music: 'Services · Music', event: 'Services · Events & Live', money: 'Services · Monetization' },
     opsSection: 'Back Office',
     platformSection: 'Platform',

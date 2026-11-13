@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { L, dailySql, fillDaily, type ServiceReport } from '@rave/domain/reports';
 import { requireSuperAdmin, type ServiceContext } from '@rave/service-kit';
 
-/** Ringkasan Payout (Super Admin). Persetujuan & transfer tetap di Divisi Keuangan → Finance (tidak diduplikasi). */
+/** Ringkasan Payout (Super Admin). Persetujuan & transfer tetap di Keuangan → Finance (tidak diduplikasi). */
 export async function reportRoutes(app: FastifyInstance, { db }: ServiceContext) {
   app.get('/v1/admin/reports/payout', { preHandler: requireSuperAdmin }, async (): Promise<ServiceReport> => {
     const k = await db.one(

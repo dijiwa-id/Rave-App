@@ -35,24 +35,24 @@ export function AdminLayout() {
   const cmsTitle = useDict('cms').title;
   const svc = useDict('admin').services;
   // Menu mengikuti izin peran ("Peran & Akses"); halaman & API menegakkan hal yang sama.
-  // Sidebar per divisi = area izin di "Peran & Akses" (ADMIN_PERMISSIONS[*].area): menu & seksi mengikuti izin peran,
+  // Seksi sidebar = area izin di "Peran & Akses" (ADMIN_PERMISSIONS[*].area): menu & seksi mengikuti izin peran,
   // seksi tanpa item yang boleh dibuka otomatis tersembunyi. Platform & pengaturan layanan khusus Super Admin.
   const area = (p: AdminPermission) => n.areas[ADMIN_PERMISSIONS[p].area as keyof typeof n.areas] ?? ADMIN_PERMISSIONS[p].area;
   const NAV: AdminNavItem[] = [
     { to: '/admin', label: n.dashboard, icon: LayoutDashboard, end: true, section: n.overviewSection },
-    // Divisi Konten
+    // Seksi Konten
     { to: '/admin/qc', label: n.qc, icon: Disc3, perms: ['qc.review'], section: area('qc.review') },
     { to: '/admin/categories', label: n.categories, icon: Shapes, perms: ['catalog.curate'] },
     { to: '/admin/artwork', label: n.artwork, icon: Images, perms: ['catalog.curate'] },
     { to: '/admin/live', label: n.live, icon: Radio, perms: ['live.moderate'] },
-    // Divisi Iklan
+    // Seksi Iklan
     { to: '/admin/ads', label: n.ads, icon: Megaphone, perms: ['ads.manage', 'ads.review'], section: area('ads.manage') },
-    // Divisi Kepercayaan
+    // Seksi Kepercayaan
     { to: '/admin/kyc', label: n.kyc, icon: IdCard, perms: ['kyc.review'], section: area('kyc.review') },
     { to: '/admin/disputes', label: n.disputes, icon: Gavel, perms: ['dispute.resolve'] },
-    // Divisi Keuangan
+    // Seksi Keuangan
     { to: '/admin/finance', label: n.finance, icon: Scale, perms: ['finance.view', 'finance.refund', 'finance.payout'], section: area('finance.view') },
-    // Divisi Pengguna
+    // Seksi Pengguna
     { to: '/admin/users', label: n.users, icon: Users, perms: ['users.view'], section: area('users.view') },
     { to: '/admin/audit', label: n.audit, icon: FileClock, perms: ['audit.view'] },
     // Platform — tata kelola (khusus Super Admin, tidak dapat didelegasikan).

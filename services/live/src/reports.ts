@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { L, dailySql, fillDaily, type ServiceReport } from '@rave/domain/reports';
 import { requireSuperAdmin, type ServiceContext } from '@rave/service-kit';
 
-/** Laporan Live Streaming (Super Admin → Pengaturan Layanan). Moderasi tetap di Divisi Konten → Moderasi Live. */
+/** Laporan Live Streaming (Super Admin → Pengaturan Layanan). Moderasi tetap di Konten → Moderasi Live. */
 export async function reportRoutes(app: FastifyInstance, { db }: ServiceContext) {
   app.get('/v1/admin/reports/live', { preHandler: requireSuperAdmin }, async (): Promise<ServiceReport> => {
     const k = await db.one(

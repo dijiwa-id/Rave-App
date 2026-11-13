@@ -40,7 +40,7 @@ export const RAVE_SERVICES: RaveService[] = [
   { id: 'booking', report: true, type: 'event', icon: CalendarCheck, status: 'ready', groups: ['booking', 'commission'] },
   { id: 'contract', report: true, type: 'event', icon: FileSignature, status: 'ready', groups: ['legal'] },
   { id: 'ticketing', report: true, type: 'event', icon: Ticket, status: 'ready', groups: ['refund'] },
-  // Monetisasi — pengaturan Iklan dibuka dari Divisi Iklan → Kebijakan (tidak diduplikasi di sidebar).
+  // Monetisasi — pengaturan Iklan dibuka dari Iklan → Kebijakan (tidak diduplikasi di sidebar).
   { id: 'ads', type: 'money', icon: Megaphone, status: 'ready', groups: ['ads'], nav: false },
   { id: 'payout', report: true, type: 'money', icon: Wallet, status: 'ready', groups: ['payout'] },
   { id: 'subscription', report: true, type: 'money', icon: Crown, status: 'soon', groups: ['subscription'], keys: (k) => !isPro(k) && !isDownload(k) },

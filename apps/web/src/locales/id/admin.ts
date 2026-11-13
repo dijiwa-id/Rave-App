@@ -18,7 +18,7 @@ const admin = {
     audit: 'Audit Log',
     ads: 'Iklan',
     overviewSection: 'Ringkasan',
-    areas: { Konten: 'Divisi Konten', Iklan: 'Divisi Iklan', Kepercayaan: 'Divisi Kepercayaan', Keuangan: 'Divisi Keuangan', Pengguna: 'Divisi Pengguna' },
+    areas: { Konten: 'Konten', Iklan: 'Iklan', Kepercayaan: 'Kepercayaan', Keuangan: 'Keuangan', Pengguna: 'Pengguna' },
     serviceTypes: { music: 'Layanan · Musik', event: 'Layanan · Event & Live', money: 'Layanan · Monetisasi' },
     opsSection: 'Back Office',
     platformSection: 'Platform',

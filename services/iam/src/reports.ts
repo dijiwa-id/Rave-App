@@ -4,7 +4,7 @@ import { requireSuperAdmin, type ServiceContext } from '@rave/service-kit';
 
 const ACTIVE = `member_type <> 'FREE' AND (member_until IS NULL OR member_until > now())`;
 
-/** Laporan Langganan Premium & RAVE Pro (Super Admin). Jenis member diubah di Divisi Pengguna → Pengguna. */
+/** Laporan Langganan Premium & RAVE Pro (Super Admin). Jenis member diubah di Pengguna → Pengguna. */
 export async function reportRoutes(app: FastifyInstance, { db }: ServiceContext) {
   app.get('/v1/admin/reports/subscription', { preHandler: requireSuperAdmin }, async (): Promise<ServiceReport> => {
     const k = await db.one(

@@ -9,7 +9,7 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ### Fitur
 
-- **web:** sidebar Back Office per divisi & jenis layanan, pengaturan per layanan (530005a)
+- **web:** sidebar Back Office per area sidebar Back Office per divisi & jenis layanan jenis layanan, pengaturan per layanan (530005a)
 - **admin:** laporan per sub-layanan (KPI, tren 14 hari, tabel) (b38489e)
 - **catalog:** kelola kategori Jelajahi dari Back Office + izin Kurasi katalog (f29e676)
 - **contract:** Tahap 3 — templat spk-v2, PDF Puppeteer, QR, hash, storage privat, verifikasi publik (eb95613)
