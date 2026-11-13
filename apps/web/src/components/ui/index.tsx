@@ -8,17 +8,29 @@ const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).jo
 export { cx };
 
 // ---------- Button ----------
+/**
+ * Satu sistem tombol untuk seluruh aplikasi: semua varian memakai border 2px, tinggi tetap per ukuran, ikon berukuran
+ * seragam, dan (varian dasbor) bayangan sablon + umpan balik tekan yang sama — lihat `.rave-btn` di index.css.
+ * Tombol tanpa label (ikon saja) otomatis persegi.
+ */
 type Variant = 'primary' | 'white' | 'outline' | 'ghost' | 'dark' | 'danger' | 'ink' | 'outline-ink';
 const variants: Record<Variant, string> = {
-  primary: 'border-2 border-rave-ink bg-rave-primary text-rave-on-primary shadow-[3px_3px_0_#0b0a0c] hover:-translate-y-0.5 hover:bg-rave-primary-hover',
-  white: 'border-2 border-rave-ink bg-rave-paper text-rave-ink shadow-[3px_3px_0_#0b0a0c] hover:-translate-y-0.5',
-  outline: 'border-2 border-white/40 text-white hover:border-white hover:-translate-y-0.5',
-  ghost: 'text-rave-muted hover:text-white',
-  dark: 'bg-rave-highlight text-white hover:bg-[#3e3e3e]',
-  danger: 'bg-[#dc2626] text-white hover:bg-[#ef4444]',
-  ink: 'border-2 border-[#181818] bg-b2b-ink text-b2b-on-ink hover:-translate-y-0.5 active:translate-y-0',
-  'outline-ink': 'border-2 border-b2b-ink/80 bg-b2b-card text-b2b-ink shadow-[3px_3px_0_rgba(24,24,24,0.18)] hover:-translate-y-0.5 hover:border-rave-accent hover:text-rave-accent active:translate-y-0',
+  primary: 'rave-btn border-rave-ink bg-rave-primary text-rave-on-primary [--btn-shadow:#0b0a0c] hover:bg-rave-primary-hover',
+  white: 'rave-btn border-rave-ink bg-rave-paper text-rave-ink [--btn-shadow:#0b0a0c]',
+  outline: 'rave-btn rave-btn--flat border-white/40 text-white hover:border-white',
+  ghost: 'rave-btn rave-btn--flat border-transparent text-rave-muted hover:text-white',
+  dark: 'rave-btn rave-btn--flat border-transparent bg-rave-highlight text-white hover:bg-[#3e3e3e]',
+  danger: 'rave-btn border-transparent bg-[#dc2626] text-white hover:bg-[#e53e3e]',
+  ink: 'rave-btn border-transparent bg-b2b-ink text-b2b-on-ink',
+  'outline-ink': 'rave-btn border-b2b-ink bg-b2b-card text-b2b-ink hover:border-rave-accent hover:text-rave-accent',
 };
+const sizes = {
+  sm: 'h-8 text-[11px] [&>svg]:size-3.5',
+  md: 'h-10 text-[12px] [&>svg]:size-4',
+  lg: 'h-12 text-[13px] [&>svg]:size-4',
+};
+const pads = { sm: 'px-3', md: 'px-4', lg: 'px-6' };
+const squares = { sm: 'w-8', md: 'w-10', lg: 'w-12' };
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
   size?: 'sm' | 'md' | 'lg';
@@ -29,20 +41,22 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   { variant = 'primary', size = 'md', loading, icon, className, children, disabled, ...rest },
   ref,
 ) {
-  const sizes = { sm: 'h-8 px-3.5 text-[11px]', md: 'h-10 px-5 text-[12px]', lg: 'h-12 px-7 text-[13px]' };
+  const iconOnly = (children === undefined || children === null || children === false) && !!icon;
   return (
     <button
       ref={ref}
       disabled={disabled || loading}
+      aria-busy={loading || undefined}
       className={cx(
-        'inline-flex items-center justify-center gap-2 rounded-none font-label font-bold tracking-[0.08em] uppercase transition-all duration-150 disabled:pointer-events-none disabled:opacity-50',
+        'inline-flex shrink-0 items-center justify-center gap-2 rounded-none border-2 font-label leading-none font-bold tracking-[0.08em] whitespace-nowrap uppercase select-none disabled:pointer-events-none disabled:opacity-50 [&>svg]:shrink-0',
         variants[variant],
         sizes[size],
+        iconOnly ? squares[size] : pads[size],
         className,
       )}
       {...rest}
     >
-      {loading ? <Spinner className="size-4" /> : icon}
+      {loading ? <Spinner className={size === 'sm' ? 'size-3.5' : 'size-4'} /> : icon}
       {children}
     </button>
   );

@@ -13,6 +13,8 @@
   --font-display: 'Staatliches', 'Anton', Impact, 'Arial Narrow', sans-serif;
   /* Sekunder: Space Mono — baris info flyer rave (tanggal, venue, katalog, tombol). */
   --font-label: 'Space Mono', ui-monospace, 'Courier New', monospace;
+  /* Teks monospasi (ID, slug, kode, angka) memakai font label brand yang di-host sendiri — tidak bergantung font sistem. */
+  --font-mono: 'Space Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace;
 
   --color-rave-ink: #181818;
   --color-rave-paper: #ededed;
@@ -794,6 +796,8 @@ h2 {
 :root[data-b2b-theme] .bg-b2b-ink {
   background-image: var(--b2b-grad);
   background-color: #5b2a6e;
+}
+:root[data-b2b-theme] .bg-b2b-ink:not(.rave-btn) {
   box-shadow: var(--b2b-glow);
 }
 :root[data-b2b-theme] .bg-b2b-ink.border-b2b-ink {
@@ -1058,3 +1062,52 @@ h2 {
   background-color: #f4c21f;
   box-shadow: 0 2px 0 rgb(0 0 0 / 0.35);
 }
+
+/*
+ * Sistem tombol (komponen <Button>): border 2px + bayangan sablon 2px yang sama di semua varian, angkat 1px saat hover,
+ * tertekan saat aktif. Warna bayangan dari --btn-shadow (gelap mengikuti tema). Varian --flat tanpa bayangan.
+ */
+.rave-btn {
+  --btn-shadow: rgb(24 24 24 / 0.85);
+  box-shadow: 2px 2px 0 var(--btn-shadow);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, filter 0.15s ease;
+}
+.rave-btn:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--btn-shadow);
+}
+.rave-btn:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 0 0 0 var(--btn-shadow);
+}
+.rave-btn.rave-btn--flat,
+.rave-btn.rave-btn--flat:hover:not(:disabled),
+.rave-btn.rave-btn--flat:active:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+}
+:root[data-b2b-theme='dark'] .rave-btn {
+  --btn-shadow: #050506;
+}
+:root[data-b2b-theme='dark'] .rave-btn.border-b2b-ink {
+  border-color: var(--b2b-card-border);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rave-btn,
+  .rave-btn:hover:not(:disabled),
+  .rave-btn:active:not(:disabled) {
+    transform: none;
+    transition: none;
+  }
+}
+
+/*
+ * Jaring pengaman tema gelap dasbor: utilitas warna terang (teks status *-600/700, latar putih) yang ditulis
+ * langsung di halaman dipetakan ke nada yang terbaca di permukaan gelap.
+ */
+:root[data-b2b-theme='dark'] main .bg-white:not(.rave-keep-white) { background-color: var(--color-b2b-card); }
+:root[data-b2b-theme='dark'] :is(.text-blue-600, .text-blue-700) { color: #8fb8ff; }
+:root[data-b2b-theme='dark'] :is(.text-emerald-600, .text-emerald-700, .text-green-600, .text-green-700) { color: #5fd8a4; }
+:root[data-b2b-theme='dark'] :is(.text-amber-600, .text-amber-700) { color: #f4c95d; }
+:root[data-b2b-theme='dark'] :is(.text-red-600, .text-red-700) { color: #ff8a8a; }
+:root[data-b2b-theme='dark'] :is(.text-violet-600, .text-violet-700, .text-purple-600, .text-purple-700) { color: #c4a5ff; }

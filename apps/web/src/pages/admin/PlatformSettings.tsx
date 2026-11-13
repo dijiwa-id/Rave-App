@@ -275,7 +275,7 @@ function ImageSettingField({
         className={cx(
           "relative h-24 max-w-full shrink-0 overflow-hidden border-2 border-b2b-line",
           rule.square ? "w-24" : "w-full sm:w-72",
-          darkBg ? "bg-[#181818]" : "bg-white",
+          darkBg ? "bg-[#181818]" : "rave-keep-white bg-white",
         )}
         title={darkBg ? t.previewDark : t.previewLight}
       >

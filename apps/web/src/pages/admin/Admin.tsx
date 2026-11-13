@@ -1087,7 +1087,7 @@ function MemberModal({ user, onClose }: { user: Me | null; onClose: () => void }
                   onClick={() => setType(m)}
                   className={cx(
                     'border px-3 py-2.5 text-left text-sm font-bold transition',
-                    type === m ? 'border-b2b-ink bg-b2b-ink text-white' : 'border-b2b-line bg-white hover:border-b2b-ink',
+                    type === m ? 'border-b2b-ink bg-b2b-ink text-b2b-on-ink' : 'border-b2b-line bg-b2b-card text-b2b-ink hover:border-b2b-ink',
                   )}
                 >
                   {t.member[m]}

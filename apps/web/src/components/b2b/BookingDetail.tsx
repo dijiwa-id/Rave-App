@@ -138,7 +138,7 @@ function ContractDocument({ contract }: { contract: Contract }) {
           {kind === 'DRAFT' ? d.viewFinal : d.viewSignedDraft}
         </button>
       )}
-      <object key={viewer?.url ?? v.url} data={viewer?.url ?? v.url} type="application/pdf" className="h-[70vh] min-h-[420px] w-full border border-b2b-line bg-white" aria-label={d.frameTitle(v.contract_no ?? '')}>
+      <object key={viewer?.url ?? v.url} data={viewer?.url ?? v.url} type="application/pdf" className="rave-keep-white h-[70vh] min-h-[420px] w-full border border-b2b-line bg-white" aria-label={d.frameTitle(v.contract_no ?? '')}>
         <div className="grid h-full place-items-center p-6 text-center text-sm text-b2b-muted">
           <p>{d.fallback}</p>
         </div>
