@@ -1,3 +1,4 @@
+import { GENRES as DOMAIN_GENRES } from '@rave/domain';
 // Konten demo orisinal (fiktif). Lirik ditulis khusus untuk demo, bukan lirik lagu nyata.
 
 /** Baseline pendengar bulanan per slug (dipakai juga oleh seed playback agar konsisten). */
@@ -179,33 +180,22 @@ export const CATEGORIES: { id: string; name: string; color: string; href: string
   { id: 'untukmu', name: 'Dibuat Untukmu', color: '#1e3264', href: '/app', genres: [] },
   { id: 'chart', name: 'Chart Kota', color: '#8d67ab', href: '/app/genre/chart', genres: [] },
   { id: 'rilis-baru', name: 'Rilis Baru', color: '#e8115b', href: '/app/genre/rilis-baru', genres: [] },
-  { id: 'discover', name: 'Discover Indie', color: '#8d67ab', href: '/app/genre/discover', genres: ['indie-pop', 'indie-rock', 'shoegaze', 'dream-pop'] },
+  { id: 'discover', name: 'Discover Indie', color: '#8d67ab', href: '/app/genre/discover', genres: ['indie-pop', 'indie-rock', 'shoegaze', 'dream-pop', 'bedroom-pop', 'math-rock', 'midwest-emo', 'lo-fi'] },
   { id: 'event', name: 'Event Live', color: '#7358ff', href: '/app/events', genres: [] },
-  { id: 'hip-hop', name: 'Hip-Hop', color: '#bc5900', href: '/app/genre/hip-hop', genres: ['hip-hop'] },
-  { id: 'pop', name: 'Pop', color: '#148a08', href: '/app/genre/pop', genres: ['pop', 'indie-pop', 'electronic'] },
+  { id: 'hip-hop', name: 'Hip-Hop', color: '#bc5900', href: '/app/genre/hip-hop', genres: ['hip-hop', 'trap', 'drill', 'boom-bap', 'phonk', 'rap-melodic'] },
+  { id: 'pop', name: 'Pop', color: '#148a08', href: '/app/genre/pop', genres: ['pop', 'indie-pop', 'bedroom-pop', 'synth-pop', 'hyperpop', 'dance-pop', 'city-pop', 'k-pop'] },
   { id: 'indie', name: 'Indie', color: '#e91429', href: '/app/genre/indie', genres: ['indie-pop', 'indie-rock'] },
-  { id: 'rock', name: 'Rock', color: '#e8115b', href: '/app/genre/rock', genres: ['rock', 'post-punk', 'indie-rock'] },
-  { id: 'rnb', name: 'R&B', color: '#dc148c', href: '/app/genre/rnb', genres: ['r-n-b', 'soul'] },
-  { id: 'akustik', name: 'Akustik', color: '#477d95', href: '/app/genre/akustik', genres: ['folk', 'akustik'] },
-  { id: 'fokus', name: 'Fokus', color: '#503750', href: '/app/genre/fokus', genres: ['shoegaze', 'dream-pop', 'folk'] },
-  { id: 'elektronik', name: 'Elektronik', color: '#0d73ec', href: '/app/genre/elektronik', genres: ['electronic'] },
+  { id: 'rock', name: 'Rock', color: '#e8115b', href: '/app/genre/rock', genres: ['rock', 'alternative-rock', 'post-punk', 'indie-rock', 'punk', 'pop-punk', 'emo', 'hardcore', 'metal', 'grunge'] },
+  { id: 'rnb', name: 'R&B', color: '#dc148c', href: '/app/genre/rnb', genres: ['r-n-b', 'alt-r-n-b', 'soul', 'neo-soul', 'funk'] },
+  { id: 'akustik', name: 'Akustik', color: '#477d95', href: '/app/genre/akustik', genres: ['folk', 'indie-folk', 'akustik', 'singer-songwriter'] },
+  { id: 'fokus', name: 'Fokus', color: '#503750', href: '/app/genre/fokus', genres: ['ambient', 'lo-fi', 'post-rock', 'shoegaze', 'dream-pop', 'nu-jazz'] },
+  { id: 'dangdut', name: 'Dangdut & Koplo', color: '#d84000', href: '/app/genre/dangdut', genres: ['dangdut', 'dangdut-koplo', 'funkot', 'dj-remix', 'campursari'] },
+  { id: 'nusantara', name: 'Nusantara', color: '#5b2a6e', href: '/app/genre/nusantara', genres: ['pop-melayu', 'pop-sunda', 'pop-jawa', 'keroncong', 'gamelan-kontemporer'] },
+  { id: 'elektronik', name: 'Elektronik', color: '#0d73ec', href: '/app/genre/elektronik', genres: ['electronic', 'house', 'techno', 'drum-and-bass', 'uk-garage', 'jersey-club', 'edm', 'synthwave', 'future-bass', 'amapiano'] },
 ];
 
-export const GENRES: [string, string][] = [
-  ['indie-pop', 'Indie Pop'],
-  ['indie-rock', 'Indie Rock'],
-  ['folk', 'Folk'],
-  ['akustik', 'Akustik'],
-  ['rock', 'Rock'],
-  ['post-punk', 'Post-Punk'],
-  ['r-n-b', 'R&B'],
-  ['soul', 'Soul'],
-  ['shoegaze', 'Shoegaze'],
-  ['dream-pop', 'Dream Pop'],
-  ['hip-hop', 'Hip-Hop'],
-  ['pop', 'Pop'],
-  ['electronic', 'Elektronik'],
-];
+/** Taksonomi genre bersama (packages/domain/src/genres.ts). */
+export const GENRES: [string, string][] = DOMAIN_GENRES.map((g) => [g.id, g.name]);
 
 interface SeedShow {
   kind: 'PODCAST' | 'FICTION';

@@ -12,6 +12,7 @@
     "./money": "./src/money.ts",
     "./events": "./src/events.ts",
     "./seed-ids": "./src/seed-ids.ts",
+    "./genres": "./src/genres.ts",
     "./settings": "./src/settings.ts",
     "./ads": "./src/ads.ts",
     "./landing": "./src/landing.ts",

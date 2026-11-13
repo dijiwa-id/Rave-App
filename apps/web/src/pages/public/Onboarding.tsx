@@ -1,3 +1,4 @@
+import { POPULAR_GENRE_IDS, genreName as domainGenreName } from '@rave/domain/genres';
 import { useMemo, useState, type ComponentType } from 'react';
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -19,7 +20,7 @@ import { useApplyDashboardTheme, useDashboardTheme } from '@/lib/theme';
 
 /** Nilai kota disimpan apa adanya (termasuk 'Lainnya'); hanya label yang diterjemahkan. */
 const CITIES = ['Jakarta', 'Bandung', 'Yogyakarta', 'Surabaya', 'Malang', 'Bali', 'Medan', 'Semarang', 'Makassar', 'Solo', 'Palembang', 'Lainnya'];
-const FALLBACK_GENRES = ['indie-pop', 'folk', 'akustik', 'rock', 'post-punk', 'indie-rock', 'r-n-b', 'soul', 'shoegaze', 'dream-pop', 'hip-hop', 'pop', 'electronic', 'jazz', 'dangdut'];
+const FALLBACK_GENRES = POPULAR_GENRE_IDS;
 const MIN_ARTISTS = 3;
 
 type StepId = 'city' | 'genre' | 'artist';
@@ -63,8 +64,9 @@ export default function Onboarding() {
     enabled: !!token,
   });
 
-  const genreList = genresQ.data?.data?.length ? genresQ.data.data : FALLBACK_GENRES.map((g) => ({ id: g, name: g }));
+  const genreList = genresQ.data?.data?.length ? genresQ.data.data : FALLBACK_GENRES.map((g) => ({ id: g, name: domainGenreName(g) }));
   const genreName = (id: string) => genreList.find((g) => g.id === id)?.name ?? id;
+  const [allGenres, setAllGenres] = useState(false);
   const allArtists = artistsQ.data?.data ?? [];
 
   // Artis yang cocok dengan genre & kota pilihan naik ke atas (urutan katalog dipertahankan untuk skor sama).
@@ -228,7 +230,7 @@ export default function Onboarding() {
                     )}
                   </div>
                   <div className="mt-6 flex flex-wrap gap-2" role="group" aria-label={d.genreTitle}>
-                    {genreList.map((g) => {
+                    {(allGenres ? genreList : genreList.filter((g) => POPULAR_GENRE_IDS.includes(g.id) || genres.includes(g.id))).map((g) => {
                       const on = genres.includes(g.id);
                       return (
                         <button key={g.id} type="button" aria-pressed={on} onClick={() => toggle(genres, setGenres, g.id)} className={cx(option(on), 'h-10 px-3.5')}>
@@ -237,6 +239,11 @@ export default function Onboarding() {
                         </button>
                       );
                     })}
+                    {genreList.length > POPULAR_GENRE_IDS.length && (
+                      <button type="button" onClick={() => setAllGenres((v) => !v)} aria-expanded={allGenres} className="h-10 px-3.5 text-xs font-bold text-b2b-muted underline underline-offset-4 hover:text-b2b-ink">
+                        {allGenres ? d.fewerGenres : d.allGenres(genreList.length)}
+                      </button>
+                    )}
                   </div>
                 </motion.div>
               )}

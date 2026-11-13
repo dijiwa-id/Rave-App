@@ -7,7 +7,7 @@ import type { Me } from '@/lib/types';
 import { managementOrgs, promotorOrgs, useAuth } from '@/stores/auth';
 import { Badge, Button, Field, Input, Select, toast } from '@/components/ui';
 import { RaveLogo } from '@/components/ui/RaveLogo';
-import { CITIES, GENRES } from './common';
+import { CITIES, GENRES, genreName } from './common';
 import { PendingSplits } from './PendingSplits';
 import { useDict } from '@/lib/i18n';
 
@@ -141,7 +141,7 @@ export function OrgOnboarding({ kind }: { kind: 'artist' | 'promotor' }) {
                       onClick={() => setGenres(genres.includes(g) ? genres.filter((x) => x !== g) : [...genres, g])}
                       className={`rounded-none border px-3 py-1 text-xs font-bold ${genres.includes(g) ? 'border-b2b-ink bg-b2b-ink text-b2b-on-ink' : 'border-b2b-line text-b2b-muted'}`}
                     >
-                      {g}
+                      {genreName(g)}
                     </button>
                   ))}
                 </div>

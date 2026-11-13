@@ -4,7 +4,7 @@ import { FileUp, Play, Timer, Trash2 } from 'lucide-react';
 import { api, ApiError, fmt } from '@/lib/api';
 import type { Release, Track } from '@/lib/types';
 import { Button, Card, Field, Input, Modal, Select, Textarea, cx, toast } from '@/components/ui';
-import { GENRES } from '@/components/b2b/common';
+import { genreName, GENRES } from '@/components/b2b/common';
 import { useDict } from '@/lib/i18n';
 
 const todayWib = () => new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
@@ -76,7 +76,9 @@ export function ChangeRequestEditor({ r, onDone }: { r: Release; onDone: () => v
           <Field label={t.genre}>
             <Select value={f.genre} onChange={(e) => setF({ ...f, genre: e.target.value })}>
               {[...new Set([f.genre, ...GENRES])].map((g) => (
-                <option key={g}>{g}</option>
+                <option key={g} value={g}>
+                  {genreName(g)}
+                </option>
               ))}
             </Select>
           </Field>

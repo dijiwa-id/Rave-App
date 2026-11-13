@@ -6,7 +6,7 @@ import SpotlightCard from '@/components/reactbits/SpotlightCard';
 import { api, fmt } from '@/lib/api';
 import type { DiscoveryResult } from '@/lib/types';
 import { Badge, Button, Field, Input, PageHeader, Select } from '@/components/ui';
-import { categoryLabels, CITIES, Empty, formatLabels, GENRES, Meter, QueryState } from '@/components/b2b/common';
+import { categoryLabels, CITIES, Empty, formatLabels, genreName, GENRES, Meter, QueryState } from '@/components/b2b/common';
 import { useDict } from '@/lib/i18n';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
@@ -50,7 +50,9 @@ export default function Discover() {
           <Select value={f.genre} onChange={(e) => setF({ ...f, genre: e.target.value })}>
             <option value="">{t.all}</option>
             {GENRES.map((g) => (
-              <option key={g}>{g}</option>
+              <option key={g} value={g}>
+                {genreName(g)}
+              </option>
             ))}
           </Select>
         </Field>

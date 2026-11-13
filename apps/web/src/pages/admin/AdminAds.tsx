@@ -10,7 +10,7 @@ import { dict, useDict } from '@/lib/i18n';
 import type { AdsOverview, AdSimulateInput, AdSimulateResult, Campaign, CampaignInput, CampaignStatus, Me, SettingsResponse } from '@/lib/types';
 import { isSuperAdmin, useAuth } from '@/stores/auth';
 import { Badge, Button, Card, cx, Field, Input, Label, Modal, PageHeader, Select, Stat, Textarea, toast } from '@/components/ui';
-import { CITIES, Empty, GENRES, QueryState, Table } from '@/components/b2b/common';
+import { CITIES, Empty, genreName, GENRES, QueryState, Table } from '@/components/b2b/common';
 import { BarList, LineChart, SERIES } from '@/components/b2b/charts';
 import { AdCard, type AdCardCreative } from '@/components/ads/AdCard';
 import { pct, ReadOnlyNote, useIsSuperAdmin } from './Platform';
@@ -1141,7 +1141,7 @@ function Simulator() {
                     onClick={() => set('genres', on ? f.genres.filter((x) => x !== g) : [...f.genres, g])}
                     className={cx('rounded-none border px-2.5 py-0.5 text-xs font-semibold transition', on ? 'border-b2b-ink bg-b2b-ink text-b2b-on-ink' : 'border-b2b-line text-b2b-muted hover:border-b2b-ink')}
                   >
-                    {g}
+                    {genreName(g)}
                   </button>
                 );
               })}

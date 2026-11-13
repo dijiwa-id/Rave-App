@@ -312,6 +312,8 @@ const dict = {
     otherCity: 'Lainnya',
     genreTitle: 'Genre apa yang kamu suka?',
     genreBody: 'Pilih sebanyak yang kamu mau.',
+    allGenres: (n: number) => `Lihat semua ${n} genre`,
+    fewerGenres: 'Tampilkan genre populer saja',
     artistTitle: 'Pilih minimal 3 artis',
     selected: (n: number) => `${n}/3 dipilih`,
     artistsError: 'Daftar artis belum dapat dimuat.',

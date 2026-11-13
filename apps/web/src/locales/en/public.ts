@@ -313,6 +313,8 @@ const dict: Shape<typeof id> = {
     otherCity: 'Other',
     genreTitle: 'What genres do you like?',
     genreBody: 'Pick as many as you want.',
+    allGenres: (n: number) => `Show all ${n} genres`,
+    fewerGenres: 'Show popular genres only',
     artistTitle: 'Pick at least 3 artists',
     selected: (n) => `${n}/3 selected`,
     artistsError: "The artist list couldn't be loaded.",

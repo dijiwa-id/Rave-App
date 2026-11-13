@@ -1,3 +1,4 @@
+import { GENRE_IDS, genreName } from '@rave/domain/genres';
 import type { ReactNode } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
@@ -76,7 +77,9 @@ export const categoryLabel = (k: string) => categoryLabels()[k] ?? k;
 export const formatLabel = (k: string) => formatLabels()[k] ?? k;
 export const zoneLabel = (k: string) => zoneLabels()[k] ?? k;
 export const CITIES = ['Jakarta', 'Bandung', 'Yogyakarta', 'Surabaya', 'Malang', 'Bali', 'Medan', 'Semarang', 'Makassar', 'Solo'];
-export const GENRES = ['indie-pop', 'folk', 'akustik', 'rock', 'post-punk', 'indie-rock', 'r-n-b', 'soul', 'shoegaze', 'dream-pop', 'hip-hop', 'pop', 'electronic', 'jazz'];
+/** Taksonomi genre bersama (packages/domain/src/genres.ts) — ID slug; tampilkan dengan `genreName`. */
+export const GENRES: readonly string[] = GENRE_IDS;
+export { genreName };
 
 // ---------- Query wrapper ----------
 export function QueryState({ q, children, empty }: { q: { isLoading: boolean; error: unknown; data?: unknown; refetch: () => unknown }; children: ReactNode; empty?: ReactNode }) {

@@ -5,6 +5,9 @@ import { forbidden, isAdmin, isPublicMediaFile, managedArtistIds, notFound, reqL
 import { ARTIST_SUMMARY_COLS, EPISODE_COLS, RELEASE_SUMMARY_SELECT, SHOW_COLS, TRACK_SELECT, isUuid, releaseFull } from './queries.js';
 import { UPLOAD_DIR } from './storage.js';
 import { demoArtFile } from './demo-art.js';
+import { GENRES } from '@rave/domain';
+
+const GENRE_META = new Map(GENRES.map((g) => [g.id, g]));
 
 export function canManageArtist(u: AuthUser | null, artistId: string) {
   // Admin back office tidak mengelola karya artis (audit go-live A1); moderasi lewat /v1/admin/* (qc.review).
@@ -95,7 +98,13 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
     return { category: cat, artists, releases, tracks };
   });
 
-  app.get('/v1/catalog/genres', async () => ({ data: await db.query(`SELECT id, name FROM genres ORDER BY name`) }));
+  // Rumpun & penanda "populer" dari taksonomi bersama (@rave/domain) — klien dapat menampilkan genre populer lebih dulu.
+  // Genre di DB yang tidak ada di taksonomi (dibuat manual) tetap tampil dengan group 'other'.
+  app.get('/v1/catalog/genres', async (_req, reply) => {
+    const rows = await db.query<{ id: string; name: string }>(`SELECT id, name FROM genres ORDER BY name`);
+    reply.header('cache-control', 'public, max-age=300, stale-while-revalidate=3600');
+    return { data: rows.map((g) => ({ ...g, group: GENRE_META.get(g.id)?.group ?? 'other', popular: !!GENRE_META.get(g.id)?.popular })) };
+  });
 
   // ---------- Pencarian toleran typo (REQ-STR-05) ----------
   app.get('/v1/catalog/search', async (req) => {
