@@ -113,6 +113,11 @@ npm run dev           # 11 service + gateway (:8080) + web (:5173) di foreground
 ```
 
 `npm start`, `npm stop`, `npm run status` dan `npm run logs` memanggil perintah yang sama.
+
+Snapshot data demo dari DB dev (lebih lengkap dari seed: rilis hasil unggah Studio, playlist, riwayat dengar, booking)
+ada di `infra/demo/rave-demo.sql.gz`. Pulihkan ke DB kosong dengan `scripts/demo-data.sh import [DATABASE_URL]`;
+perbarui snapshot dengan `scripts/demo-data.sh export`. Berkas unggahan (`storage/uploads`: audio/cover) **tidak** ikut —
+salin terpisah bila rilis hasil unggah perlu bisa diputar. OTP, refresh token dan audit log tidak disertakan.
 Reset total DB dev: `./rave stop --all && npm run db:reset && ./rave start`.
 
 **Auto-reload** (aktif pada `./rave dev` dan `./rave start`):
