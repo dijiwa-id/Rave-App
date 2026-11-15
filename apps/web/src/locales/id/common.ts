@@ -1,5 +1,9 @@
 // Kamus Bahasa Indonesia — namespace "common" (UI bersama, layout, pemutar, lib & store).
 const common = {
+  embed: {
+    via: (p: string) => `Diputar lewat ${p} — tidak dihitung sebagai stream RAVE`,
+    badge: 'Embed',
+  },
   language: {
     label: 'Bahasa',
   },
@@ -166,6 +170,7 @@ const common = {
     profileSettings: 'Profil & Pengaturan',
     registerArtist: 'Daftar sebagai Artis',
     registerPromotor: 'Daftar sebagai Promotor',
+    registerPodcaster: 'Daftar sebagai Podcaster',
     logout: 'Keluar',
     back: 'Kembali',
     forward: 'Maju',
@@ -261,6 +266,7 @@ const common = {
     queue: 'Antrean',
     quality: 'Kualitas audio (REQ-STR-02)',
     adLock: 'Iklan sedang diputar',
+    seekPremium: 'Geser lagu khusus Premium — upgrade untuk maju/mundur bebas',
     pauseAd: 'Jeda iklan',
     resumeAd: 'Lanjutkan iklan',
     loading: 'Memuat',

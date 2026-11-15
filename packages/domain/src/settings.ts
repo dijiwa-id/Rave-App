@@ -3,6 +3,7 @@
 // dan frontend Super Admin untuk merender form. Menambah kunci = menambah entri di sini.
 
 import { coerceLanding, LANDING_DEFAULT } from './landing.js';
+import { EMBED_PROVIDER_OPTIONS } from './podcast.js';
 
 export type SettingType = 'boolean' | 'number' | 'string' | 'text' | 'enum' | 'list' | 'image' | 'partners' | 'landing';
 
@@ -53,6 +54,8 @@ export const SETTING_GROUPS = {
   content: { label: 'Konten Landing', description: 'Konten halaman publik yang dikelola tanpa deploy lewat Editor Landing (Platform → Editor Landing): section, slogan & logo partner pita kuning.' },
   maintenance: { label: 'Pemeliharaan', description: 'Mode pemeliharaan ditegakkan di API Gateway.' },
   modules: { label: 'Modul & Fitur', description: 'Nyalakan/matikan modul tanpa deploy (feature flag).' },
+  podcast: { label: 'Podcaster', description: 'Siapa yang boleh menerbitkan podcast & audio fiksi, moderasi episode, batas, episode Premium, dan embed iframe dari platform lain.' },
+  upload: { label: 'Upload', description: 'Batas & format berkas yang diunggah (master lagu, audio episode, artwork), kuota per pengguna, dan batas harian.' },
   live: { label: 'Live Streaming', description: 'Siaran langsung konser & sesi studio: ingest RTMP/browser, latensi, chat, dan batas.' },
   ads: { label: 'Iklan', description: 'Kebijakan penayangan iklan untuk pengguna Gratis: ad load, frequency cap, masa bebas iklan, dan kategori.' },
   commission: { label: 'Komisi & Biaya', description: 'Take rate off-air (Bab 4.1, keputusan D-02).' },
@@ -249,9 +252,45 @@ export const SETTINGS: SettingDef[] = [
   // ---- Modul ----
   { key: 'modules.booking', group: 'modules', label: 'Booking off-air', description: 'Inquiry, negosiasi, kontrak (Promotor Hub & Inbox Booking).', type: 'boolean', default: true, public: true, consumers: ['gateway', 'web'], dangerous: true },
   { key: 'modules.ticketing', group: 'modules', label: 'Ticketing', description: 'Penjualan tiket & check-in.', type: 'boolean', default: true, public: true, consumers: ['gateway', 'web'], dangerous: true },
-  { key: 'modules.podcasts', group: 'modules', label: 'Podcast & audio fiksi', description: 'Katalog podcast & cerita di aplikasi fan.', type: 'boolean', default: true, public: true, consumers: ['web'] },
+  { key: 'modules.podcasts', group: 'modules', label: 'Podcast & audio fiksi', description: 'Katalog podcast & cerita di aplikasi fan serta Podcaster (Studio).', type: 'boolean', default: true, public: true, consumers: ['gateway', 'catalog', 'web'] },
   { key: 'modules.live', group: 'modules', label: 'Live streaming', description: 'Siaran langsung (menu Live di aplikasi dengar, Studio, dan Promotor Hub).', type: 'boolean', default: true, public: true, consumers: ['gateway', 'live', 'web'], dangerous: true },
   { key: 'modules.waitlist', group: 'modules', label: 'Waitlist landing page', description: 'Formulir pra-registrasi di landing page.', type: 'boolean', default: true, public: true, consumers: ['gateway', 'web'] },
+
+  // ---- Podcaster ----
+  { key: 'podcast.creator_enabled', group: 'podcast', label: 'Kreator dapat menerbitkan podcast', description: 'Menu Podcast di Artist Studio & Podcaster Studio. Mati = hanya katalog yang sudah ada (episode baru ditolak).', type: 'boolean', default: true, public: true, consumers: ['catalog', 'web'], dangerous: true },
+  {
+    key: 'podcast.creator_org_types',
+    group: 'podcast',
+    label: 'Jenis akun yang boleh menjadi podcaster',
+    description: 'Organisasi yang boleh membuat acara. Kreator = akun Podcaster tanpa profil artis.',
+    type: 'list',
+    default: ['ARTIST', 'CREATOR'],
+    options: [
+      { value: 'ARTIST', label: 'Artis' },
+      { value: 'MANAGEMENT', label: 'Manajemen' },
+      { value: 'LABEL', label: 'Label' },
+      { value: 'CREATOR', label: 'Kreator / Podcaster' },
+    ],
+    public: true,
+    consumers: ['catalog', 'web'],
+  },
+  { key: 'podcast.require_review', group: 'podcast', label: 'Episode wajib ditinjau', description: 'Episode yang diterbitkan kreator masuk antrean Back Office → Moderasi Podcast sebelum tayang. Mati = langsung tayang.', type: 'boolean', default: true, public: true, consumers: ['catalog', 'web'] },
+  { key: 'podcast.fiction_enabled', group: 'podcast', label: 'Kreator boleh membuat audio fiksi', description: 'Selain podcast, kreator boleh membuat acara jenis audio fiksi/cerita berseri (musim & nomor episode).', type: 'boolean', default: true, public: true, consumers: ['catalog', 'web'] },
+  { key: 'podcast.max_shows_per_org', group: 'podcast', label: 'Acara maksimum per akun', description: 'Jumlah acara (podcast + audio fiksi) per organisasi.', type: 'number', default: 5, min: 1, max: 100, unit: 'acara', public: true, consumers: ['catalog', 'web'] },
+  { key: 'podcast.max_episode_minutes', group: 'podcast', label: 'Durasi episode maksimum', description: 'Audio episode yang diunggah lebih panjang dari ini ditolak.', type: 'number', default: 240, min: 5, max: 1440, unit: 'menit', public: true, consumers: ['catalog', 'web'] },
+  { key: 'podcast.premium_episodes', group: 'podcast', label: 'Kreator boleh membuat episode Premium', description: 'Episode bertanda Premium hanya bisa diputar pelanggan Premium (REQ-POD-02). Episode embed tidak bisa Premium.', type: 'boolean', default: true, public: true, consumers: ['catalog', 'web'] },
+  { key: 'podcast.embed_enabled', group: 'podcast', label: 'Episode embed (iframe) dari platform lain', description: 'Kreator boleh menempelkan kode embed/URL episode dari platform lain alih-alih mengunggah audio. Hanya alamat iframe yang disimpan (HTML lain dibuang), diputar di pemutar platform asal — tidak dihitung stream/royalti RAVE.', type: 'boolean', default: true, public: true, consumers: ['catalog', 'web'] },
+  {
+    key: 'podcast.embed_providers',
+    group: 'podcast',
+    label: 'Platform embed yang diizinkan',
+    description: 'Domain iframe yang diterima. Platform lain ditolak saat menyimpan episode.',
+    type: 'list',
+    default: ['spotify', 'youtube', 'apple', 'soundcloud', 'anchor'],
+    options: EMBED_PROVIDER_OPTIONS,
+    public: true,
+    consumers: ['catalog', 'web'],
+  },
 
   // ---- Live streaming ----
   { key: 'live.max_concurrent', group: 'live', label: 'Siaran bersamaan maksimum', description: 'Batas stream LIVE serentak di seluruh platform (beban transcoding server).', type: 'number', default: 5, min: 1, max: 100, unit: 'stream', consumers: ['live'] },
@@ -275,15 +314,37 @@ export const SETTINGS: SettingDef[] = [
   { key: 'live.chat_slowmode_seconds', group: 'live', label: 'Slowmode chat', description: 'Jeda minimum antar-pesan per pengguna.', type: 'number', default: 2, min: 0, max: 120, unit: 'detik', consumers: ['live'] },
   { key: 'live.rtmp_enabled', group: 'live', label: 'Ingest RTMP (OBS/Larix)', description: 'Terima siaran dari encoder eksternal di port RTMP.', type: 'boolean', default: true, public: true, consumers: ['live', 'web'] },
   { key: 'live.browser_ingest_enabled', group: 'live', label: 'Siaran dari browser', description: 'Artis/promotor dapat siaran langsung dari kamera browser tanpa aplikasi tambahan.', type: 'boolean', default: true, public: true, consumers: ['live', 'web'] },
+  {
+    key: 'live.allowed_org_types',
+    group: 'live',
+    label: 'Jenis akun yang boleh siaran',
+    description: 'Organisasi yang boleh membuat siaran baru (Studio, Promotor Hub, Podcaster Studio).',
+    type: 'list',
+    default: ['ARTIST', 'MANAGEMENT', 'LABEL', 'PROMOTOR', 'VENUE', 'CREATOR'],
+    options: [
+      { value: 'ARTIST', label: 'Artis' },
+      { value: 'MANAGEMENT', label: 'Manajemen' },
+      { value: 'LABEL', label: 'Label' },
+      { value: 'PROMOTOR', label: 'Promotor' },
+      { value: 'VENUE', label: 'Venue' },
+      { value: 'CREATOR', label: 'Kreator / Podcaster' },
+    ],
+    public: true,
+    consumers: ['live', 'web'],
+  },
+  { key: 'live.max_open_per_org', group: 'live', label: 'Siaran terbuka per akun', description: 'Jumlah siaran berstatus terjadwal/live/terputus per organisasi. Akhiri atau hapus siaran lama untuk membuat yang baru.', type: 'number', default: 10, min: 1, max: 200, unit: 'siaran', consumers: ['live'] },
+  { key: 'live.ticketed_enabled', group: 'live', label: 'Siaran bertiket', description: 'Izinkan siaran khusus pemegang tiket event (akses TICKET). Mati = siaran baru hanya publik.', type: 'boolean', default: true, public: true, consumers: ['live', 'web'] },
+  { key: 'live.chat_max_chars', group: 'live', label: 'Panjang pesan chat maksimum', description: 'Pesan chat lebih panjang ditolak.', type: 'number', default: 300, min: 20, max: 1000, unit: 'karakter', public: true, consumers: ['live', 'web'] },
   { key: 'live.demo_channel', group: 'live', label: 'Kanal demo', description: 'Kanal "Senja Kolektif — Live Session" yang selalu siaran (sinyal uji dari server). Untuk demo & uji pemutar.', type: 'boolean', default: true, consumers: ['live'] },
 
   // ---- Iklan (tier Gratis) ----
   { key: 'ads.enabled', group: 'ads', label: 'Penayangan iklan', description: 'Iklan di antara lagu untuk pengguna Gratis. Premium selalu bebas iklan.', type: 'boolean', default: true, public: true, consumers: ['ads', 'web'], dangerous: true },
-  { key: 'ads.break_interval_minutes', group: 'ads', label: 'Jeda minimum antar-iklan', description: 'Waktu minimum antara dua jeda iklan untuk satu pendengar. Praktik umum: 15–30 menit.', type: 'number', default: 15, min: 5, max: 120, unit: 'menit', consumers: ['ads'] },
-  { key: 'ads.min_streams_between_breaks', group: 'ads', label: 'Lagu minimum antar-jeda', description: 'Jumlah lagu yang diputar penuh (≥ 30 dtk) sebelum jeda iklan berikutnya.', type: 'number', default: 3, min: 1, max: 20, unit: 'lagu', consumers: ['ads'] },
-  { key: 'ads.max_ads_per_break', group: 'ads', label: 'Iklan per jeda', description: 'Jumlah iklan maksimum dalam satu jeda.', type: 'number', default: 2, min: 1, max: 4, unit: 'iklan', consumers: ['ads'] },
-  { key: 'ads.max_ads_per_hour', group: 'ads', label: 'Ad load per jam', description: 'Batas total iklan per pendengar dalam 60 menit (setara ±2–3 menit iklan per jam).', type: 'number', default: 6, min: 1, max: 20, unit: 'iklan', consumers: ['ads'] },
-  { key: 'ads.daily_grace_streams', group: 'ads', label: 'Masa bebas iklan harian', description: 'Jumlah lagu pertama setiap hari yang selalu bebas iklan.', type: 'number', default: 5, min: 0, max: 50, unit: 'lagu', consumers: ['ads'] },
+  { key: 'ads.anonymous_enabled', group: 'ads', label: 'Iklan untuk pengguna anonim', description: 'Pengguna yang belum masuk menerima satu iklan setiap kali pratinjau 30 detik berakhir, lalu lanjut ke pratinjau berikutnya.', type: 'boolean', default: true, public: true, consumers: ['ads', 'web'] },
+  { key: 'ads.break_interval_minutes', group: 'ads', label: 'Jeda minimum antar-iklan', description: 'Waktu minimum antara dua jeda iklan untuk satu pendengar. 0 = tanpa jeda waktu (iklan setiap kali lagu selesai, sesuai kebijakan Lagu minimum antar-jeda).', type: 'number', default: 0, min: 0, max: 120, unit: 'menit', consumers: ['ads'] },
+  { key: 'ads.min_streams_between_breaks', group: 'ads', label: 'Lagu minimum antar-jeda', description: 'Jumlah lagu yang diputar (≥ 30 dtk) sebelum jeda iklan berikutnya. 1 = iklan setelah setiap lagu selesai (default tier Gratis).', type: 'number', default: 1, min: 1, max: 20, unit: 'lagu', consumers: ['ads'] },
+  { key: 'ads.max_ads_per_break', group: 'ads', label: 'Iklan per jeda', description: 'Jumlah iklan maksimum dalam satu jeda.', type: 'number', default: 1, min: 1, max: 4, unit: 'iklan', consumers: ['ads'] },
+  { key: 'ads.max_ads_per_hour', group: 'ads', label: 'Ad load per jam', description: 'Batas total iklan per pendengar dalam 60 menit. Default 20 ≈ satu iklan setiap lagu (±3 menit).', type: 'number', default: 20, min: 1, max: 30, unit: 'iklan', consumers: ['ads'] },
+  { key: 'ads.daily_grace_streams', group: 'ads', label: 'Masa bebas iklan harian', description: 'Jumlah lagu pertama setiap hari yang selalu bebas iklan. 0 = iklan sejak lagu pertama selesai.', type: 'number', default: 0, min: 0, max: 50, unit: 'lagu', consumers: ['ads'] },
   { key: 'ads.max_audio_seconds', group: 'ads', label: 'Durasi maksimum iklan audio', description: 'Kreatif audio lebih panjang ditolak saat peninjauan.', type: 'number', default: 30, min: 10, max: 60, unit: 'detik', consumers: ['ads'] },
   { key: 'ads.max_display_seconds', group: 'ads', label: 'Durasi maksimum iklan display', description: 'Lama kartu iklan display tampil di pemutar.', type: 'number', default: 15, min: 5, max: 30, unit: 'detik', consumers: ['ads'] },
   { key: 'ads.skip_after_seconds', group: 'ads', label: 'Bisa dilewati setelah', description: 'Iklan display dapat dilewati setelah detik ini. 0 = langsung.', type: 'number', default: 5, min: 0, max: 30, unit: 'detik', public: true, consumers: ['ads', 'web'] },
@@ -422,6 +483,7 @@ export const SETTINGS: SettingDef[] = [
   { key: 'catalog.isrc_registrant_code', group: 'transcoding', label: 'Kode pendaftar ISRC RAVE', description: 'Format CC-XXX (kode negara + kode pendaftar dari agensi ISRC nasional, mis. PAPPRI/IFPI). Bila diisi, lagu tanpa ISRC otomatis diberi CC-XXX-YY-NNNNN dengan nomor urut per tahun (tidak berulang). Kosong = tidak ada ISRC otomatis; artis/label wajib mengisi ISRC sendiri dan QC melihat "ISRC kosong".', type: 'string', default: '', consumers: ['catalog'] },
 
   // ---- Streaming ----
+  { key: 'streaming.free_seek_enabled', group: 'streaming', label: 'Geser lagu untuk Gratis', description: 'Bila mati (default), pendengar Gratis tidak bisa menggeser posisi lagu/episode (maju/mundur) — hanya Premium. Berlaku di web, desktop & mobile.', type: 'boolean', default: false, public: true, consumers: ['web'] },
   { key: 'streaming.preview_seconds', group: 'streaming', label: 'Durasi pratinjau anonim', description: 'REQ-WEB-04.', type: 'number', default: 30, min: 10, max: 120, unit: 'detik', public: true, consumers: ['playback'] },
   { key: 'streaming.lossless_enabled', group: 'streaming', label: 'Lossless untuk Premium', description: 'Kualitas tinggi (AAC 320) & Lossless (FLAC) hanya untuk pelanggan Premium (menggantikan D-03 "lossless gratis"). Bila mati, permintaan lossless Premium diturunkan ke AAC 320.', type: 'boolean', default: true, public: true, consumers: ['playback', 'web'] },
   {
@@ -478,10 +540,15 @@ export const SETTINGS: SettingDef[] = [
   { key: 'security.rate_limit_otp_per_minute', group: 'security', label: 'Rate limit endpoint OTP', description: 'Per IP di gateway.', type: 'number', default: 10, min: 1, max: 100, unit: 'req/mnt', consumers: ['gateway'] },
 
   // ---- Storage ----
-  { key: 'storage.max_upload_mb', group: 'storage', label: 'Ukuran upload maksimum', description: 'Master audio & artwork di Artist Studio.', type: 'number', default: 50, min: 1, max: 2048, unit: 'MB', public: true, consumers: ['catalog', 'web'] },
-  { key: 'storage.allowed_audio_types', group: 'storage', label: 'Format audio diizinkan', description: 'MIME type, pisahkan dengan koma.', type: 'list', default: ['audio/wav', 'audio/x-wav', 'audio/flac', 'audio/aiff', 'audio/mp4', 'audio/mpeg', 'audio/aac', 'audio/ogg', 'audio/opus'], consumers: ['catalog'] },
-  { key: 'storage.allowed_image_types', group: 'storage', label: 'Format gambar diizinkan', description: 'MIME type, pisahkan dengan koma.', type: 'list', default: ['image/jpeg', 'image/png'], consumers: ['catalog'] },
-  { key: 'storage.quota_uploads_gb', group: 'storage', label: 'Kuota bucket uploads', description: 'Upload baru ditolak bila kuota terlampaui.', type: 'number', default: 10, min: 1, max: 100000, unit: 'GB', consumers: ['catalog', 'platform'] },
+  { key: 'storage.max_upload_mb', group: 'upload', label: 'Ukuran upload maksimum', description: 'Master lagu & artwork rilis di Artist Studio. Audio episode podcast memakai batas tersendiri.', type: 'number', default: 50, min: 1, max: 2048, unit: 'MB', public: true, consumers: ['catalog', 'web'] },
+  { key: 'storage.allowed_audio_types', group: 'upload', label: 'Format audio diizinkan', description: 'MIME type, pisahkan dengan koma.', type: 'list', default: ['audio/wav', 'audio/x-wav', 'audio/flac', 'audio/aiff', 'audio/mp4', 'audio/mpeg', 'audio/aac', 'audio/ogg', 'audio/opus'], consumers: ['catalog'] },
+  { key: 'storage.allowed_image_types', group: 'upload', label: 'Format gambar diizinkan', description: 'MIME type, pisahkan dengan koma.', type: 'list', default: ['image/jpeg', 'image/png'], consumers: ['catalog'] },
+  { key: 'storage.quota_uploads_gb', group: 'upload', label: 'Kuota bucket uploads (platform)', description: 'Total seluruh upload. Upload baru ditolak bila kuota terlampaui.', type: 'number', default: 10, min: 1, max: 100000, unit: 'GB', consumers: ['catalog', 'platform'] },
+  { key: 'upload.podcast_max_mb', group: 'upload', label: 'Ukuran audio episode maksimum', description: 'Batas berkas audio episode podcast/audio fiksi (rekaman panjang). Tidak terikat batas master lagu.', type: 'number', default: 300, min: 10, max: 4096, unit: 'MB', public: true, consumers: ['catalog', 'web'] },
+  { key: 'upload.user_quota_gb', group: 'upload', label: 'Kuota per pengguna', description: 'Total upload selesai milik satu akun. 0 = tanpa batas (tetap dibatasi kuota platform).', type: 'number', default: 5, min: 0, max: 10000, unit: 'GB', consumers: ['catalog'] },
+  { key: 'upload.daily_limit', group: 'upload', label: 'Upload per hari per pengguna', description: 'Jumlah upload baru yang boleh dibuat satu akun dalam 24 jam (anti-spam). 0 = tanpa batas.', type: 'number', default: 100, min: 0, max: 10000, unit: 'file', consumers: ['catalog'] },
+  { key: 'upload.artwork_min_px', group: 'upload', label: 'Resolusi artwork rilis minimum', description: 'Artwork rilis di bawah sisi ini ditolak. 0 = hanya peringatan (standar disarankan 3000 px).', type: 'number', default: 0, min: 0, max: 3000, step: 100, unit: 'px', public: true, consumers: ['catalog', 'web'] },
+  { key: 'upload.cover_min_px', group: 'upload', label: 'Resolusi sampul podcast minimum', description: 'Sampul acara podcast/audio fiksi (persegi). Standar direktori podcast: 1400–3000 px.', type: 'number', default: 1400, min: 300, max: 3000, step: 100, unit: 'px', public: true, consumers: ['catalog', 'web'] },
   { key: 'storage.quota_backups_gb', group: 'storage', label: 'Kuota bucket backups', description: 'Backup terlama dihapus otomatis bila terlampaui.', type: 'number', default: 20, min: 1, max: 100000, unit: 'GB', consumers: ['platform'] },
   { key: 'storage.disk_warn_pct', group: 'storage', label: 'Ambang peringatan disk', description: 'Dasbor menandai disk kritis di atas ambang ini.', type: 'number', default: 85, min: 50, max: 99, unit: '%', consumers: ['platform'] },
   { key: 'storage.bus_retention_days', group: 'storage', label: 'Retensi log event bus', description: 'Event yang sudah dikonsumsi semua consumer group & lebih tua dari ini dihapus.', type: 'number', default: 30, min: 1, max: 3650, unit: 'hari', consumers: ['platform'] },
@@ -521,6 +588,7 @@ export const ADMIN_PERMISSIONS = {
   'live.moderate': { label: 'Moderasi live streaming', area: 'Konten' },
   'catalog.curate': { label: 'Kurasi katalog: kategori Jelajahi & artwork rilis', area: 'Konten' },
   'library.curate': { label: 'Editor playlist editorial (beranda & Jelajahi)', area: 'Konten' },
+  'podcast.moderate': { label: 'Moderasi podcast: tinjau episode & sembunyikan acara', area: 'Konten' },
   'ads.review': { label: 'Tinjau kampanye iklan', area: 'Iklan' },
   'ads.manage': { label: 'Buat & kelola kampanye iklan', area: 'Iklan' },
   'kyc.review': { label: 'Verifikasi KYC/KYB', area: 'Kepercayaan' },
@@ -540,11 +608,11 @@ export const CONFIGURABLE_ADMIN_ROLES = ADMIN_ROLES.filter((r) => r !== 'SUPER_A
 /** Default prinsip hak minimum: tiap peran hanya area kerjanya; pengeluaran uang (refund) hanya Finance. */
 export const DEFAULT_ROLE_PERMISSIONS: Record<Exclude<AdminRole, 'SUPER_ADMIN'>, AdminPermission[]> = {
   OPS: ['qc.review', 'live.moderate', 'ads.review', 'ads.manage', 'kyc.review', 'dispute.resolve', 'finance.view', 'users.view', 'audit.view'],
-  CONTENT_QC: ['qc.review', 'live.moderate', 'catalog.curate', 'ads.review'],
+  CONTENT_QC: ['qc.review', 'live.moderate', 'catalog.curate', 'podcast.moderate', 'ads.review'],
   FINANCE: ['finance.view', 'finance.refund', 'finance.payout', 'kyc.review'],
   LEGAL: ['qc.review', 'kyc.review', 'dispute.resolve', 'audit.view'],
   SUPPORT: ['users.view', 'finance.view'],
-  EDITORIAL: ['live.moderate', 'catalog.curate', 'library.curate', 'ads.manage'],
+  EDITORIAL: ['live.moderate', 'catalog.curate', 'library.curate', 'podcast.moderate', 'ads.manage'],
 };
 
 export const accessKey = (role: string) => `access.role.${role}`;

@@ -2,6 +2,10 @@ import type { Shape } from '@/lib/i18n';
 import type id from '../id/common';
 
 const common: Shape<typeof id> = {
+  embed: {
+    via: (p: string) => `Played via ${p} — not counted as a RAVE stream`,
+    badge: 'Embed',
+  },
   language: {
     label: 'Language',
   },
@@ -168,6 +172,7 @@ const common: Shape<typeof id> = {
     profileSettings: 'Profile & Settings',
     registerArtist: 'Join as an Artist',
     registerPromotor: 'Join as a Promoter',
+    registerPodcaster: 'Join as a Podcaster',
     logout: 'Log out',
     back: 'Back',
     forward: 'Forward',
@@ -263,6 +268,7 @@ const common: Shape<typeof id> = {
     queue: 'Queue',
     quality: 'Audio quality (REQ-STR-02)',
     adLock: 'Ad playing',
+    seekPremium: 'Seeking is a Premium feature — upgrade to skip back and forth freely',
     pauseAd: 'Pause ad',
     resumeAd: 'Resume ad',
     loading: 'Loading',

@@ -25,6 +25,7 @@ import {
   signMediaUrl,
   MEDIA_PREFIX,
   wakeJob,
+  HttpError,
 } from '@rave/service-kit';
 import { isUuid, releaseFull, releasesFull } from './queries.js';
 import { canManageArtist } from './routes.js';
@@ -112,7 +113,7 @@ const releaseChangeInput = z.object({
  * Validasi master audio. Dengan ffmpeg: semua format yang dikenali (WAV, FLAC, AIFF, ALAC/AAC-M4A, MP3, OGG, Opus).
  * Tanpa ffmpeg (fallback): hanya header WAV. Master lossless wajib memenuhi minimum `transcoding.min_*`.
  */
-async function inspectAudio(path: string, head: Buffer, warnings: string[]): Promise<AudioMeta> {
+async function inspectAudio(path: string, head: Buffer, warnings: string[], purpose = 'release'): Promise<AudioMeta> {
   let m: AudioMeta | null = null;
   if (ffmpegPath()) m = await probeAudio(path);
   else {
@@ -122,6 +123,18 @@ async function inspectAudio(path: string, head: Buffer, warnings: string[]): Pro
   if (!m) throw unprocessable('File audio tidak dikenali (didukung: WAV, FLAC, AIFF, ALAC/AAC M4A, MP3, OGG, Opus)');
   if (!m.duration_ms && m.codec !== 'unknown') warnings.push('Durasi tidak terbaca dari berkas');
   if (m.duration_ms && m.duration_ms < 1000) throw unprocessable('Audio terlalu pendek (minimal 1 detik)');
+  // Audio episode podcast: bukan master rilis — tanpa standar sample rate/bit depth, hanya batas durasi kebijakan Podcaster.
+  // Audio iklan (Super Admin → Iklan): berkas ringan siap putar, durasi ≤ batas iklan audio.
+  if (purpose === 'ad') {
+    const maxS = settings.num('ads.max_audio_seconds');
+    if (m.duration_ms && m.duration_ms > (maxS + 1) * 1000) throw unprocessable(`Durasi audio iklan melebihi batas ${maxS} detik (diterima ${Math.round(m.duration_ms / 1000)} detik)`);
+    return m;
+  }
+  if (purpose === 'podcast') {
+    const maxMin = settings.num('podcast.max_episode_minutes');
+    if (m.duration_ms && m.duration_ms > maxMin * 60_000) throw unprocessable(`Durasi episode melebihi batas ${maxMin} menit`);
+    return m;
+  }
   const minRate = settings.num('transcoding.min_sample_rate_hz') || 44_100;
   const minBits = settings.num('transcoding.min_bit_depth') || 16;
   if (m.lossless) {
@@ -135,9 +148,19 @@ async function inspectAudio(path: string, head: Buffer, warnings: string[]): Pro
   return m;
 }
 
+/** Audio iklan: format lossy yang diputar semua klien (web/desktop/mobile) tanpa transcoding. */
+const AD_AUDIO_EXT = ['.mp3', '.m4a', '.aac', '.ogg', '.opus'];
+
 /** Sampul playlist pengguna: ringan (≤ 8 MB) namun tetap tajam di layar retina (≥ 300 px). */
 const PLAYLIST_COVER_MAX_MB = 8;
 const PLAYLIST_COVER_MIN_PX = 300;
+
+/** Batas ukuran per tujuan upload (pengaturan Upload). Sampul playlist/kategori tetap ringan. */
+function uploadMaxMb(purpose: string, kind: string): number {
+  if (purpose === 'podcast') return kind === 'audio' ? settings.num('upload.podcast_max_mb') : Math.min(PLAYLIST_COVER_MAX_MB * 2, settings.num('storage.max_upload_mb'));
+  if (purpose !== 'release') return Math.min(PLAYLIST_COVER_MAX_MB, settings.num('storage.max_upload_mb'));
+  return settings.num('storage.max_upload_mb');
+}
 
 /** Header yang ditahan di memori untuk validasi (WAV fmt/data, dimensi PNG/JPEG). */
 const HEAD_BYTES = 512 * 1024;
@@ -665,7 +688,9 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
         .object({
           kind: z.enum(['audio', 'artwork']),
           /** playlist = sampul playlist pengguna (fan); category = gambar kategori Jelajahi (Super Admin). Gambar saja, ≤ 8 MB, ≥ 300 px. */
-          purpose: z.enum(['release', 'playlist', 'category']).default('release'),
+          /** podcast = audio episode (≤ upload.podcast_max_mb) atau sampul acara (≥ upload.cover_min_px). */
+          /** ad = audio/gambar kampanye iklan (izin ads.manage) — audio lossy ringan (MP3/AAC/OGG/Opus), gambar ≥ 300 px, ≤ 8 MB. */
+          purpose: z.enum(['release', 'playlist', 'category', 'podcast', 'ad']).default('release'),
           filename: z.string().min(1).max(200),
           // Boleh kosong: browser sering tidak mengenali .flac/.aiff → MIME ditentukan dari ekstensi di bawah.
           content_type: z.string().max(100),
@@ -678,21 +703,42 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
         // MIME tak baku/kosong dari browser (x-flac, x-aiff, x-m4a, octet-stream) → MIME standar menurut ekstensi.
         if (AUDIO_UPLOAD_TYPES[ext0] && (!ct.startsWith('audio/') || /^audio\/x-(flac|aiff|m4a)$/.test(ct))) b.content_type = AUDIO_UPLOAD_TYPES[ext0];
       }
-      if (b.purpose !== 'release' && b.kind !== 'artwork') throw badRequest('Sampul harus berupa gambar');
+      if (b.purpose !== 'release' && b.purpose !== 'podcast' && b.purpose !== 'ad' && b.kind !== 'artwork') throw badRequest('Sampul harus berupa gambar');
+      if (b.purpose === 'ad') {
+        if (!hasPermission(req.user, 'ads.manage')) throw forbidden('Berkas iklan memerlukan izin Kelola iklan');
+        const ext = (b.filename.match(/\.[a-z0-9]{2,5}$/i)?.[0] ?? '').toLowerCase();
+        if (b.kind === 'audio' && !AD_AUDIO_EXT.includes(ext)) throw unprocessable(`Audio iklan harus ${AD_AUDIO_EXT.join(', ')} (berkas ringan siap putar, bukan master)`);
+      }
       if (b.purpose === 'category' && !hasPermission(req.user, 'catalog.curate')) throw forbidden('Gambar kategori memerlukan izin Kurasi katalog');
       // Kebijakan upload dari pengaturan platform (Super Admin → Storage & Retensi). Sampul playlist dibatasi lebih kecil.
-      const maxMb = b.purpose !== 'release' ? Math.min(PLAYLIST_COVER_MAX_MB, settings.num('storage.max_upload_mb')) : settings.num('storage.max_upload_mb');
+      const maxMb = uploadMaxMb(b.purpose, b.kind);
       if (b.size > maxMb * 1024 * 1024) throw unprocessable(`Ukuran file melebihi batas ${maxMb} MB`);
       const allowed = settings.get<string[]>(b.kind === 'audio' ? 'storage.allowed_audio_types' : 'storage.allowed_image_types');
       if (!allowed.includes(b.content_type.toLowerCase())) throw unprocessable(`Tipe file ${b.content_type} tidak diizinkan untuk ${b.kind} (diizinkan: ${allowed.join(', ')})`);
       if ((await uploadsBytes(db)) + b.size > settings.num('storage.quota_uploads_gb') * 1024 ** 3) throw unprocessable('Kuota penyimpanan upload platform penuh. Hubungi admin RAVE.');
+      // Kebijakan per akun (Super Admin → Pengaturan → Upload). Admin tidak dibatasi (kurasi/penggantian artwork).
+      if (!req.user!.roles.includes('admin')) {
+        const quotaGb = settings.num('upload.user_quota_gb');
+        const daily = settings.num('upload.daily_limit');
+        if (quotaGb > 0 || daily > 0) {
+          const u = await db.one(
+            `SELECT coalesce(sum(size) FILTER (WHERE completed_at IS NOT NULL), 0)::bigint AS bytes,
+                    count(*) FILTER (WHERE created_at > now() - interval '24 hours')::int AS today
+               FROM uploads WHERE user_id = $1`,
+            [req.user!.sub],
+          );
+          if (quotaGb > 0 && Number(u.bytes) + b.size > quotaGb * 1024 ** 3) throw unprocessable(`Kuota upload akun Anda (${quotaGb} GB) penuh. Hapus berkas lama atau hubungi admin RAVE.`);
+          if (daily > 0 && u.today >= daily) throw new HttpError(429, 'Too Many Requests', `Batas ${daily} upload per 24 jam tercapai. Coba lagi nanti.`);
+        }
+      }
       const id = uuidv7();
       const ext = (b.filename.match(/\.[a-z0-9]{2,5}$/i)?.[0] ?? (b.kind === 'audio' ? '.wav' : '.jpg')).toLowerCase();
       // Ekstensi menentukan apakah berkas publik (gambar/rendisi gratis) atau wajib URL bertanda tangan (master) —
       // audio berekstensi gambar (atau sebaliknya) ditolak agar master tidak bisa disajikan tanpa tanda tangan.
       if (b.kind === 'audio' && !AUDIO_UPLOAD_TYPES[ext]) throw unprocessable(`Ekstensi file audio ${ext} tidak didukung (didukung: ${Object.keys(AUDIO_UPLOAD_TYPES).join(', ')})`);
       if (b.kind === 'artwork' && !['.jpg', '.jpeg', '.png'].includes(ext)) throw unprocessable('Gambar harus berekstensi .jpg, .jpeg, atau .png');
-      const stored = `${id}${ext}`;
+      // Audio iklan publik (lihat isPublicMediaFile) → penanda `.ad` di nama berkas; master lain tetap bertanda tangan.
+      const stored = b.purpose === 'ad' && b.kind === 'audio' ? `${id}.ad${ext}` : `${id}${ext}`;
       await db.query(`INSERT INTO uploads (id, user_id, kind, filename, content_type, size, stored_name, purpose) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [
         id,
         req.user!.sub,
@@ -734,7 +780,8 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
           // bodyLimit Fastify tidak berlaku untuk parser stream → batas sebenarnya ditegakkan UploadMeter.
           onRequest: async (req) => {
             const len = Number(req.headers['content-length']);
-            const maxMb = settings.num('storage.max_upload_mb');
+            // Batas terbesar yang mungkin (audio episode bisa lebih besar dari master lagu); batas pasti per upload di UploadMeter.
+            const maxMb = Math.max(settings.num('storage.max_upload_mb'), settings.num('upload.podcast_max_mb'));
             if (Number.isFinite(len) && len > maxMb * 1024 * 1024) throw unprocessable(`Ukuran file melebihi batas ${maxMb} MB`);
           },
         },
@@ -755,22 +802,31 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
             let audioMeta: AudioMeta | null = null;
             let size = 0;
             try {
-              const { bytes, head } = await receiveUpload(src, part, u.purpose !== 'release' ? Math.min(PLAYLIST_COVER_MAX_MB, settings.num('storage.max_upload_mb')) : settings.num('storage.max_upload_mb'));
+              const { bytes, head } = await receiveUpload(src, part, uploadMaxMb(u.purpose, u.kind));
               size = bytes;
               if (!bytes) throw badRequest('Body biner kosong (kirim dengan content-type audio/* atau image/*)');
               if (u.kind === 'artwork') {
                 const dim = imageSize(head);
                 if (!dim) throw unprocessable(u.purpose !== 'release' ? 'Sampul harus JPEG/PNG yang valid' : 'Artwork harus JPEG/PNG yang valid');
                 meta = dim;
-                if (u.purpose !== 'release') {
+                if (u.purpose === 'ad') {
+                  if (Math.min(dim.width, dim.height) < PLAYLIST_COVER_MIN_PX) throw unprocessable(`Gambar iklan minimal ${PLAYLIST_COVER_MIN_PX} px (diterima ${dim.width}×${dim.height})`);
+                  if (Math.abs(dim.width / dim.height - 16 / 9) > 0.05) warnings.push('Gambar iklan sebaiknya 16:9 — ditampilkan terpotong di tengah');
+                } else if (u.purpose === 'podcast') {
+                  const min = settings.num('upload.cover_min_px');
+                  if (Math.min(dim.width, dim.height) < min) throw unprocessable(`Sampul acara minimal ${min}×${min} px (diterima ${dim.width}×${dim.height})`);
+                  if (dim.width !== dim.height) warnings.push('Sampul acara sebaiknya persegi (1:1)');
+                } else if (u.purpose !== 'release') {
                   if (Math.min(dim.width, dim.height) < PLAYLIST_COVER_MIN_PX) throw unprocessable(`Sampul minimal ${PLAYLIST_COVER_MIN_PX}×${PLAYLIST_COVER_MIN_PX} px (diterima ${dim.width}×${dim.height})`);
                   if (dim.width !== dim.height) warnings.push('Sampul bukan persegi — ditampilkan terpotong di tengah (1:1)');
                 } else {
+                  const min = settings.num('upload.artwork_min_px');
+                  if (min > 0 && Math.min(dim.width, dim.height) < min) throw unprocessable(`Artwork rilis minimal ${min}×${min} px (diterima ${dim.width}×${dim.height})`);
                   if (dim.width !== dim.height) warnings.push('Artwork sebaiknya persegi (1:1)');
                   if (dim.width < 3000) warnings.push(`Resolusi ${dim.width}×${dim.height} di bawah standar 3000×3000 px`);
                 }
               } else {
-                audioMeta = await inspectAudio(part, head, warnings);
+                audioMeta = await inspectAudio(part, head, warnings, u.purpose);
                 meta = { ...audioMeta };
               }
               await rename(part, join(UPLOAD_DIR, u.stored_name)); // atomik: file final tidak pernah setengah jadi
@@ -778,7 +834,8 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
               await rm(part, { force: true }).catch(() => {});
               throw e;
             }
-            const transcode = u.kind === 'audio' && audioMeta ? initialTranscodeStatus() : 'none';
+            // Audio episode & iklan diputar dari berkas aslinya (tanpa rendisi) — hemat CPU worker transcoding.
+            const transcode = u.kind === 'audio' && audioMeta && u.purpose !== 'podcast' && u.purpose !== 'ad' ? initialTranscodeStatus() : 'none';
             await db.query(`UPDATE uploads SET completed_at = now(), size = $2, audio_meta = $3, transcode_status = $4 WHERE id = $1`, [
               id,
               size,

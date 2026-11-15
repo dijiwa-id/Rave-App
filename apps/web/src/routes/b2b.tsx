@@ -36,6 +36,8 @@ const studio = {
   finance: () => import('@/pages/studio/Finance'),
   team: () => import('@/pages/studio/Team'),
   profile: () => import('@/pages/studio/Profile'),
+  podcasts: () => import('@/pages/studio/Podcasts'),
+  podcaster: () => import('@/pages/studio/PodcasterStudio'),
 };
 const promotor = {
   layout: () => import('@/pages/promotor/PromotorLayout'),
@@ -49,6 +51,8 @@ const promotor = {
 const admin = () => import('@/pages/admin/Admin');
 const adminLive = () => import('@/pages/admin/AdminLive');
 const adminAds = () => import('@/pages/admin/AdminAds');
+const adminEditorial = () => import('@/pages/admin/AdminEditorial');
+const adminPodcasts = () => import('@/pages/admin/AdminPodcasts');
 // Live Streaming: satu modul untuk Studio & Promotor Hub (org dari pemilih layout).
 const live = () => import('@/pages/live/LiveStudio');
 const platform = {
@@ -92,7 +96,15 @@ export const b2bRoutes: RouteObject[] = [
           { path: 'team', element: named(studio.team, 'default') },
           { path: 'live', element: named(live, 'StudioLive') },
           { path: 'live/:id', element: named(live, 'StudioLiveDetail') },
+          gated('podcasts', [{ path: 'podcasts', element: named(studio.podcasts, 'default') }]),
         ]),
+      },
+      {
+        // Podcaster Studio — akun Kreator (org CREATOR) tanpa profil artis.
+        path: '/podcaster',
+        element: named(studio.podcaster, 'PodcasterLayout'),
+        errorElement: B2B_ERR,
+        children: guarded([gated('podcasts', [{ index: true, element: named(studio.podcaster, 'PodcasterHome') }])]),
       },
       {
         path: '/promotor',
@@ -144,6 +156,10 @@ export const b2bRoutes: RouteObject[] = [
                 { path: 'categories', element: named(platform.categories, 'PlatformCategories') },
                 { path: 'artwork', element: named(platform.artwork, 'PlatformArtwork') },
               ]),
+              // Editor playlist editorial (izin library.curate).
+              access(['library.curate'], [{ path: 'editorial', element: named(adminEditorial, 'AdminEditorial') }]),
+              // Moderasi podcast kreator (izin podcast.moderate).
+              access(['podcast.moderate'], [{ path: 'podcasts', element: named(adminPodcasts, 'AdminPodcasts') }]),
               { path: 'platform/artwork', element: <Navigate to="/admin/artwork" replace /> },
               { path: 'platform/categories', element: <Navigate to="/admin/categories" replace /> },
               {

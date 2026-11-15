@@ -156,6 +156,13 @@ export interface Show {
   category: string;
   age_rating?: string | null;
   content_warning?: string | null;
+  explicit?: boolean;
+}
+export interface EpisodeEmbed {
+  provider: string;
+  src: string;
+  kind: 'audio' | 'video';
+  height: number;
 }
 export interface Episode {
   id: string;
@@ -168,6 +175,9 @@ export interface Episode {
   season?: number | null;
   episode_number?: number | null;
   cover_url: string;
+  /** upload = diputar pemutar RAVE; embed = iframe platform lain (lihat `embed`). */
+  source?: 'upload' | 'embed';
+  embed?: EpisodeEmbed | null;
 }
 export interface Split {
   id: string;

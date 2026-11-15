@@ -1,13 +1,14 @@
-import { BarChart3, CalendarDays, Disc3, FileSignature, Inbox, LayoutDashboard, Mic2, Tags, UserRound, Users, Wallet, Radio } from 'lucide-react';
+import { BarChart3, CalendarDays, Disc3, FileSignature, Headphones, Inbox, LayoutDashboard, Mic2, Tags, UserRound, Users, Wallet, Radio } from 'lucide-react';
 import { B2BLayout, type B2BNavItem } from '@/layouts/B2BLayout';
 import { artistOrgs, useAuth } from '@/stores/auth';
 import { OrgSwitcher, useB2BContext, useCurrentArtist } from '@/components/b2b/common';
 import { OrgOnboarding } from '@/components/b2b/OrgOnboarding';
 import { useModule } from '@/components/ModuleGate';
 import { useDict } from '@/lib/i18n';
+import { setting, usePlatformConfig } from '@/lib/platform';
 
-type NavKey = 'dashboard' | 'releases' | 'profile' | 'analytics' | 'epk' | 'rateCard' | 'calendar' | 'live' | 'bookings' | 'contracts' | 'finance' | 'team';
-type Item = Omit<B2BNavItem, 'label'> & { key: NavKey; module?: 'booking' | 'live' };
+type NavKey = 'dashboard' | 'releases' | 'profile' | 'analytics' | 'epk' | 'rateCard' | 'calendar' | 'live' | 'podcasts' | 'bookings' | 'contracts' | 'finance' | 'team';
+type Item = Omit<B2BNavItem, 'label'> & { key: NavKey; module?: 'booking' | 'live' | 'podcasts' };
 const NAV: Item[] = [
   { to: '/studio', key: 'dashboard', icon: LayoutDashboard, end: true },
   { to: '/studio/releases', key: 'releases', icon: Disc3 },
@@ -17,6 +18,7 @@ const NAV: Item[] = [
   { to: '/studio/rate-card', key: 'rateCard', icon: Tags, module: 'booking' },
   { to: '/studio/calendar', key: 'calendar', icon: CalendarDays, module: 'booking' },
   { to: '/studio/live', key: 'live', icon: Radio, module: 'live' },
+  { to: '/studio/podcasts', key: 'podcasts', icon: Headphones, module: 'podcasts' },
   { to: '/studio/bookings', key: 'bookings', icon: Inbox, module: 'booking' },
   { to: '/studio/contracts', key: 'contracts', icon: FileSignature, module: 'booking' },
   { to: '/studio/finance', key: 'finance', icon: Wallet },
@@ -28,7 +30,11 @@ export default function StudioLayout() {
   const current = useCurrentArtist();
   const set = useB2BContext((s) => s.set);
   // Menu modul yang dimatikan Super Admin (modules.live / modules.booking) disembunyikan.
-  const on = { live: useModule('live'), booking: useModule('booking') };
+  const cfg = usePlatformConfig();
+  // Menu Podcast: modul aktif + penerbitan kreator dibuka + jenis org saat ini diizinkan (Pengaturan → Podcaster).
+  const podcastOk =
+    useModule('podcasts') && setting(cfg, 'podcast.creator_enabled', true) && setting<string[]>(cfg, 'podcast.creator_org_types', ['ARTIST', 'CREATOR']).includes(current?.type ?? 'ARTIST');
+  const on = { live: useModule('live'), booking: useModule('booking'), podcasts: podcastOk };
   const d = useDict('b2b').studio;
   const orgs = artistOrgs(user);
   if (!orgs.length) return <OrgOnboarding kind="artist" />;

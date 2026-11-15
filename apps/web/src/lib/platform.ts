@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { queryClient } from '@/lib/queryClient';
+import { useAuth } from '@/stores/auth';
 import type { PlatformConfig } from '@/lib/types';
 import defaultIcon from '@/assets/brand/rave-icon.svg';
 import defaultLogo from '@/assets/brand/rave-logo-dark.webp';
@@ -30,6 +32,16 @@ export function usePlatformConfig() {
 export function setting<T>(cfg: PlatformConfig | null, key: string, fallback: T): T {
   const v = cfg?.settings?.[key];
   return v === undefined || v === null ? fallback : (v as T);
+}
+
+/** Geser posisi lagu (maju/mundur): Premium selalu; Gratis/anonim hanya bila `streaming.free_seek_enabled` aktif. */
+export const canSeek = (premium: boolean | undefined, cfg: PlatformConfig | null) => !!premium || setting<boolean>(cfg, 'streaming.free_seek_enabled', false) === true;
+/** Versi non-hook untuk store pemutar (pintasan keyboard, media session, klik lirik). */
+export const canSeekNow = () => canSeek(useAuth.getState().user?.premium, queryClient.getQueryData<PlatformConfig | null>(['platform-config']) ?? null);
+export function useCanSeek() {
+  const cfg = usePlatformConfig();
+  const premium = useAuth((s) => s.user?.premium);
+  return canSeek(premium, cfg);
 }
 
 /**

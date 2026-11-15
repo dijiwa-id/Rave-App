@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { AD_OUTCOME_LABEL, categoryViolation, evaluateAdBreak, type AdBreakOutcome, type AdPlacement, type AdPolicy, type ListenerAdState } from '@rave/domain/ads';
-import { callService, conflict, notFound, requireAuth, settings, uuidv7, z, type AuthUser, type Db, type ServiceContext } from '@rave/service-kit';
+import { callService, conflict, notFound, settings, signProtectedMediaUrl, uuidv7, z, type AuthUser, type Db, type ServiceContext } from '@rave/service-kit';
 
 /** Kebijakan efektif dari pengaturan platform (Super Admin → Pengaturan → Iklan). */
 export function currentPolicy(): AdPolicy {
@@ -12,6 +12,7 @@ export function currentPolicy(): AdPolicy {
     maxAdsPerHour: settings.num('ads.max_ads_per_hour'),
     dailyGraceStreams: settings.num('ads.daily_grace_streams'),
     podcastPreroll: settings.bool('ads.podcast_preroll'),
+    anonymousEnabled: settings.bool('ads.anonymous_enabled'),
   };
 }
 
@@ -186,7 +187,8 @@ function creativeOut(impressionId: string, c: any) {
     title: c.title,
     body: c.body,
     image_url: c.image_url,
-    audio_url: c.audio_url,
+    // Audio iklan unggahan publik (`.ad.`); berkas bucket lain yang ditautkan manual tetap ditandatangani.
+    audio_url: c.audio_url ? signProtectedMediaUrl(c.audio_url, 3600) : null,
     click_url: c.click_url,
     cta_label: c.cta_label,
     theme_color: c.theme_color,
@@ -221,19 +223,21 @@ export async function servingRoutes(app: FastifyInstance, { db, name }: ServiceC
     let outcome: AdBreakOutcome | 'no_fill' = decision.outcome;
     let ads: ReturnType<typeof creativeOut>[] = [];
     let breakId: string | null = null;
-    if (decision.outcome === 'serve' && u) {
-      const consent = await adsConsent(name, u.sub);
-      const chosen = pick(await eligibility(db, { userId: u.sub, city: u.city ?? null, consent, genres: content.genres, contentWarning: content.contentWarning }), decision.slots);
+    if (decision.outcome === 'serve') {
+      // Anonim: tanpa persetujuan iklan → hanya penargetan kontekstual (genre), tanpa kota & frequency cap per akun.
+      const consent = u ? await adsConsent(name, u.sub) : false;
+      const chosen = pick(await eligibility(db, { userId: u?.sub ?? null, city: u?.city ?? null, consent, genres: content.genres, contentWarning: content.contentWarning }), decision.slots);
       if (!chosen.length) outcome = 'no_fill';
       else {
         breakId = uuidv7();
         await db.tx(async (tx) => {
           for (const c of chosen) {
             const id = uuidv7();
-            await tx.query(`INSERT INTO impressions (id, break_id, campaign_id, user_id, placement) VALUES ($1,$2,$3,$4,$5)`, [id, breakId, c.id, u.sub, b.placement]);
+            await tx.query(`INSERT INTO impressions (id, break_id, campaign_id, user_id, placement) VALUES ($1,$2,$3,$4,$5)`, [id, breakId, c.id, u?.sub ?? null, b.placement]);
             ads.push(creativeOut(id, c.row));
           }
-          await tx.query(
+          if (u)
+            await tx.query(
             `INSERT INTO listener_state (user_id, day, streams_today, streams_since_break, last_break_at) VALUES ($1, ${TODAY}, 0, 0, now())
              ON CONFLICT (user_id) DO UPDATE SET streams_since_break = 0, last_break_at = now(), updated_at = now()`,
             [u.sub],
@@ -241,18 +245,21 @@ export async function servingRoutes(app: FastifyInstance, { db, name }: ServiceC
         });
       }
     }
-    // Pengguna anonim tidak dicatat sebagai "jeda" (bukan inventori iklan).
-    if (u) await recordOutcome(db, outcome);
+    // Anonim ditolak kebijakan (iklan anonim mati) bukan inventori → tidak dicatat sebagai jeda.
+    if (u || outcome !== 'anonymous') await recordOutcome(db, outcome);
     return { break_id: breakId, ads, outcome, reason: outcome === 'no_fill' ? 'Tidak ada kampanye yang cocok' : AD_OUTCOME_LABEL[outcome as AdBreakOutcome] };
   });
 
-  app.post('/v1/ads/impressions/:id/events', { preHandler: requireAuth }, async (req) => {
+  // Impresi anonim (user_id NULL) dilaporkan tanpa login; id impresi (UUIDv7, acak 74 bit) berlaku sebagai kunci.
+  app.post('/v1/ads/impressions/:id/events', async (req) => {
+    const viewer = req.user && !req.user.roles.includes('service') ? req.user.sub : null;
     const { id } = req.params as { id: string };
     const b = z.object({ event: z.enum(['start', 'complete', 'skip', 'click']) }).parse(req.body);
     if (!isUuid(id)) throw notFound('Impresi');
     const imp = await db.one(
-      `SELECT i.*, c.type, c.duration_s FROM impressions i JOIN campaigns c ON c.id = i.campaign_id WHERE i.id = $1 AND i.user_id = $2`,
-      [id, req.user!.sub],
+      `SELECT i.*, c.type, c.duration_s FROM impressions i JOIN campaigns c ON c.id = i.campaign_id
+        WHERE i.id = $1 AND i.user_id IS NOT DISTINCT FROM $2::uuid AND i.served_at > now() - interval '1 day'`,
+      [id, viewer],
     );
     if (!imp) throw notFound('Impresi');
     if (b.event === 'skip') {

@@ -1,12 +1,13 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Lock } from 'lucide-react';
+import { AlertTriangle, Headphones, Lock } from 'lucide-react';
 import { api, fmt } from '@/lib/api';
 import type { Episode, Show } from '@/lib/types';
 import { usePlayer, type Playable } from '@/stores/player';
 import { colorFor, DarkError, HeroHeader, PlayFab } from '@/components/fan';
 import { PageLoader } from '@/components/ui';
 import { useDict } from '@/lib/i18n';
+import { EmbedPlayer } from '@/components/podcast/EmbedPlayer';
 
 export function episodeToPlayable(e: Episode, show: Pick<Show, 'id' | 'title'> & Partial<Pick<Show, 'content_warning'>>): Playable {
   return {
@@ -40,22 +41,30 @@ export default function ShowPage() {
           <ul className="divide-y divide-white/10">
             {s.episodes.map((e) => (
               <li key={e.id} className="flex gap-4 py-4">
-                <img src={e.cover_url} alt="" className="size-28 shrink-0 rounded-none object-cover" loading="lazy" />
+                {e.cover_url || s.cover_url ? (
+                  <img src={e.cover_url || s.cover_url} alt="" className="size-28 shrink-0 rounded-none object-cover" loading="lazy" />
+                ) : (
+                  <span className="grid size-28 shrink-0 place-items-center bg-white/5 text-rave-muted">
+                    <Headphones className="size-8" />
+                  </span>
+                )}
                 <div className="min-w-0 flex-1">
                   <Link to={`/app/episode/${e.id}`} className="line-clamp-2 font-bold hover:underline">
                     {e.season ? `S${e.season} E${e.episode_number} · ` : ''}
                     {e.title}
                   </Link>
                   <p className="mt-1 line-clamp-2 text-sm text-rave-muted">{e.description}</p>
+                  {e.source === 'embed' && e.embed && <EmbedPlayer embed={e.embed} title={e.title} className="mt-3 max-w-2xl" />}
                   <div className="mt-3 flex items-center gap-4 text-sm text-rave-muted">
-                    <PlayFab size="xs" playKey={`episode:${e.id}`} label={d.shared.play(e.title)} onClick={() => playOne(episodeToPlayable(e, s))} />
+                    {e.source !== 'embed' && <PlayFab size="xs" playKey={`episode:${e.id}`} label={d.shared.play(e.title)} onClick={() => playOne(episodeToPlayable(e, s))} />}
                     {e.is_premium && (
                       <span className="inline-flex items-center gap-1 rounded-none bg-rave-orange/20 px-2 py-0.5 text-xs font-bold text-rave-orange">
                         <Lock className="size-3" /> Premium
                       </span>
                     )}
                     <span>
-                      {fmt.date(e.published_at)} · {fmt.minutes(e.duration_ms)}
+                      {fmt.date(e.published_at)}
+                      {e.duration_ms > 0 && ` · ${fmt.minutes(e.duration_ms)}`}
                     </span>
                   </div>
                 </div>

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AdCard, BRAND_GRADIENT } from '@/components/ads/AdCard';
 import { setting, usePlatformConfig } from '@/lib/platform';
@@ -32,10 +32,15 @@ export function AdBreakOverlay() {
   const nav = useNavigate();
   const d = useDict('common');
 
+  const anonymous = setting<boolean>(cfg, 'ads.anonymous_enabled', true) !== false;
   useEffect(() => useAds.getState().setEnabled(enabled), [enabled]);
-  // Logout / naik ke Premium di tengah jeda → hentikan iklan, pemutar lanjut.
+  useEffect(() => useAds.setState({ anonymousEnabled: anonymous }), [anonymous]);
+  // Logout / naik ke Premium di tengah jeda → hentikan iklan, pemutar lanjut. (Anonim sejak awal boleh menerima iklan
+  // pratinjau — yang dihentikan hanya perpindahan dari login ke logout.)
+  const hadToken = useRef(!!token);
   useEffect(() => {
-    if (!token || premium) abortAdBreak();
+    if ((hadToken.current && !token) || premium) abortAdBreak();
+    hadToken.current = !!token;
   }, [token, premium]);
 
   if (!active || !ad) return null;

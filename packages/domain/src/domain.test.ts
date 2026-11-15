@@ -143,6 +143,13 @@ describe('kebijakan iklan', () => {
     expect(evaluateAdBreak(policy, { ...base, anonymous: true }).outcome).toBe('anonymous');
     expect(evaluateAdBreak(policy, { ...base, premiumContent: true }).outcome).toBe('premium_content');
   });
+  it('anonim: satu iklan setelah pratinjau bila ads.anonymous_enabled (tanpa aturan riwayat), konten Premium tetap bebas', () => {
+    const anon = { ...base, anonymous: true, streamsToday: 0, streamsSinceBreak: 0, minutesSinceBreak: 1 };
+    expect(evaluateAdBreak({ ...policy, anonymousEnabled: true }, anon)).toMatchObject({ outcome: 'serve', slots: 1 });
+    expect(evaluateAdBreak({ ...policy, anonymousEnabled: true }, { ...anon, premiumContent: true }).outcome).toBe('premium_content');
+    expect(evaluateAdBreak({ ...policy, anonymousEnabled: false }, anon).outcome).toBe('anonymous');
+    expect(evaluateAdBreak({ ...policy, enabled: false, anonymousEnabled: true }, anon).outcome).toBe('disabled');
+  });
   it('menghormati masa bebas iklan, jeda minimum, jumlah lagu, dan batas per jam', () => {
     expect(evaluateAdBreak(policy, { ...base, streamsToday: 2 }).outcome).toBe('grace');
     expect(evaluateAdBreak(policy, { ...base, minutesSinceBreak: 5 }).outcome).toBe('too_soon');

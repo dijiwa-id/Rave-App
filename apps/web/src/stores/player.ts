@@ -4,8 +4,9 @@ import { dict } from '@/lib/i18n';
 import { useAuth } from '@/stores/auth';
 import { safeGet, safeSet } from '@/lib/storage';
 import type { PlaybackSession } from '@/lib/types';
-import { runAdBreak, useAds } from '@/stores/ads';
+import { anonymousAdsOn, runAdBreak, useAds } from '@/stores/ads';
 import { toast } from '@/components/ui';
+import { canSeekNow } from '@/lib/platform';
 import { registerAudio, resumeFx, setLoudness, withFx } from '@/lib/audioFx';
 
 /** Item yang bisa diputar: lagu atau episode podcast/fiksi. */
@@ -126,10 +127,19 @@ if (typeof window !== 'undefined') {
 
 /** Percobaan pemulihan otomatis berturut-turut untuk item yang sama (direset saat item baru dimuat). */
 let recoveries = 0;
+/** Pratinjau anonim sudah ditangani untuk item ini (timeupdate tetap terpicu setelah pause). */
+let previewEnded = false;
 const MAX_RECOVERIES = 2;
 
 // Pesan galat diambil dari kamus saat terjadi (bukan konstanta modul) agar mengikuti bahasa aktif.
 const errText = () => dict('common').player.errors;
+let seekDeniedAt = 0;
+/** Percobaan geser oleh akun Gratis → satu toast per 4 dtk (slider/pintasan bisa memanggil berkali-kali). */
+function seekDenied() {
+  if (Date.now() - seekDeniedAt < 4000) return;
+  seekDeniedAt = Date.now();
+  toast.info(dict('common').player.seekPremium);
+}
 /** Penjelasan "HQ/Lossless khusus Premium" cukup sekali per sesi aplikasi, bukan tiap lagu. */
 let premiumQualityNotified = false;
 /** "Versi Lossless sedang disiapkan" cukup sekali per lagu per sesi aplikasi. */
@@ -150,6 +160,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
   async function load(item: Playable, resumeMs = 0) {
     const prev = get();
     if (!resumeMs) recoveries = 0;
+    previewEnded = false;
     if (!resumeMs && prev.current && prev.playing && prev.positionMs < prev.durationMs - 2000) queueEvent('skip');
     // Hentikan audio lama sekarang: bila sesi item baru gagal (Premium, 5xx, offline), lagu sebelumnya tidak terus berbunyi.
     audio.pause();
@@ -201,6 +212,21 @@ export const usePlayer = create<PlayerState>((set, get) => {
    * BERIKUTNYA sebelum item itu mulai; runAdBreak resolve segera bila tidak ada iklan / gagal / Premium.
    * Selama jeda, playQueue/playOne hanya mengubah antrean — item terpilih diputar setelah iklan selesai.
    */
+  /**
+   * Pratinjau 30 dtk anonim berakhir. Iklan anonim aktif (`ads.anonymous_enabled`) → satu iklan, lalu pratinjau item
+   * berikutnya; selain itu (atau antrean habis) berhenti dengan ajakan masuk seperti sebelumnya.
+   */
+  async function onPreviewEnded() {
+    const n = nextIndex();
+    if (!anonymousAdsOn() || n == null) return void set({ error: errText().previewEnded });
+    toast.info(errText().previewEnded);
+    const { queue } = get();
+    set({ index: n });
+    await runAdBreak(queue[n]);
+    const item = get().queue[get().index];
+    if (item) void load(item);
+  }
+
   async function onEnded() {
     queueEvent('complete');
     const { repeat, current, queue, index, muted, volume } = get();
@@ -243,9 +269,10 @@ export const usePlayer = create<PlayerState>((set, get) => {
       const s = get();
       set({ positionMs: pos });
       // Pratinjau 30 detik untuk pengguna anonim (REQ-WEB-04)
-      if (s.session?.preview_only && s.session.preview_ms && pos >= s.session.preview_ms) {
+      if (s.session?.preview_only && s.session.preview_ms && pos >= s.session.preview_ms && !previewEnded) {
+        previewEnded = true;
         audio.pause();
-        set({ error: errText().previewEnded });
+        void onPreviewEnded();
       }
       if (playedMs - lastProgressAt >= 15_000) {
         lastProgressAt = playedMs;
@@ -333,8 +360,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
     prev() {
       if (useAds.getState().busy) return;
       const { queue, index } = get();
-      if (audio.currentTime > 3 || index <= 0) {
-        audio.currentTime = 0;
+      // Gratis tanpa izin geser: "sebelumnya" tidak mengulang lagu dari awal (itu seek) — langsung ke lagu sebelumnya.
+      if (index <= 0 || (audio.currentTime > 3 && canSeekNow())) {
+        if (canSeekNow()) audio.currentTime = 0;
         return;
       }
       set({ index: index - 1 });
@@ -342,6 +370,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
     },
     seek(ms) {
       if (useAds.getState().busy) return;
+      // Tier Gratis: posisi tidak bisa digeser (kebijakan streaming.free_seek_enabled). Semua jalur — slider, lirik,
+      // pintasan keyboard, media session — lewat sini; pemulihan internal memakai audio.currentTime langsung.
+      if (!canSeekNow()) return seekDenied();
       audio.currentTime = ms / 1000;
       set({ positionMs: ms });
     },

@@ -951,13 +951,123 @@ console.log('\n▶ Editor playlist editorial (Back Office, izin library.curate)'
   if (feat.data?.data?.length) await call(SA, 'PUT', '/v1/admin/library/playlists/order', { ids: feat.data.data.map((p: any) => p.id) });
 }
 
+console.log('\n▶ Podcaster: acara & episode kreator, embed iframe, moderasi, pengaturan Upload/Live');
+{
+  const SA = sa.access_token;
+  const ART = artistTok;
+  const ORG = SEED.artists[0].orgId;
+  const setS = (changes: Record<string, unknown>, reason: string) => call(SA, 'PUT', '/v1/admin/platform/settings', { changes, reason });
+  const pol = await call(ART, 'GET', `/v1/studio/podcasts?org_id=${ORG}`);
+  check('Studio podcast: org artis eligible + kebijakan dikirim', pol.status === 200 && pol.data?.eligible === true && pol.data?.policy?.require_review === true, pol.data);
+  check('fan tanpa org tidak bisa membuat acara (403)', (await call(fan.access_token, 'POST', '/v1/studio/podcasts', { org_id: ORG, title: 'Bukan Milikku', publisher: 'Fan', category: 'Musik' })).status === 403);
+  const sh = await call(ART, 'POST', '/v1/studio/podcasts', { org_id: ORG, kind: 'PODCAST', title: 'Obrolan Studio E2E', publisher: 'Senja Kolektif', category: 'Musik', description: 'uji e2e' });
+  const SHOW = sh.data?.id;
+  check('buat acara podcast', sh.status === 201 && sh.data?.status === 'ACTIVE' && sh.data?.episode_count === 0, sh.data);
+  const pub0 = await call(null, 'GET', `/v1/catalog/shows/${SHOW}`);
+  check('acara tanpa episode tayang belum tampil publik (404)', pub0.status === 404, pub0.status);
+  // Embed: kode iframe Spotify → hanya src kanonik yang disimpan.
+  const prev = await call(ART, 'POST', '/v1/studio/podcasts/embed/preview', { embed_code: '<iframe src="https://open.spotify.com/embed/episode/4rOoJ6Egrf8K2IrywzwOMk?utm_source=generator" onload="alert(1)"></iframe>' });
+  check('pratinjau embed Spotify → URL kanonik', prev.data?.provider === 'spotify' && prev.data?.src === 'https://open.spotify.com/embed/episode/4rOoJ6Egrf8K2IrywzwOMk', prev.data);
+  const evil = await call(ART, 'POST', `/v1/studio/podcasts/${SHOW}/episodes`, { title: 'Embed jahat', source: 'embed', embed_code: '<iframe src="https://evil.example/x"></iframe>', publish: true });
+  check('embed domain asing ditolak (422)', evil.status === 422, evil.status);
+  const premEmbed = await call(ART, 'POST', `/v1/studio/podcasts/${SHOW}/episodes`, { title: 'Embed premium', source: 'embed', embed_code: 'https://youtu.be/dQw4w9WgXcQ', is_premium: true });
+  check('episode embed tidak bisa Premium (422)', premEmbed.status === 422, premEmbed.status);
+  const ep1 = await call(ART, 'POST', `/v1/studio/podcasts/${SHOW}/episodes`, { title: 'Ep 1 — embed Spotify', source: 'embed', embed_code: 'https://open.spotify.com/episode/4rOoJ6Egrf8K2IrywzwOMk?si=x', publish: true });
+  check('episode embed diterbitkan → PENDING (tinjauan wajib)', ep1.status === 201 && ep1.data?.status === 'PENDING' && ep1.data?.embed?.src === 'https://open.spotify.com/embed/episode/4rOoJ6Egrf8K2IrywzwOMk', ep1.data);
+  // Upload audio episode: MP3 22 kHz mono (bukan standar master lagu) diterima untuk purpose podcast, tanpa transcoding.
+  const { execFileSync } = await import('node:child_process');
+  const { readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const FF = createRequire(import.meta.url)('ffmpeg-static') as string;
+  let EP2: string | undefined;
+  try {
+    const mp3Path = `${tmpdir()}/rave-e2e-ep-${process.pid}.mp3`;
+    execFileSync(FF, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=330:sample_rate=22050:duration=3', '-ac', '1', '-c:a', 'libmp3lame', '-b:a', '64k', mp3Path]);
+    const mp3 = readFileSync(mp3Path);
+    rmSync(mp3Path, { force: true });
+    const relUp = await call(ART, 'POST', '/v1/studio/uploads', { kind: 'audio', filename: 'rel.mp3', content_type: 'audio/mpeg', size: mp3.length });
+    const relPut = await fetch(BASE + relUp.data?.upload_url, { method: 'PUT', headers: { authorization: `Bearer ${ART}`, 'content-type': 'audio/mpeg' }, body: new Uint8Array(mp3) });
+    check('MP3 22 kHz ditolak sebagai master lagu (standar rilis)', relPut.status === 422, relPut.status);
+    const pu = await call(ART, 'POST', '/v1/studio/uploads', { kind: 'audio', purpose: 'podcast', filename: 'ep2.mp3', content_type: 'audio/mpeg', size: mp3.length });
+    const pput = await fetch(BASE + pu.data?.upload_url, { method: 'PUT', headers: { authorization: `Bearer ${ART}`, 'content-type': 'audio/mpeg' }, body: new Uint8Array(mp3) });
+    const pj: any = await pput.json();
+    check('audio episode MP3 22 kHz diterima (purpose podcast) tanpa transcoding', pput.status === 200 && pj.transcode_status === 'none', [pput.status, pj]);
+    const ep2 = await call(ART, 'POST', `/v1/studio/podcasts/${SHOW}/episodes`, { title: 'Ep 2 — unggahan', source: 'upload', audio_url: pj.public_url, is_premium: false });
+    EP2 = ep2.data?.id;
+    check('episode unggahan disimpan sebagai draf + durasi dari probe', ep2.status === 201 && ep2.data?.status === 'DRAFT' && ep2.data?.duration_ms >= 2500, ep2.data);
+  } catch (e) {
+    check('ffmpeg tersedia untuk uji audio episode', false, String(e));
+  }
+  const stolen = await call(ART, 'POST', `/v1/studio/podcasts/${SHOW}/episodes`, { title: 'Audio orang lain', source: 'upload', audio_url: '/v1/catalog/media/bukan-milik.mp3' });
+  check('audio yang bukan unggahan podcast milik user ditolak (422)', stolen.status === 422, stolen.status);
+  // Moderasi Back Office.
+  const q1 = await call(SA, 'GET', '/v1/admin/podcasts/episodes?status=PENDING');
+  check('antrean moderasi memuat episode PENDING', q1.status === 200 && q1.data?.data?.some((x: any) => x.id === ep1.data?.id) && q1.data.pending >= 1, q1.data?.pending);
+  check('fan tidak bisa membuka moderasi (403)', (await call(fan.access_token, 'GET', '/v1/admin/podcasts/episodes')).status === 403);
+  const rejNoReason = await call(SA, 'POST', `/v1/admin/podcasts/episodes/${ep1.data?.id}/decision`, { action: 'reject' });
+  check('tolak tanpa alasan → 400', rejNoReason.status === 400, rejNoReason.status);
+  const appr = await call(SA, 'POST', `/v1/admin/podcasts/episodes/${ep1.data?.id}/decision`, { action: 'approve' });
+  check('setujui episode → PUBLISHED', appr.data?.status === 'PUBLISHED', appr.data);
+  const pub1 = await call(null, 'GET', `/v1/catalog/shows/${SHOW}`);
+  check('acara tampil publik hanya dengan episode tayang + data embed', pub1.status === 200 && pub1.data?.episodes?.length === 1 && pub1.data.episodes[0].source === 'embed' && pub1.data.episodes[0].embed?.provider === 'spotify', pub1.data?.episodes);
+  const ps = await call(fan.access_token, 'POST', '/v1/playback/sessions', { episode_id: ep1.data?.id, quality: 'auto' });
+  check('episode embed tidak diputar lewat pemutar RAVE (404)', ps.status === 404, ps.status);
+  if (EP2) {
+    const draftPlay = await call(fan.access_token, 'POST', '/v1/playback/sessions', { episode_id: EP2, quality: 'auto' });
+    check('episode draf tidak bisa diputar publik (404)', draftPlay.status === 404, draftPlay.status);
+    // Tinjauan dimatikan → terbit langsung tayang dan bisa diputar.
+    await setS({ 'podcast.require_review': false }, 'uji e2e podcast tanpa tinjauan');
+    await new Promise((r) => setTimeout(r, 2000));
+    const go = await call(ART, 'PATCH', `/v1/studio/podcasts/${SHOW}/episodes/${EP2}`, { publish: true });
+    check('tanpa tinjauan: terbitkan → langsung PUBLISHED', go.data?.status === 'PUBLISHED', go.data);
+    const play = await call(fan.access_token, 'POST', '/v1/playback/sessions', { episode_id: EP2, quality: 'auto' });
+    check('episode unggahan tayang bisa diputar', play.status === 201 && !!play.data?.stream_url, [play.status, play.data?.detail]);
+    await call(SA, 'POST', '/v1/admin/platform/settings/reset', { keys: ['podcast.require_review'], reason: 'selesai uji e2e podcast' });
+  }
+  const hide = await call(SA, 'POST', `/v1/admin/podcasts/shows/${SHOW}/visibility`, { hidden: true, reason: 'uji e2e sembunyikan acara' });
+  const gone = await call(null, 'GET', `/v1/catalog/shows/${SHOW}`);
+  const blockedEp = await call(ART, 'POST', `/v1/studio/podcasts/${SHOW}/episodes`, { title: 'Setelah disembunyikan', source: 'embed', embed_code: 'https://youtu.be/dQw4w9WgXcQ' });
+  check('acara disembunyikan moderator → hilang dari publik & episode baru ditolak (409)', hide.data?.status === 'HIDDEN' && gone.status === 404 && blockedEp.status === 409, [hide.data?.status, gone.status, blockedEp.status]);
+  // Pengaturan: embed dimatikan & batas acara per akun.
+  await setS({ 'podcast.embed_enabled': false, 'podcast.max_shows_per_org': 1 }, 'uji e2e kebijakan podcaster');
+  await new Promise((r) => setTimeout(r, 2000));
+  const noEmbed = await call(ART, 'POST', '/v1/studio/podcasts/embed/preview', { embed_code: 'https://youtu.be/dQw4w9WgXcQ' });
+  const second = await call(ART, 'POST', '/v1/studio/podcasts', { org_id: ORG, title: 'Acara kedua', publisher: 'Senja Kolektif', category: 'Musik' });
+  check('pengaturan: embed mati (403) & batas 1 acara per akun (422)', noEmbed.status === 403 && second.status === 422, [noEmbed.status, second.status]);
+  await call(SA, 'POST', '/v1/admin/platform/settings/reset', { keys: ['podcast.embed_enabled', 'podcast.max_shows_per_org'], reason: 'selesai uji e2e podcaster' });
+  const del = await call(ART, 'DELETE', `/v1/studio/podcasts/${SHOW}`);
+  check('hapus acara beserta episodenya', del.data?.ok === true, del.data);
+  // Upload: batas harian per pengguna; Live: jenis akun & siaran bertiket.
+  await setS({ 'upload.daily_limit': 1, 'live.ticketed_enabled': false, 'live.allowed_org_types': ['PROMOTOR'] }, 'uji e2e upload & live');
+  await new Promise((r) => setTimeout(r, 2000));
+  const lim = await call(ART, 'POST', '/v1/studio/uploads', { kind: 'artwork', filename: 'x.png', content_type: 'image/png', size: 1000 });
+  check('pengaturan Upload: batas upload harian → 429', lim.status === 429, [lim.status, lim.data?.detail]);
+  const liveNo = await call(ART, 'POST', '/v1/live/studio/streams', { org_id: ORG, title: 'Siaran ditolak' });
+  check('pengaturan Live: jenis akun tidak diizinkan → 403', liveNo.status === 403, [liveNo.status, liveNo.data?.detail]);
+  await call(SA, 'POST', '/v1/admin/platform/settings/reset', { keys: ['upload.daily_limit', 'live.ticketed_enabled', 'live.allowed_org_types'], reason: 'selesai uji e2e upload & live' });
+}
+
 console.log('\n▶ Iklan: kebijakan penayangan tier Gratis');
+// Anonim: satu iklan setelah pratinjau 30 dtk (ads.anonymous_enabled, default aktif; promosi RAVE mengisi slot kosong).
 const adAnon = await call(null, 'POST', '/v1/ads/break', { placement: 'between_tracks' });
-check('iklan: anonim tidak pernah diberi iklan', adAnon.data?.outcome === 'anonymous' && adAnon.data.ads.length === 0, adAnon.data);
+check('iklan: anonim mendapat satu iklan setelah pratinjau', ['serve', 'no_fill'].includes(adAnon.data?.outcome) && adAnon.data.ads.length <= 1, adAnon.data);
+if (adAnon.data?.ads?.[0]) {
+  const ev = await call(null, 'POST', `/v1/ads/impressions/${adAnon.data.ads[0].impression_id}/events`, { event: 'start' });
+  check('iklan: impresi anonim dilaporkan tanpa login', ev.status === 200 && ev.data?.ok === true, [ev.status, ev.data]);
+  const evOther = await call(F, 'POST', `/v1/ads/impressions/${adAnon.data.ads[0].impression_id}/events`, { event: 'click' });
+  check('iklan: akun lain tidak bisa melaporkan impresi anonim (404)', evOther.status === 404, evOther.status);
+}
+await call(S, 'PUT', '/v1/admin/platform/settings', { changes: { 'ads.anonymous_enabled': false }, reason: 'uji e2e iklan anonim mati' });
+await new Promise((r) => setTimeout(r, 2000));
+const adAnonOff = await call(null, 'POST', '/v1/ads/break', { placement: 'between_tracks' });
+check('iklan: iklan anonim dimatikan → tanpa iklan', adAnonOff.data?.outcome === 'anonymous' && adAnonOff.data.ads.length === 0, adAnonOff.data);
+await call(S, 'POST', '/v1/admin/platform/settings/reset', { keys: ['ads.anonymous_enabled'], reason: 'selesai uji e2e iklan anonim' });
 const adPrem = await call(admin.access_token, 'POST', '/v1/admin/ads/simulate', { premium: true });
 check('iklan: simulator — Premium selalu bebas iklan', adPrem.data?.outcome === 'premium', adPrem.data);
-const adGrace = await call(admin.access_token, 'POST', '/v1/admin/ads/simulate', { streams_today: 1 });
-check('iklan: simulator — masa bebas iklan harian', adGrace.data?.outcome === 'grace', adGrace.data);
+const adEvery = await call(admin.access_token, 'POST', '/v1/admin/ads/simulate', { streams_today: 1, streams_since_break: 1, minutes_since_break: 0 });
+check('iklan: default tier Gratis — iklan setelah setiap lagu selesai (tanpa masa bebas/jeda waktu)', adEvery.data?.outcome === 'serve' && adEvery.data.slots === 1, adEvery.data);
+const adFirst = await call(admin.access_token, 'POST', '/v1/admin/ads/simulate', { streams_today: 1, streams_since_break: 0, minutes_since_break: 0 });
+check('iklan: belum ada lagu selesai sejak jeda → tanpa iklan', adFirst.data?.outcome === 'too_few_streams', adFirst.data);
 const adServe = await call(admin.access_token, 'POST', '/v1/admin/ads/simulate', { streams_today: 10, streams_since_break: 5, minutes_since_break: 30, genres: ['indie-pop'] });
 check('iklan: simulator — tayang bila syarat terpenuhi', adServe.data?.outcome === 'serve' && adServe.data.slots >= 1, adServe.data);
 const adBad = await call(admin.access_token, 'POST', '/v1/admin/ads/campaigns', { advertiser: 'E2E', name: 'Uji judi', category: 'gambling', type: 'display', title: 'Uji kategori', duration_s: 10 });
@@ -972,6 +1082,33 @@ const adDel = await call(admin.access_token, 'DELETE', `/v1/admin/ads/campaigns/
 check('iklan: kampanye ditolak tanpa impresi dapat dihapus', adDel.data?.deleted === true, adDel.data);
 const adOv = await call(admin.access_token, 'GET', '/v1/admin/ads/overview?days=7');
 check('iklan: ringkasan & matriks kategori', !!adOv.data?.kpis && adOv.data.policy.categories.some((c: any) => c.key === 'gambling' && c.blocked), adOv.data?.kpis);
+const adPremReal = await call(P2, 'POST', '/v1/ads/break', { placement: 'between_tracks' });
+check('iklan: pelanggan Premium (token asli) tidak pernah diberi iklan', adPremReal.data?.outcome === 'premium' && adPremReal.data.ads.length === 0, adPremReal.data);
+{
+  // Audio iklan diunggah dari komputer (purpose 'ad'): izin ads.manage, berkas lossy ringan, publik tanpa tanda tangan.
+  const { execFileSync } = await import('node:child_process');
+  const { readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const FFM = createRequire(import.meta.url)('ffmpeg-static') as string;
+  const mp3Path = `${tmpdir()}/rave-e2e-ad-${process.pid}.mp3`;
+  execFileSync(FFM, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=660:sample_rate=44100:duration=5', '-c:a', 'libmp3lame', '-b:a', '128k', mp3Path]);
+  const mp3 = readFileSync(mp3Path);
+  rmSync(mp3Path, { force: true });
+  const fanAd = await call(F, 'POST', '/v1/studio/uploads', { kind: 'audio', purpose: 'ad', filename: 'iklan.mp3', content_type: 'audio/mpeg', size: mp3.length });
+  check('iklan: unggah audio iklan tanpa izin ads.manage → 403', fanAd.status === 403, fanAd.status);
+  const wavAd = await call(admin.access_token, 'POST', '/v1/studio/uploads', { kind: 'audio', purpose: 'ad', filename: 'iklan.wav', content_type: 'audio/wav', size: 1000 });
+  check('iklan: audio iklan WAV (master) ditolak → 422', wavAd.status === 422, [wavAd.status, wavAd.data?.detail]);
+  const adUp = await call(admin.access_token, 'POST', '/v1/studio/uploads', { kind: 'audio', purpose: 'ad', filename: 'iklan.mp3', content_type: 'audio/mpeg', size: mp3.length });
+  const adPut = await fetch(BASE + adUp.data?.upload_url, { method: 'PUT', headers: { authorization: `Bearer ${admin.access_token}`, 'content-type': 'audio/mpeg' }, body: new Uint8Array(mp3) });
+  const adPutJ = await adPut.json();
+  check('iklan: unggah audio MP3 dari komputer (tanpa transcoding)', adPut.status === 200 && adPutJ.transcode_status === 'none' && /\.ad\.mp3$/.test(adPutJ.public_url ?? ''), adPutJ);
+  const adMedia = await fetch(BASE + adPutJ.public_url);
+  check('iklan: audio iklan unggahan publik (tanpa URL bertanda tangan)', adMedia.status === 200 && adMedia.headers.get('content-type') === 'audio/mpeg', adMedia.status);
+  await adMedia.arrayBuffer().catch(() => {});
+  const adAudio = await call(admin.access_token, 'POST', '/v1/admin/ads/campaigns', { advertiser: 'E2E', name: 'Uji audio unggahan', category: 'education', type: 'audio', title: 'Spot audio unggahan', audio_url: adPutJ.public_url, duration_s: 5 });
+  check('iklan: kampanye audio memakai berkas unggahan (bukan HTTPS) diterima', adAudio.status === 201 && adAudio.data.audio_url === adPutJ.public_url, [adAudio.status, adAudio.data]);
+  if (adAudio.data?.id) await call(admin.access_token, 'DELETE', `/v1/admin/ads/campaigns/${adAudio.data.id}`);
+}
 
 console.log('\n▶ Refund tiket (permintaan pembeli, perubahan jadwal, pembatalan event, bayar terlambat)');
 {

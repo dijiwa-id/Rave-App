@@ -1,11 +1,12 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, ClipboardCheck, FlaskConical, Lock, Megaphone, Pause, Pencil, Play, Plus, Send, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Check, ClipboardCheck, FlaskConical, ImagePlus, Lock, Megaphone, Music, Pause, Pencil, Play, Plus, Send, ShieldCheck, Trash2, X } from 'lucide-react';
 import { AD_CATEGORIES, AD_CATEGORY_KEYS, categoryViolation, type AdCategory, type AdCategoryTier } from '@rave/domain/ads';
 import { SETTINGS, SETTINGS_BY_KEY } from '@rave/domain/settings';
 import { serviceHref } from '@/lib/raveServices';
 import { api, ApiError, fmt } from '@/lib/api';
+import { IMAGE_ACCEPT, uploadFile } from '@/lib/upload';
 import { dict, useDict } from '@/lib/i18n';
 import type { AdsOverview, AdSimulateInput, AdSimulateResult, Campaign, CampaignInput, CampaignStatus, Me, SettingsResponse } from '@/lib/types';
 import { isSuperAdmin, useAuth } from '@/stores/auth';
@@ -577,10 +578,73 @@ function validate(d: Draft, submit: boolean, s: ReturnType<typeof useAdSettings>
   for (const k of ['image_url', 'audio_url', 'click_url'] as const) {
     const u = d[k].trim();
     if (k === 'audio_url' && d.type !== 'audio') continue;
-    if (u && !u.startsWith('https://') && !(d.is_house && u.startsWith('/'))) e[k] = d.is_house ? t.httpsOrInternal : t.httpsRequired;
+    const uploaded = k !== 'click_url' && u.startsWith('/v1/catalog/media/');
+    if (u && !uploaded && !u.startsWith('https://') && !(d.is_house && u.startsWith('/'))) e[k] = d.is_house ? t.httpsOrInternal : t.httpsRequired;
   }
   if (d.end_at && d.start_at && d.end_at < d.start_at) e.end_at = t.endAfterStart;
   return e;
+}
+
+/** Audio iklan yang diterima server (purpose `ad`): berkas lossy ringan, diputar apa adanya di semua klien. */
+const AD_AUDIO_ACCEPT = '.mp3,.m4a,.aac,.ogg,.opus,audio/mpeg,audio/mp4,audio/aac,audio/ogg,audio/opus';
+
+/** URL berkas iklan: tempel tautan HTTPS atau unggah dari komputer (bucket uploads, izin ads.manage), dengan pratinjau. */
+function MediaInput(p: { kind: 'audio' | 'artwork'; label: string; hint?: string; error?: string; value: string; onChange: (v: string) => void; placeholder: string }) {
+  const t = useDict('admin').ads.editor;
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [name, setName] = useState<string | null>(null);
+  const v = p.value.trim();
+  const usable = /^(https:\/\/|\/)/.test(v);
+  async function pick(f: File | undefined) {
+    if (!f) return;
+    setBusy(true);
+    try {
+      p.onChange(await uploadFile(f, p.kind, 'ad'));
+      setName(f.name);
+      toast.success(t.uploaded(f.name));
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+      if (ref.current) ref.current.value = '';
+    }
+  }
+  const audio = p.kind === 'audio';
+  return (
+    <div className="min-w-0">
+      <Label hint={p.hint}>{p.label}</Label>
+      <div className={cx('border border-dashed bg-b2b-bg p-3', p.error ? 'border-red-500' : 'border-b2b-line')}>
+        {usable ? (
+          audio ? (
+            <audio controls preload="none" src={v} className="mb-3 h-10 w-full" aria-label={t.listenAudio} />
+          ) : (
+            <div className="mb-3 aspect-video w-full overflow-hidden bg-b2b-line/40">
+              <img src={v} alt="" className="size-full object-cover" onError={(e) => (e.currentTarget.style.visibility = 'hidden')} onLoad={(e) => (e.currentTarget.style.visibility = 'visible')} />
+            </div>
+          )
+        ) : (
+          <button type="button" onClick={() => ref.current?.click()} disabled={busy} className="mb-3 flex w-full flex-col items-center justify-center gap-1 py-4 text-center text-xs text-b2b-muted hover:text-b2b-ink">
+            {audio ? <Music className="size-6" /> : <ImagePlus className="size-6" />}
+            <span className="font-semibold">{t.uploadFromComputer}</span>
+            <span>{audio ? 'MP3 · AAC · OGG · Opus' : 'JPG · PNG · 16:9'}</span>
+          </button>
+        )}
+        <div className="flex gap-2">
+          <Input value={p.value} onChange={(e) => (p.onChange(e.target.value), setName(null))} placeholder={p.placeholder} inputMode="url" className="min-w-0 flex-1 text-xs" aria-label={p.label} />
+          <input ref={ref} type="file" accept={audio ? AD_AUDIO_ACCEPT : IMAGE_ACCEPT} className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
+          <Button type="button" size="sm" variant="outline-ink" icon={audio ? <Music /> : <ImagePlus />} loading={busy} onClick={() => ref.current?.click()} title={t.uploadFromComputer}>
+            {v ? t.replace : t.upload}
+          </Button>
+          {v && (
+            <Button type="button" size="sm" variant="outline-ink" icon={<X />} onClick={() => (p.onChange(''), setName(null))} aria-label={t.remove} title={t.remove} />
+          )}
+        </div>
+        {name && <p className="mt-1.5 truncate text-xs text-b2b-muted">{name}</p>}
+      </div>
+      {p.error && <span className="mt-1 block text-xs text-red-500">{p.error}</span>}
+    </div>
+  );
 }
 
 /** Path galat server (`duration_s`, `/body/duration_s`, `body.duration_s`) → nama field. */
@@ -669,43 +733,45 @@ function CampaignEditor({ campaign, onClose }: { campaign: Campaign | null; onCl
   }
 
   const err = (k: keyof Draft) => errors[k] || undefined;
+  const errorCount = Object.values(errors).filter(Boolean).length + other.length;
+  const title = campaign ? t.editTitle : ad.ads.newCampaign;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/60" onClick={onClose} role="dialog" aria-modal aria-label={campaign ? t.editTitle : ad.ads.newCampaign}>
-      <div onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-5xl flex-col bg-b2b-bg text-b2b-ink shadow-2xl">
-        <header className="flex items-center justify-between gap-3 border-b border-b2b-line bg-b2b-card px-6 py-4">
-          <div>
-            <h2 className="flex items-center gap-2 text-lg font-extrabold">
-              <Megaphone className="size-5" /> {campaign ? t.editTitle : ad.ads.newCampaign}
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-[2px]" onClick={onClose} role="dialog" aria-modal aria-label={title}>
+      <div onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-6xl flex-col bg-b2b-bg text-b2b-ink shadow-2xl">
+        <header className="flex items-start justify-between gap-3 border-b border-b2b-line bg-b2b-card px-4 py-3 sm:px-6 sm:py-4">
+          <div className="min-w-0">
+            <h2 className="flex flex-wrap items-center gap-2 text-base font-extrabold sm:text-lg">
+              <Megaphone className="size-5 shrink-0" /> <span className="truncate">{title}</span>
               {status && <CampaignStatusBadge status={status} />}
             </h2>
-            <p className="text-xs text-b2b-muted">{t.intro}</p>
+            <p className="mt-0.5 text-xs text-b2b-muted">{t.intro}</p>
           </div>
-          <button onClick={onClose} aria-label={t.close} className="opacity-60 hover:opacity-100">
+          <button onClick={onClose} aria-label={t.close} className="-mr-1 grid size-9 shrink-0 place-items-center text-b2b-muted hover:bg-b2b-line/40 hover:text-b2b-ink">
             <X className="size-5" />
           </button>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="grid gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-            <form className="space-y-5" onSubmit={(e) => e.preventDefault()} noValidate>
-              {reReview && (
-                <p className="rounded-none border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800">{t.reReviewNote}</p>
-              )}
+          <div className="mx-auto grid max-w-6xl gap-5 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-6">
+            <form className="min-w-0 space-y-5" onSubmit={(e) => e.preventDefault()} noValidate>
+              {reReview && <Notice tone="amber">{t.reReviewNote}</Notice>}
               {campaign?.status === 'REJECTED' && campaign.review_note && (
-                <p className="rounded-none border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
+                <Notice tone="red">
                   <b>{t.rejected}</b> {campaign.review_note}
-                </p>
+                </Notice>
               )}
               {other.length > 0 && (
-                <ul className="rounded-none border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600">
-                  {other.map((m) => (
-                    <li key={m}>{m}</li>
-                  ))}
-                </ul>
+                <Notice tone="red">
+                  <ul className="list-inside list-disc">
+                    {other.map((m) => (
+                      <li key={m}>{m}</li>
+                    ))}
+                  </ul>
+                </Notice>
               )}
 
-              <FormSection title={t.secAdvertiser}>
+              <FormSection step={1} title={t.secAdvertiser} desc={t.secAdvertiserDesc}>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label={t.advertiser} error={err('advertiser')}>
                     <Input value={d.advertiser} onChange={(e) => set('advertiser', e.target.value)} maxLength={120} placeholder="PT Kopi Tepi Kota" />
@@ -713,8 +779,6 @@ function CampaignEditor({ campaign, onClose }: { campaign: Campaign | null; onCl
                   <Field label={t.name} hint={t.internal} error={err('name')}>
                     <Input value={d.name} onChange={(e) => set('name', e.target.value)} maxLength={120} placeholder={t.namePlaceholder} />
                   </Field>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
                   <Field label={t.category} error={err('category')}>
                     <Select value={d.category} onChange={(e) => set('category', e.target.value)}>
                       {TIERS.map((tier) => (
@@ -739,8 +803,13 @@ function CampaignEditor({ campaign, onClose }: { campaign: Campaign | null; onCl
                     </Field>
                   )}
                 </div>
-                <label className="flex items-start gap-3 rounded-none border border-b2b-line bg-b2b-card p-3 text-sm">
-                  <input type="checkbox" checked={d.is_house} onChange={(e) => set('is_house', e.target.checked)} className="mt-0.5 size-4 accent-violet-600" />
+                <label
+                  className={cx(
+                    'flex cursor-pointer items-start gap-3 border p-3 text-sm transition',
+                    d.is_house ? 'border-violet-500/60 bg-violet-500/[0.06]' : 'border-b2b-line bg-b2b-bg hover:border-b2b-muted',
+                  )}
+                >
+                  <input type="checkbox" checked={d.is_house} onChange={(e) => set('is_house', e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-violet-600" />
                   <span>
                     <b>{t.houseTitle}</b>
                     <span className="block text-xs text-b2b-muted">{t.houseBody}</span>
@@ -748,37 +817,72 @@ function CampaignEditor({ campaign, onClose }: { campaign: Campaign | null; onCl
                 </label>
               </FormSection>
 
-              <FormSection title={t.secCreative}>
-                <div>
-                  <Label>{t.format}</Label>
-                  <Tabs
-                    size="sm"
-                    value={d.type}
-                    onChange={(v) => set('type', v)}
-                    options={[
-                      { value: 'display', label: t.formatDisplay },
-                      { value: 'audio', label: t.formatAudio },
-                    ]}
-                  />
+              <FormSection step={2} title={t.secCreative} desc={t.secCreativeDesc}>
+                <div role="radiogroup" aria-label={t.format} className="grid gap-3 sm:grid-cols-2">
+                  {(
+                    [
+                      { v: 'display', icon: <ImagePlus className="size-5" />, label: t.formatDisplay, desc: t.formatDisplayDesc },
+                      { v: 'audio', icon: <Music className="size-5" />, label: t.formatAudio, desc: t.formatAudioDesc },
+                    ] as const
+                  ).map((o) => {
+                    const on = d.type === o.v;
+                    return (
+                      <button
+                        key={o.v}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        onClick={() => set('type', o.v)}
+                        className={cx(
+                          'flex items-start gap-3 border-2 p-3 text-left transition',
+                          on ? 'border-b2b-ink bg-b2b-card shadow-[3px_3px_0_0_var(--color-b2b-ink,#111)]' : 'border-b2b-line bg-b2b-bg hover:border-b2b-muted',
+                        )}
+                      >
+                        <span className={cx('grid size-9 shrink-0 place-items-center', on ? 'bg-b2b-ink text-b2b-card' : 'bg-b2b-line/50 text-b2b-muted')}>{o.icon}</span>
+                        <span className="min-w-0">
+                          <span className="block text-sm font-bold">{o.label}</span>
+                          <span className="block text-xs text-b2b-muted">{o.desc}</span>
+                        </span>
+                        {on && <Check className="ml-auto size-4 shrink-0" />}
+                      </button>
+                    );
+                  })}
                 </div>
-                <Field label={t.title} error={err('title')}>
-                  <Input value={d.title} onChange={(e) => set('title', e.target.value)} maxLength={90} />
+                <Field label={t.title} hint={`${d.title.length}/90`} error={err('title')}>
+                  <Input value={d.title} onChange={(e) => set('title', e.target.value)} maxLength={90} placeholder={t.titleFallback} />
                 </Field>
-                <Field label={t.body} hint={t.bodyHint} error={err('body')}>
+                <Field label={t.body} hint={`${t.optional} · ${d.body.length}/240`} error={err('body')}>
                   <Textarea value={d.body} onChange={(e) => set('body', e.target.value)} maxLength={240} className="min-h-20" />
                 </Field>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label={t.imageUrl} hint="HTTPS, 16:9" error={err('image_url')}>
-                    <Input value={d.image_url} onChange={(e) => set('image_url', e.target.value)} placeholder="https://…" inputMode="url" />
+                <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_200px]">
+                  <Field label={t.clickUrl} hint={d.is_house ? t.clickHintHouse : 'HTTPS'} error={err('click_url')}>
+                    <Input value={d.click_url} onChange={(e) => set('click_url', e.target.value)} placeholder={d.is_house ? '/premium' : 'https://…'} inputMode="url" />
                   </Field>
+                  <Field label={t.ctaLabel} hint={`${d.cta_label.length}/30`} error={err('cta_label')}>
+                    <Input value={d.cta_label} onChange={(e) => set('cta_label', e.target.value)} maxLength={30} placeholder={t.ctaPlaceholder} />
+                  </Field>
+                </div>
+              </FormSection>
+
+              <FormSection step={3} title={t.secMedia} desc={t.secMediaDesc}>
+                <div className={cx('grid gap-4', d.type === 'audio' && 'md:grid-cols-2')}>
+                  <MediaInput kind="artwork" label={t.imageUrl} hint={t.imageHint} error={err('image_url')} value={d.image_url} onChange={(v) => set('image_url', v)} placeholder="https://…" />
                   {d.type === 'audio' && (
-                    <Field label={t.audioUrl} hint={t.audioHint} error={err('audio_url')}>
-                      <Input value={d.audio_url} onChange={(e) => set('audio_url', e.target.value)} placeholder={t.audioPlaceholder} inputMode="url" />
-                    </Field>
+                    <MediaInput
+                      kind="audio"
+                      label={t.audioUrl}
+                      hint={t.audioHint(s.get<number>('ads.max_audio_seconds'))}
+                      error={err('audio_url')}
+                      value={d.audio_url}
+                      onChange={(v) => set('audio_url', v)}
+                      placeholder={t.audioPlaceholder}
+                    />
                   )}
+                </div>
+                <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_240px]">
                   <div>
                     <Label hint={t.bgColorHint}>{t.bgColor}</Label>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <input
                         type="color"
                         value={/^#[0-9a-f]{6}$/i.test(d.theme_color) ? d.theme_color : '#5B2A6E'}
@@ -787,31 +891,34 @@ function CampaignEditor({ campaign, onClose }: { campaign: Campaign | null; onCl
                           set('use_color', true);
                         }}
                         aria-label={t.pickColor}
-                        className="h-10 w-12 cursor-pointer rounded-none border border-b2b-line bg-b2b-card p-1"
+                        className="h-10 w-12 shrink-0 cursor-pointer rounded-none border border-b2b-line bg-b2b-card p-1"
                       />
-                      <Input value={d.theme_color} onChange={(e) => set('theme_color', e.target.value)} disabled={!d.use_color} className="font-mono" maxLength={7} />
+                      <div className="w-28 shrink-0">
+                        <Input value={d.theme_color} onChange={(e) => set('theme_color', e.target.value)} disabled={!d.use_color} className="font-mono" maxLength={7} aria-label={t.bgColor} />
+                      </div>
                       <label className="flex items-center gap-1.5 text-xs whitespace-nowrap text-b2b-muted">
-                        <input type="checkbox" checked={!d.use_color} onChange={(e) => set('use_color', !e.target.checked)} /> {t.raveGradient}
+                        <input type="checkbox" checked={!d.use_color} onChange={(e) => set('use_color', !e.target.checked)} className="accent-violet-600" /> {t.raveGradient}
                       </label>
                     </div>
                     {err('theme_color') && <span className="mt-1 block text-xs text-red-500">{err('theme_color')}</span>}
                   </div>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-[1fr_180px]">
-                  <Field label={t.clickUrl} hint={d.is_house ? t.clickHintHouse : 'HTTPS'} error={err('click_url')}>
-                    <Input value={d.click_url} onChange={(e) => set('click_url', e.target.value)} placeholder={d.is_house ? '/premium' : 'https://…'} inputMode="url" />
-                  </Field>
-                  <Field label={t.ctaLabel} hint={t.ctaHint} error={err('cta_label')}>
-                    <Input value={d.cta_label} onChange={(e) => set('cta_label', e.target.value)} maxLength={30} placeholder={t.ctaPlaceholder} />
+                  <Field label={t.duration} hint={t.durationHint(maxDur, d.type)} error={err('duration_s')}>
+                    <div className="relative">
+                      <Input type="number" min={3} max={maxDur} value={d.duration_s} onChange={(e) => set('duration_s', e.target.value)} className="pr-12 tabular-nums" />
+                      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-b2b-muted">{t.seconds}</span>
+                    </div>
                   </Field>
                 </div>
-                <Field label={t.duration} hint={t.durationHint(maxDur, d.type)} error={err('duration_s')}>
-                  <Input type="number" min={3} max={maxDur} value={d.duration_s} onChange={(e) => set('duration_s', e.target.value)} className="w-32" />
-                </Field>
               </FormSection>
 
-              <FormSection title={t.secTargeting}>
+              <FormSection step={4} title={t.secTargeting} desc={t.secTargetingDesc}>
                 <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={t.start} hint="WIB" error={err('start_at')}>
+                    <Input type="date" value={d.start_at} onChange={(e) => set('start_at', e.target.value)} />
+                  </Field>
+                  <Field label={t.end} hint={t.optional} error={err('end_at')}>
+                    <Input type="date" value={d.end_at} min={d.start_at || undefined} onChange={(e) => set('end_at', e.target.value)} />
+                  </Field>
                   <Field label={t.genre} hint={t.genreHint} error={err('target_genres')}>
                     <Input value={d.target_genres} onChange={(e) => set('target_genres', e.target.value)} placeholder="indie-pop, folk" list="ad-genres" />
                   </Field>
@@ -823,62 +930,83 @@ function CampaignEditor({ campaign, onClose }: { campaign: Campaign | null; onCl
                       <option key={g} value={g} />
                     ))}
                   </datalist>
-                  <Field label={t.start} hint="WIB" error={err('start_at')}>
-                    <Input type="date" value={d.start_at} onChange={(e) => set('start_at', e.target.value)} />
-                  </Field>
-                  <Field label={t.end} hint={t.optional} error={err('end_at')}>
-                    <Input type="date" value={d.end_at} min={d.start_at || undefined} onChange={(e) => set('end_at', e.target.value)} />
-                  </Field>
                   <Field label={t.maxImpressions} hint={t.optional} error={err('max_impressions')}>
-                    <Input type="number" min={1} value={d.max_impressions} onChange={(e) => set('max_impressions', e.target.value)} placeholder={ad.ads.noEnd} />
+                    <Input type="number" min={1} value={d.max_impressions} onChange={(e) => set('max_impressions', e.target.value)} placeholder={ad.ads.noEnd} className="tabular-nums" />
                   </Field>
                   <Field label={t.priority} hint={t.priorityHint} error={err('priority')}>
-                    <div className="flex items-center gap-3">
+                    <div className="flex h-10 items-center gap-3">
                       <input type="range" min={1} max={10} value={d.priority} onChange={(e) => set('priority', e.target.value)} className="flex-1 accent-violet-600" aria-label={t.priority} />
-                      <span className="w-6 text-right font-bold tabular-nums">{d.priority}</span>
+                      <span className="grid size-8 place-items-center border border-b2b-line bg-b2b-bg text-sm font-bold tabular-nums">{d.priority}</span>
                     </div>
                   </Field>
                 </div>
               </FormSection>
             </form>
 
-            <aside className="lg:sticky lg:top-0 lg:self-start">
-              <p className="mb-2 text-xs font-bold tracking-wide text-b2b-muted uppercase">{t.livePreview}</p>
-              <div className="rounded-none bg-[#181818] p-4">
-                <AdCard ad={preview} elapsedMs={0} />
+            {/* Mobile: pratinjau setelah formulir (periksa sebelum mengajukan); desktop: kolom kanan yang tetap terlihat. */}
+            <aside className="min-w-0 lg:sticky lg:top-6 lg:self-start">
+              <div className="border border-b2b-line bg-b2b-card p-4">
+                <p className="mb-3 flex items-center justify-between text-xs font-bold tracking-wide text-b2b-muted uppercase">
+                  {t.livePreview}
+                  <Badge>{d.type === 'audio' ? t.formatAudio : t.formatDisplay}</Badge>
+                </p>
+                <div className="bg-[#181818] p-3 sm:p-4">
+                  <AdCard ad={preview} elapsedMs={0} />
+                </div>
+                <ul className="mt-3 space-y-1.5 text-xs text-b2b-muted">
+                  {[t.ruleBetween, preview.skippable_after_s == null ? t.ruleNotSkippable : t.ruleSkippable(preview.skippable_after_s), t.ruleLabel(preview.label)].map((r) => (
+                    <li key={r} className="flex gap-2">
+                      <ShieldCheck className="mt-px size-3.5 shrink-0" /> {r}
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <ul className="mt-3 space-y-1 text-xs text-b2b-muted">
-                <li>· {t.ruleBetween}</li>
-                <li>· {preview.skippable_after_s == null ? t.ruleNotSkippable : t.ruleSkippable(preview.skippable_after_s)}</li>
-                <li>· {t.ruleLabel(preview.label)}</li>
-              </ul>
             </aside>
           </div>
         </div>
 
-        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-b2b-line bg-b2b-card px-6 py-3">
-          <Button variant="ghost" size="sm" onClick={onClose} className="text-b2b-muted hover:text-b2b-ink">
-            {ad.common.cancel}
-          </Button>
-          <Button variant="outline-ink" size="sm" loading={busy === 'draft'} disabled={!!busy || !s.loaded} onClick={() => save(false)}>
-            {!campaign || status === 'DRAFT' || status === 'REJECTED' ? t.saveDraft : t.saveChanges}
-          </Button>
-          {canSubmit && (
-            <Button variant="ink" size="sm" icon={<Send className="size-4" />} loading={busy === 'submit'} disabled={!!busy || !s.loaded} onClick={() => save(true)}>
-              {t.saveSubmit}
+        <footer className="flex flex-col gap-2 border-t border-b2b-line bg-b2b-card px-4 py-3 sm:flex-row sm:items-center sm:px-6">
+          <p className={cx('text-xs sm:mr-auto', errorCount ? 'font-semibold text-red-600' : 'hidden text-b2b-muted sm:block')} aria-live="polite">
+            {errorCount ? t.errorsCount(errorCount) : canSubmit ? t.footerHint : t.reReviewShort}
+          </p>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+            <div className="hidden sm:block">
+              <Button variant="ghost" size="sm" onClick={onClose} className="text-b2b-muted hover:text-b2b-ink">
+                {ad.common.cancel}
+              </Button>
+            </div>
+            <Button variant="outline-ink" size="sm" loading={busy === 'draft'} disabled={!!busy || !s.loaded} onClick={() => save(false)} className={cx(!canSubmit && 'col-span-2')}>
+              {!campaign || status === 'DRAFT' || status === 'REJECTED' ? t.saveDraft : t.saveChanges}
             </Button>
-          )}
+            {canSubmit && (
+              <Button variant="ink" size="sm" icon={<Send className="size-4" />} loading={busy === 'submit'} disabled={!!busy || !s.loaded} onClick={() => save(true)}>
+                {t.saveSubmit}
+              </Button>
+            )}
+          </div>
         </footer>
       </div>
     </div>
   );
 }
 
-function FormSection({ title, children }: { title: string; children: ReactNode }) {
+function Notice({ tone, children }: { tone: 'amber' | 'red'; children: ReactNode }) {
   return (
-    <section className="space-y-4 rounded-none border border-b2b-line bg-b2b-card p-5">
-      <h3 className="text-sm font-extrabold tracking-wide text-b2b-ink uppercase">{title}</h3>
-      {children}
+    <div className={cx('border-l-4 px-3 py-2 text-sm', tone === 'amber' ? 'border-amber-500 bg-amber-500/10 text-amber-800' : 'border-red-500 bg-red-500/10 text-red-600')}>{children}</div>
+  );
+}
+
+function FormSection({ step, title, desc, children }: { step: number; title: string; desc?: string; children: ReactNode }) {
+  return (
+    <section className="border border-b2b-line bg-b2b-card">
+      <header className="flex items-start gap-3 border-b border-b2b-line px-4 py-3 sm:px-5">
+        <span className="grid size-6 shrink-0 place-items-center bg-b2b-ink text-xs font-extrabold text-b2b-card tabular-nums">{step}</span>
+        <div className="min-w-0">
+          <h3 className="text-sm font-extrabold tracking-wide text-b2b-ink uppercase">{title}</h3>
+          {desc && <p className="text-xs text-b2b-muted">{desc}</p>}
+        </div>
+      </header>
+      <div className="space-y-4 p-4 sm:p-5">{children}</div>
     </section>
   );
 }

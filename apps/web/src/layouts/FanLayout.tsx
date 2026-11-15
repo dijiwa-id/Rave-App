@@ -51,6 +51,7 @@ function UserMenu() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const ticketing = useModule('ticketing');
+  const podcasts = useModule('podcasts');
   const ref = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
   const d = useDict('common');
@@ -129,6 +130,11 @@ function UserMenu() {
               <Link role="menuitem" className={MENU_ITEM} to="/promotor">
                 {promotor ? 'Promotor Hub' : d.layout.registerPromotor}
               </Link>
+              {podcasts && (
+                <Link role="menuitem" className={MENU_ITEM} to="/podcaster">
+                  {user?.orgs.some((o) => o.type === 'CREATOR') ? 'Podcaster Studio' : d.layout.registerPodcaster}
+                </Link>
+              )}
               {hasRole(user, 'admin') && user?.roles.includes('admin') && (
                 <Link role="menuitem" className={MENU_ITEM} to={isSuperAdmin(user) ? '/admin/platform' : '/admin'}>
                   {isSuperAdmin(user) ? 'Super Admin' : 'Back Office'}

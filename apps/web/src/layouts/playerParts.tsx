@@ -1,8 +1,9 @@
 import { useRef, useState, type ComponentProps } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Heart, Pause, Play } from 'lucide-react';
+import { Heart, Lock, Pause, Play } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { api, fmt } from '@/lib/api';
+import { useCanSeek } from '@/lib/platform';
 import { usePlayer } from '@/stores/player';
 import { currentAd, useAds } from '@/stores/ads';
 import { useAuth } from '@/stores/auth';
@@ -164,6 +165,32 @@ export function Progress({ locked, big }: { locked: boolean; big?: boolean }) {
   const durationMs = usePlayer((s) => s.durationMs);
   const seek = usePlayer((s) => s.seek);
   const d = useDict('common');
+  const free = !useCanSeek();
+  if (free && !locked) {
+    // Gratis: progres hanya tampilan (tanpa geser) + penanda Premium.
+    const pct = durationMs > 0 ? Math.min(100, (positionMs / durationMs) * 100) : 0;
+    return (
+      <div className="flex w-full items-center gap-2 text-[11px] text-rave-muted tabular-nums" title={d.player.seekPremium}>
+        <span className="w-10 text-right">{fmt.duration(positionMs)}</span>
+        <div
+          role="progressbar"
+          aria-label={d.player.position}
+          aria-valuemin={0}
+          aria-valuemax={durationMs}
+          aria-valuenow={positionMs}
+          aria-valuetext={d.player.positionOf(fmt.duration(positionMs), fmt.duration(durationMs))}
+          className={cx('relative flex-1 bg-white/15', big ? 'h-1.5' : 'h-1')}
+          onClick={() => seek(positionMs)} // ditolak store → toast "khusus Premium"
+        >
+          <div className="absolute inset-y-0 left-0 bg-rave-mustard" style={{ width: `${pct}%` }} />
+        </div>
+        <span className="flex w-10 items-center gap-1">
+          {fmt.duration(durationMs)}
+          <Lock className="size-3 shrink-0 opacity-60" aria-hidden />
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="flex w-full items-center gap-2 text-[11px] text-rave-muted tabular-nums" title={locked ? d.player.adLock : undefined}>
       <span className="w-10 text-right">{fmt.duration(positionMs)}</span>

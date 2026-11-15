@@ -18,6 +18,7 @@ import {
   requireService,
   settings,
   unauthorized,
+  unprocessable,
   uuidv7,
   z,
   type AuthUser,
@@ -260,7 +261,9 @@ export async function routes(app: FastifyInstance, ctx: ServiceContext, mgr: Liv
 
   app.post('/v1/live/streams/:id/chat', { preHandler: requireAuth }, async (req, reply) => {
     const r = await load((req.params as { id: string }).id);
-    const b = z.object({ body: z.string().trim().min(1, 'Pesan kosong').max(300) }).parse(req.body);
+    const b = z.object({ body: z.string().trim().min(1, 'Pesan kosong').max(1000) }).parse(req.body);
+    const maxChars = settings.num('live.chat_max_chars');
+    if (b.body.length > maxChars) throw badRequest(`Pesan maksimal ${maxChars} karakter`);
     if (!settings.bool('live.chat_enabled')) throw forbidden('Live chat sedang dimatikan');
     if (r.status === 'ENDED') throw forbidden('Siaran sudah berakhir');
     if ((await access(r, req.user)) === 'ticket_required') throw forbidden('Chat khusus pemegang tiket');
@@ -335,7 +338,13 @@ export async function routes(app: FastifyInstance, ctx: ServiceContext, mgr: Liv
 
     s.post('/v1/live/studio/streams', async (req, reply) => {
       const b = createBody.parse(req.body);
-      assertOrg(req.user, b.org_id, ['OWNER', 'ADMIN', 'MEMBER']);
+      const m = assertOrg(req.user, b.org_id, ['OWNER', 'ADMIN', 'MEMBER']);
+      // Kebijakan Super Admin → Pengaturan → Live Streaming.
+      if (!settings.get<string[]>('live.allowed_org_types').includes(m.type)) throw forbidden('Jenis akun ini belum diizinkan membuat siaran');
+      if (b.access === 'TICKET' && !settings.bool('live.ticketed_enabled')) throw forbidden('Siaran bertiket sedang dinonaktifkan admin');
+      const open = (await db.one(`SELECT count(*)::int AS n FROM streams WHERE org_id=$1 AND status <> 'ENDED' AND NOT is_demo`, [b.org_id]))!.n;
+      const maxOpen = settings.num('live.max_open_per_org');
+      if (open >= maxOpen) throw unprocessable(`Batas ${maxOpen} siaran terbuka per akun tercapai — akhiri atau hapus siaran lama`);
       const { org, artist, event } = await enrich(req.user!, b);
       const key = newStreamKey();
       const id = uuidv7();
@@ -363,6 +372,7 @@ export async function routes(app: FastifyInstance, ctx: ServiceContext, mgr: Liv
       if (r.status === 'ENDED') throw conflict('Siaran sudah berakhir');
       const b = createBody.omit({ org_id: true, artist_id: true }).partial().parse(req.body ?? {});
       const accessNext = b.access ?? r.access;
+      if (accessNext === 'TICKET' && r.access !== 'TICKET' && !settings.bool('live.ticketed_enabled')) throw forbidden('Siaran bertiket sedang dinonaktifkan admin');
       const eventId = b.event_id === undefined ? r.event_id : b.event_id;
       const { event } = await enrich(req.user!, { org_id: r.org_id, access: accessNext, event_id: eventId, artist_id: r.artist_id });
       await db.query(

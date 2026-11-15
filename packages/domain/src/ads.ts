@@ -46,7 +46,7 @@ export const AD_FIXED_RULES = [
   'Penargetan kota/demografi hanya untuk pengguna yang memberi persetujuan iklan (UU PDP); tanpa persetujuan hanya kontekstual (genre).',
   'Kategori terlarang (judi, dewasa, narkotika, senjata, SARA, pinjol tanpa izin) selalu ditolak.',
   'Kategori terbatas wajib mencantumkan nomor izin; setiap kampanye wajib ditinjau admin sebelum tayang.',
-  'Pengguna anonim (pratinjau 30 detik) dan konten Premium tidak disisipi iklan.',
+  'Konten Premium tidak disisipi iklan. Pengguna anonim (pratinjau 30 detik) hanya menerima satu iklan setelah pratinjau berakhir, bila diaktifkan.',
 ] as const;
 
 export interface AdPolicy {
@@ -57,6 +57,8 @@ export interface AdPolicy {
   maxAdsPerHour: number;
   dailyGraceStreams: number;
   podcastPreroll: boolean;
+  /** Pengguna anonim: satu iklan setelah pratinjau 30 detik berakhir (`ads.anonymous_enabled`). */
+  anonymousEnabled?: boolean;
 }
 
 export interface ListenerAdState {
@@ -119,7 +121,14 @@ export function evaluateAdBreak(policy: AdPolicy, s: ListenerAdState): AdBreakDe
 
   let r: AdBreakOutcome | null;
   if ((r = check('Iklan aktif', policy.enabled, policy.enabled ? 'ads.enabled = aktif' : 'ads.enabled = mati', 'disabled'))) return stop(r);
-  if ((r = check('Pengguna masuk', !s.anonymous, s.anonymous ? 'Pratinjau anonim tidak disisipi iklan' : 'Pengguna terdaftar', 'anonymous'))) return stop(r);
+  if (s.anonymous) {
+    // Anonim tidak punya riwayat (masa bebas, jeda, batas per jam) → cukup satu iklan setiap pratinjau 30 dtk berakhir.
+    if ((r = check('Iklan untuk anonim', !!policy.anonymousEnabled, policy.anonymousEnabled ? 'ads.anonymous_enabled aktif' : 'Pratinjau anonim tidak disisipi iklan', 'anonymous'))) return stop(r);
+    if ((r = check('Konten berikutnya bukan Premium', !s.premiumContent, s.premiumContent ? 'Konten Premium tidak disisipi iklan' : 'Konten reguler', 'premium_content'))) return stop(r);
+    trace.push({ rule: 'Slot jeda', pass: true, detail: '1 iklan setelah pratinjau anonim' });
+    return { outcome: 'serve', slots: 1, trace };
+  }
+  trace.push({ rule: 'Pengguna masuk', pass: true, detail: 'Pengguna terdaftar' });
   if ((r = check('Tier Gratis', !s.premium, s.premium ? 'Premium selalu bebas iklan' : 'Pengguna Gratis', 'premium'))) return stop(r);
   if ((r = check('Konten berikutnya bukan Premium', !s.premiumContent, s.premiumContent ? 'Konten Premium tidak disisipi iklan' : 'Konten reguler', 'premium_content'))) return stop(r);
   if (s.placement === 'podcast_preroll')

@@ -2,7 +2,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { forbidden, isAdmin, isPublicMediaFile, managedArtistIds, notFound, reqLocale, verifyMediaSig, z, type AuthUser, type ServiceContext } from '@rave/service-kit';
-import { ARTIST_SUMMARY_COLS, EPISODE_COLS, RELEASE_SUMMARY_SELECT, SHOW_COLS, TRACK_SELECT, isUuid, releaseFull } from './queries.js';
+import { ARTIST_SUMMARY_COLS, EPISODE_COLS, EPISODE_VISIBLE, RELEASE_SUMMARY_SELECT, SHOW_COLS, SHOW_VISIBLE, TRACK_SELECT, isUuid, releaseFull } from './queries.js';
 import { UPLOAD_DIR } from './storage.js';
 import { demoArtFile } from './demo-art.js';
 import { GENRES } from '@rave/domain';
@@ -54,10 +54,10 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
       city
         ? db.query(`SELECT id, slug, name, image_url FROM artists WHERE lower(city) = lower($1) ORDER BY monthly_listeners DESC LIMIT 10`, [city])
         : Promise.resolve([]),
-      db.query(`SELECT s.id, s.title, s.publisher, s.cover_url FROM shows s ORDER BY s.kind, s.created_at LIMIT 10`),
+      db.query(`SELECT s.id, s.title, s.publisher, s.cover_url FROM shows s WHERE ${SHOW_VISIBLE} ORDER BY s.kind, s.created_at LIMIT 10`),
       db.query(
         `SELECT e.id, e.title, coalesce(e.cover_url, s.cover_url) AS cover_url, s.title AS show_title
-         FROM episodes e JOIN shows s ON s.id = e.show_id ORDER BY e.published_at DESC LIMIT 10`,
+         FROM episodes e JOIN shows s ON s.id = e.show_id WHERE ${EPISODE_VISIBLE} ORDER BY e.published_at DESC LIMIT 10`,
       ),
     ]);
     const quick = [
@@ -138,8 +138,8 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
       want('release')
         ? db.query(`${RELEASE_SUMMARY_SELECT} WHERE ${LIVE} AND (${match('r.title')} OR ${match('a.name')}) ORDER BY greatest(${score('r.title')}, ${score('a.name')}) DESC LIMIT 10`, [term])
         : [],
-      want('show') ? db.query(`SELECT ${SHOW_COLS} FROM shows s WHERE ${match('s.title')} OR ${match('s.publisher')} ORDER BY ${score('s.title')} DESC LIMIT 10`, [term]) : [],
-      want('episode') ? db.query(`SELECT ${EPISODE_COLS} FROM episodes e WHERE ${match('e.title')} ORDER BY ${score('e.title')} DESC LIMIT 10`, [term]) : [],
+      want('show') ? db.query(`SELECT ${SHOW_COLS} FROM shows s WHERE ${SHOW_VISIBLE} AND (${match('s.title')} OR ${match('s.publisher')}) ORDER BY ${score('s.title')} DESC LIMIT 10`, [term]) : [],
+      want('episode') ? db.query(`SELECT ${EPISODE_COLS} FROM episodes e WHERE ${EPISODE_VISIBLE} AND ${match('e.title')} ORDER BY ${score('e.title')} DESC LIMIT 10`, [term]) : [],
     ]);
     return { artists, tracks, releases, shows, episodes };
   });
@@ -223,7 +223,7 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
   app.get('/v1/catalog/shows', async (req) => {
     const q = req.query as { kind?: string; category?: string };
     const data = await db.query(
-      `SELECT ${SHOW_COLS} FROM shows s WHERE ($1::text IS NULL OR s.kind = $1) AND ($2::text IS NULL OR s.category = $2) ORDER BY s.created_at`,
+      `SELECT ${SHOW_COLS} FROM shows s WHERE ${SHOW_VISIBLE} AND ($1::text IS NULL OR s.kind = $1) AND ($2::text IS NULL OR s.category = $2) ORDER BY s.created_at`,
       [q.kind ?? null, q.category ?? null],
     );
     return { data };
@@ -232,10 +232,10 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
   app.get('/v1/catalog/shows/:id', async (req) => {
     const { id } = req.params as { id: string };
     if (!isUuid(id)) throw notFound('Show');
-    const s = await db.one(`SELECT ${SHOW_COLS} FROM shows s WHERE s.id = $1`, [id]);
+    const s = await db.one(`SELECT ${SHOW_COLS} FROM shows s WHERE s.id = $1 AND ${SHOW_VISIBLE}`, [id]);
     if (!s) throw notFound('Show');
     s.episodes = await db.query(
-      `SELECT ${EPISODE_COLS} FROM episodes e WHERE e.show_id = $1
+      `SELECT ${EPISODE_COLS} FROM episodes e WHERE e.show_id = $1 AND e.status = 'PUBLISHED'
        ORDER BY ${s.kind === 'FICTION' ? 'e.season NULLS FIRST, e.episode_number' : 'e.published_at DESC'}`,
       [id],
     );
@@ -245,7 +245,7 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
   app.get('/v1/catalog/episodes/:id', async (req) => {
     const { id } = req.params as { id: string };
     if (!isUuid(id)) throw notFound('Episode');
-    const e = await db.one(`SELECT ${EPISODE_COLS} FROM episodes e WHERE e.id = $1`, [id]);
+    const e = await db.one(`SELECT ${EPISODE_COLS} FROM episodes e WHERE e.id = $1 AND ${EPISODE_VISIBLE}`, [id]);
     if (!e) throw notFound('Episode');
     e.show = await db.one(`SELECT ${SHOW_COLS} FROM shows s WHERE s.id = $1`, [e.show_id]);
     return e;

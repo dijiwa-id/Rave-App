@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { AD_CATEGORIES, AD_FIXED_RULES, AD_OUTCOME_LABEL, categoryViolation, evaluateAdBreak, type AdBreakOutcome } from '@rave/domain/ads';
-import { audit, badRequest, conflict, forbidden, hasPermission, HttpError, isSuperAdmin, notFound, requirePermission, requireRole, settings, uuidv7, z, type Db, type ServiceContext } from '@rave/service-kit';
+import { audit, badRequest, MEDIA_PREFIX, conflict, forbidden, hasPermission, HttpError, isSuperAdmin, notFound, requirePermission, requireRole, settings, uuidv7, z, type Db, type ServiceContext } from '@rave/service-kit';
 import { currentPolicy, eligibility, isUuid } from './serving.js';
 
 const STATUSES = ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'PAUSED', 'ENDED'] as const;
@@ -34,6 +34,9 @@ const campaignBody = z.object({
 });
 type CampaignInput = z.infer<typeof campaignBody>;
 
+/** Path berkas bucket uploads catalog (`/v1/catalog/media/<uuid>.<ext>`), tanpa query/traversal. */
+export const isUploadedMedia = (u: string | null | undefined) => !!u && u.startsWith(MEDIA_PREFIX) && /^[\w-]+(\.ad)?\.[a-z0-9]{2,5}$/i.test(u.slice(MEDIA_PREFIX.length));
+
 /** Validasi terhadap kebijakan penayangan (kategori, durasi, aset, URL, masa tayang). */
 function policyErrors(c: CampaignInput): { path: string; message: string }[] {
   const e: { path: string; message: string }[] = [];
@@ -47,7 +50,9 @@ function policyErrors(c: CampaignInput): { path: string; message: string }[] {
   for (const k of ['image_url', 'audio_url', 'click_url'] as const) {
     const u = c[k];
     // Tautan internal ("/premium", "/app/live") diizinkan untuk promosi RAVE; tautan luar wajib HTTPS.
-    if (u && !u.startsWith('https://') && !(c.is_house && u.startsWith('/'))) e.push({ path: k, message: 'Wajib URL HTTPS' });
+    // Berkas yang diunggah dari komputer (bucket uploads catalog) diizinkan untuk gambar & audio semua kampanye.
+    const uploaded = k !== 'click_url' && isUploadedMedia(u);
+    if (u && !uploaded && !u.startsWith('https://') && !(c.is_house && u.startsWith('/'))) e.push({ path: k, message: 'Wajib URL HTTPS atau berkas yang diunggah' });
   }
   if (c.end_at && c.start_at && new Date(c.end_at) <= new Date(c.start_at)) e.push({ path: 'end_at', message: 'Harus setelah tanggal mulai' });
   return e;

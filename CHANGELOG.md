@@ -6,6 +6,37 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 ## [Unreleased]
 
 ### Fitur
+- **Tier Gratis: tidak bisa menggeser lagu** (pengaturan publik baru `streaming.free_seek_enabled`, default mati): di web,
+  desktop & mobile, slider progres hanya tampilan (ikon kunci + toast "Geser lagu khusus Premium"); pintasan keyboard,
+  media session/layar kunci, dan ketuk lirik juga diabaikan. "Sebelumnya" tidak mengulang lagu dari awal — langsung ke
+  lagu sebelumnya. Pemulihan stream internal tetap berjalan.
+- **Iklan setelah setiap lagu untuk tier Gratis**: default kebijakan iklan diubah — masa bebas harian 0, jeda waktu 0
+  menit (min. kini 0), 1 lagu antar-jeda, 1 iklan per jeda, batas 20 iklan/jam (maks 30). Tetap bisa diatur Super Admin.
+- **Iklan untuk pengguna anonim** (`ads.anonymous_enabled`, default aktif; migrasi ads `003_anonymous_impressions`):
+  setelah pratinjau 30 detik berakhir, pengguna yang belum masuk menerima satu iklan (penargetan kontekstual saja) lalu
+  lanjut ke pratinjau berikutnya; impresi anonim dilaporkan tanpa login.
+- **Super Admin → Iklan: unggah audio & gambar iklan dari komputer** (purpose upload baru `ad`, migrasi catalog
+  `016_ad_upload`, izin `ads.manage`): audio MP3/AAC/OGG/Opus ≤ 8 MB dan ≤ `ads.max_audio_seconds`, diputar apa adanya
+  (tanpa transcoding) dan disajikan publik (`<id>.ad.<ext>`, bukan master berhak cipta); gambar JPG/PNG ≥ 300 px
+  (saran 16:9). Kampanye kini menerima berkas unggahan selain tautan HTTPS.
+- **Formulir kampanye iklan dirombak**: 4 langkah bernomor (Pengiklan · Format & pesan · Media · Jadwal & target), kartu
+  pilihan format, penghitung karakter, ubin media dengan pratinjau gambar/pemutar audio, footer tetap dengan ringkasan
+  galat; responsif (mobile: satu kolom, pratinjau di bawah, tombol selebar layar).
+- **Back Office → Konten → Playlist Editorial** (`/admin/editorial`, izin `library.curate`): daftar draf/tayang dengan
+  urutan beranda (naik/turun), buat playlist, ubah judul/deskripsi/tag, unggah sampul atau kembali ke sampul otomatis,
+  tayangkan/jadikan draf, hapus, tambah lagu sekaligus dari pencarian katalog, pindah & hapus lagu.
+- **Podcaster** (`services/catalog/src/podcasts.ts`, migrasi catalog `015_podcaster`): kreator membuat acara podcast/audio
+  fiksi & episode dari **Artist Studio → Podcast** atau **Podcaster Studio** (`/podcaster`, akun Kreator baru tanpa profil
+  artis). Episode bisa **unggah audio** (purpose `podcast`: batas tersendiri, tanpa standar master lagu & tanpa transcoding)
+  atau **embed iframe dari platform lain** (Spotify, YouTube, Apple Podcasts, SoundCloud, Spotify for Creators) — hanya URL
+  embed kanonik yang disimpan, dirender sebagai iframe ber-sandbox, tidak dihitung stream. Draf → tinjauan → tayang;
+  katalog publik & pemutar hanya melihat episode tayang dari acara aktif.
+- **Back Office → Konten → Moderasi Podcast** (`/admin/podcasts`, izin baru `podcast.moderate` untuk Content QC &
+  Editorial): antrean tinjauan dengan pratinjau audio/embed, setujui/tolak beralasan, sembunyikan episode/acara.
+- **Pengaturan baru**: grup **Podcaster** (penerbitan kreator, jenis akun, tinjauan wajib, audio fiksi, batas acara &
+  durasi, episode Premium, embed + daftar platform), grup **Upload** (kunci upload `storage.*` dipindah ke sini + audio
+  episode maks, kuota per akun, batas harian, resolusi artwork/sampul minimum), dan **Live Streaming** (jenis akun yang
+  boleh siaran, siaran terbuka per akun, siaran bertiket, panjang chat) — semuanya ditegakkan di backend.
 - **Editor playlist editorial (API Back Office)** (`services/library/src/editorial.ts`, izin baru `library.curate`
   untuk Super Admin & peran Editorial): `/v1/admin/library/playlists` — daftar (termasuk draf), buat (default draf),
   ubah judul/deskripsi/sampul/tag, tayang/draf, hapus, urutan tampil di beranda, tambah lagu sekaligus (duplikat

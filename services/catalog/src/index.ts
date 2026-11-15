@@ -7,6 +7,7 @@ import { reportRoutes } from './reports.js';
 import { seed } from './seed.js';
 import { syncGenres } from './genres-sync.js';
 import { studioRoutes } from './studio.js';
+import { podcastRoutes } from './podcasts.js';
 import { transcodeJob } from './audio.js';
 import { spectrumJob, spectrumRoutes } from './spectrum.js';
 
@@ -16,6 +17,7 @@ async function routes(app: FastifyInstance, ctx: ServiceContext) {
   await spectrumRoutes(app, ctx);
   await studioRoutes(app, ctx);
   await adminRoutes(app, ctx);
+  await podcastRoutes(app, ctx);
   await reportRoutes(app, ctx);
 }
 

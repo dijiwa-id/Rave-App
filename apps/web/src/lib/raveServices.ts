@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { AudioWaveform, BadgeCheck, CalendarCheck, Coins, Crown, Download, FileSignature, Headphones, Megaphone, Radio, Ticket, Wallet } from 'lucide-react';
+import { AudioWaveform, BadgeCheck, CalendarCheck, Coins, Crown, Download, FileSignature, Headphones, Megaphone, Mic, Radio, Ticket, UploadCloud, Wallet } from 'lucide-react';
 import type { SettingGroup } from '@rave/domain/settings';
 
 /**
@@ -33,6 +33,8 @@ export const RAVE_SERVICES: RaveService[] = [
   // Musik & streaming
   { id: 'streaming', report: true, type: 'music', icon: Headphones, status: 'ready', groups: ['streaming'] },
   { id: 'transcoding', report: true, type: 'music', icon: AudioWaveform, status: 'ready', groups: ['transcoding'] },
+  { id: 'upload', type: 'music', icon: UploadCloud, status: 'ready', groups: ['upload'] },
+  { id: 'podcast', type: 'music', icon: Mic, status: 'ready', groups: ['podcast'] },
   { id: 'royalty', report: true, type: 'music', icon: Coins, status: 'soon', groups: ['royalty'] },
   { id: 'downloads', type: 'music', icon: Download, status: 'soon', groups: ['subscription'], keys: isDownload },
   // Event & live

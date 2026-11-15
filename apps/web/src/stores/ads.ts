@@ -22,6 +22,8 @@ interface ActiveBreak {
 interface AdsState {
   /** `ads.enabled` dari konfigurasi publik — disinkronkan oleh AdBreakOverlay. */
   enabled: boolean;
+  /** `ads.anonymous_enabled`: pengguna anonim mendapat satu iklan setelah pratinjau 30 dtk berakhir. */
+  anonymousEnabled: boolean;
   /** true selama permintaan jeda berjalan atau iklan diputar → kontrol pemutar dikunci. */
   busy: boolean;
   active: ActiveBreak | null;
@@ -56,6 +58,7 @@ function stopMedia() {
 
 export const useAds = create<AdsState>((set, get) => ({
   enabled: true,
+  anonymousEnabled: true,
   busy: false,
   active: null,
   volume: 0.8,
@@ -163,11 +166,19 @@ function endBreak() {
   done?.();
 }
 
-/** Pendengar yang mungkin menerima iklan: login, bukan Premium, iklan aktif secara global. */
+/** Pendengar yang mungkin menerima iklan: iklan aktif global dan (login bukan Premium, atau anonim bila iklan anonim aktif). */
 function eligible() {
   const { accessToken, user } = useAuth.getState();
-  return !!accessToken && !!user && !user.premium && useAds.getState().enabled;
+  const a = useAds.getState();
+  if (!a.enabled) return false;
+  if (!accessToken || !user) return a.anonymousEnabled;
+  return !user.premium;
 }
+/** Anonim + iklan anonim aktif → pratinjau yang berakhir diikuti iklan lalu pratinjau berikutnya (stores/player.ts). */
+export const anonymousAdsOn = () => {
+  const a = useAds.getState();
+  return a.enabled && a.anonymousEnabled && !useAuth.getState().accessToken;
+};
 
 /**
  * Minta jeda iklan sebelum `next` diputar; resolve setelah semua iklan selesai (atau segera bila tidak ada).

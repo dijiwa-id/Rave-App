@@ -13,7 +13,7 @@ import { LyricScroller } from '@/components/fan/LyricScroller';
 import { Spectrum, usePlayerView } from '@/layouts/playerParts';
 import type { Lyrics as LyricsT } from './Track';
 import { useDict } from '@/lib/i18n';
-import { useBranding } from '@/lib/platform';
+import { useBranding, useCanSeek } from '@/lib/platform';
 
 /**
  * Lirik tersinkron layar penuh (REQ-STR-03).
@@ -268,6 +268,7 @@ function KaraokeControls() {
   const pos = usePlayer((s) => Math.floor(s.positionMs / 1000) * 1000);
   const dur = usePlayer((s) => s.durationMs);
   const pct = dur > 0 ? clamp01(pos / dur) * 100 : 0;
+  const seekable = useCanSeek();
   const btn = 'grid size-10 place-items-center text-white/80 transition hover:text-rave-mustard';
   return (
     <div className="mx-auto mt-4 flex max-w-3xl items-center gap-3 sm:gap-4">
@@ -292,11 +293,11 @@ function KaraokeControls() {
           const r = e.currentTarget.getBoundingClientRect();
           if (dur > 0) seek(clamp01((e.clientX - r.left) / r.width) * dur);
         }}
-        className="group relative h-6 flex-1"
+        className={cx('group relative h-6 flex-1', !seekable && 'cursor-default')}
       >
         <span className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 bg-white/15" />
         <span className="absolute top-1/2 left-0 h-1 -translate-y-1/2 bg-rave-mustard transition-[width] duration-500 ease-linear" style={{ width: `${pct}%` }} />
-        <span className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 bg-white opacity-0 transition group-hover:opacity-100" style={{ left: `${pct}%` }} />
+        <span className={cx('absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 bg-white opacity-0 transition', seekable && 'group-hover:opacity-100')} style={{ left: `${pct}%` }} />
       </button>
       <span className="w-10 font-label text-[11px] text-white/60 tabular-nums">{fmt.duration(dur)}</span>
     </div>

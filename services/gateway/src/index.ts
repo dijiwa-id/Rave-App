@@ -36,6 +36,7 @@ export const ROUTES: [prefix: string, upstream: Upstream][] = [
   ['/v1/studio', 'catalog'],
   ['/v1/admin/qc', 'catalog'],
   ['/v1/admin/artwork', 'catalog'],
+  ['/v1/admin/podcasts', 'catalog'],
   ['/v1/admin/catalog', 'catalog'],
   // Laporan sub-layanan (Super Admin → Pengaturan Layanan) — dilayani service pemilik datanya.
   ['/v1/admin/reports/streaming', 'playback'],
@@ -81,6 +82,7 @@ const MODULE_PREFIXES: [prefix: string, key: string, label: string][] = [
   ['/v1/live', 'modules.live', 'Live streaming'],
   ['/v1/catalog/shows', 'modules.podcasts', 'Podcast & cerita'],
   ['/v1/catalog/episodes', 'modules.podcasts', 'Podcast & cerita'],
+  ['/v1/studio/podcasts', 'modules.podcasts', 'Podcast & cerita'],
 ];
 /** Tetap dilayani saat mode pemeliharaan: login, back office, konfigurasi, dan webhook PG (dana masuk tak boleh hilang). */
 const MAINTENANCE_BYPASS = ['/v1/auth', '/v1/admin', '/v1/platform', '/v1/webhooks'];

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { audit, badRequest, config, conflict, isSuperAdmin, forbidden, notFound, publish, requirePermission, settings, unauthorized, wakeJob, z, type Client, type Job, type ServiceContext } from '@rave/service-kit';
-import { isUuid, releaseFull, releasesFull } from './queries.js';
+import { EPISODE_VISIBLE, isUuid, releaseFull, releasesFull } from './queries.js';
 import { open as fsOpen } from 'node:fs/promises';
 import { join } from 'node:path';
 import { imageSize, UPLOAD_DIR } from './storage.js';
@@ -467,7 +467,11 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
     s.get('/internal/episodes/:id/media', async (req) => {
       const { id } = req.params as { id: string };
       if (!isUuid(id)) throw notFound('Episode');
-      const e = await db.one(`SELECT id, is_premium, audio_url, duration_ms, show_id, title FROM episodes WHERE id = $1`, [id]);
+      // Hanya episode tayang & berupa unggahan (embed diputar di pemutar platform asal, bukan pemutar RAVE).
+      const e = await db.one(
+        `SELECT id, is_premium, CASE WHEN source = 'upload' THEN audio_url END AS audio_url, duration_ms, show_id, title FROM episodes e WHERE e.id = $1 AND ${EPISODE_VISIBLE}`,
+        [id],
+      );
       if (!e) throw notFound('Episode');
       return e;
     });

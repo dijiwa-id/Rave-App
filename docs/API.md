@@ -175,6 +175,59 @@ Super Admin selalu boleh; default juga peran **Editorial** (Peran & Akses → Ko
 EditorialPlaylist = { id, title, description, cover_url, has_custom_cover, tags, sort_order, published, track_count, created_at, updated_at }
 ```
 
+### Podcaster — acara & episode kreator (Artist Studio / Podcaster Studio)
+
+Org yang boleh: `podcast.creator_org_types` (default `ARTIST`, `CREATOR`; Kreator = akun Podcaster tanpa profil artis,
+dibuat lewat `POST /v1/orgs { type: "CREATOR" }`). Fitur dimatikan → 403; modul `modules.podcasts` mati → 503.
+Katalog publik (`/v1/catalog/shows|episodes`, beranda, pencarian) hanya menampilkan episode `PUBLISHED` dari acara
+`ACTIVE` yang punya ≥ 1 episode tayang. Episode embed tidak bisa diputar lewat `/v1/playback/sessions` (404) dan
+tidak dihitung stream/royalti.
+
+| Method & Path | Body / Query | Respons |
+|---|---|---|
+| `GET /v1/studio/podcasts` | `?org_id=` | `{ data: StudioShow[], policy: PodcastPolicy, eligible }` |
+| `POST /v1/studio/podcasts` | `{ org_id, kind: "PODCAST"\|"FICTION", title, publisher, category, description?, cover_url?, explicit?, content_warning? }` | `201 StudioShow` (batas `podcast.max_shows_per_org` → 422) |
+| `GET /v1/studio/podcasts/:id` | | `StudioShow & { episodes: StudioEpisode[], policy }` (semua status) |
+| `PATCH /v1/studio/podcasts/:id` · `DELETE …/:id` | sebagian field POST · (OWNER/ADMIN) | `StudioShow` · `{ ok }` |
+| `POST /v1/studio/podcasts/:id/episodes` | `{ title, description?, source: "upload"\|"embed", audio_url? (upload purpose podcast milik user), embed_code? (kode iframe / URL), is_premium?, season?, episode_number?, publish? }` | `201 StudioEpisode` — `publish:true` → `PENDING` bila `podcast.require_review`, selain itu `PUBLISHED`; tanpa → `DRAFT` |
+| `PATCH /v1/studio/podcasts/:id/episodes/:episodeId` | sebagian field + `publish?: boolean` | `StudioEpisode` — ubah isi episode tayang/ditolak saat tinjauan wajib → kembali `PENDING` |
+| `DELETE /v1/studio/podcasts/:id/episodes/:episodeId` | | `{ ok }` |
+| `POST /v1/studio/podcasts/embed/preview` | `{ embed_code }` | `{ provider, src, kind: "audio"\|"video", height }` (422 bila tidak valid) |
+
+Embed (`packages/domain/src/podcast.ts`): platform `spotify`, `youtube` (→ youtube-nocookie), `apple`, `soundcloud`,
+`anchor` (Spotify for Creators), dibatasi `podcast.embed_providers`. Server hanya mengambil `src` iframe/URL, memvalidasi
+host + pola path, lalu menyimpan URL embed kanonik — HTML kreator tidak pernah disimpan atau dirender. Klien merender
+iframe ber-`sandbox`. Episode embed tidak bisa Premium.
+
+Upload audio episode: `POST /v1/studio/uploads { kind: "audio", purpose: "podcast" }` — batas `upload.podcast_max_mb`,
+durasi ≤ `podcast.max_episode_minutes`, tanpa standar master lagu (MP3/22 kHz diterima) dan tanpa transcoding (diputar
+dari berkas asli). Sampul acara: `{ kind: "artwork", purpose: "podcast" }` ≥ `upload.cover_min_px`.
+
+```ts
+StudioShow = { id, org_id, kind, title, publisher, description, category, cover_url, explicit, content_warning, status: "ACTIVE"|"HIDDEN", hidden_reason, episode_count, published_count, pending_count, created_at, updated_at }
+StudioEpisode = { id, show_id, title, description, status: "DRAFT"|"PENDING"|"PUBLISHED"|"REJECTED"|"HIDDEN", source, audio_url, audio_preview_url (bertanda tangan 1 jam), embed: { provider, src, kind, height }|null, duration_ms, is_premium, season, episode_number, cover_url, review_note, submitted_at, reviewed_at, published_at, created_at, updated_at }
+Episode (publik) += { source: "upload"|"embed", embed: { provider, src, kind, height }|null }
+```
+
+### Moderasi podcast (Back Office, izin `podcast.moderate`; default Content QC & Editorial)
+
+| Method & Path | Body / Query | Respons |
+|---|---|---|
+| `GET /v1/admin/podcasts/episodes` | `?status=PENDING\|PUBLISHED\|REJECTED\|HIDDEN\|DRAFT\|all&q=` | `{ data: (StudioEpisode & { show })[], pending }` |
+| `POST /v1/admin/podcasts/episodes/:id/decision` | `{ action: "approve"\|"reject"\|"hide", reason? }` — reject/hide wajib alasan ≥ 5 | `StudioEpisode` |
+| `GET /v1/admin/podcasts/shows` | `?q=&origin=all\|creator` | `{ data: StudioShow[] }` |
+| `POST /v1/admin/podcasts/shows/:id/visibility` | `{ hidden, reason? }` (sembunyikan wajib alasan) | `StudioShow` |
+
+Audit: `podcast.show.create|update|delete|hide|unhide`, `podcast.episode.create|update|delete|approve|reject|hide`.
+
+### Kebijakan Upload & Live (Pengaturan Super Admin)
+
+- **Upload** (`upload.*` + `storage.max_upload_mb|allowed_*_types|quota_uploads_gb`): kuota per akun
+  `upload.user_quota_gb` (422), batas upload baru per 24 jam `upload.daily_limit` (429) — admin dikecualikan;
+  `upload.artwork_min_px` (0 = hanya peringatan) untuk artwork rilis.
+- **Live**: `live.allowed_org_types` (403 saat membuat siaran), `live.max_open_per_org` (422), `live.ticketed_enabled`
+  (403 untuk akses `TICKET`), `live.chat_max_chars` (400).
+
 ## 4. Playback & Analytics (REQ-STR-01/02, REQ-WEB-04, REQ-STU-03)
 
 | Method & Path | Auth | Body / Query | Respons |

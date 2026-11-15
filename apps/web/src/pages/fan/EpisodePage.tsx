@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Lock } from 'lucide-react';
+import { Headphones, Lock } from 'lucide-react';
 import { api, fmt } from '@/lib/api';
 import type { Episode, Show } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
@@ -10,6 +10,7 @@ import { colorFor, DarkError, glow, PlayFab } from '@/components/fan';
 import { PageLoader } from '@/components/ui';
 import { episodeToPlayable } from './ShowPage';
 import { useDict } from '@/lib/i18n';
+import { EmbedPlayer } from '@/components/podcast/EmbedPlayer';
 
 /** Episode (mockup Spotify 7 & 10): header warna, tombol play hijau, deskripsi, paywall premium. */
 export default function EpisodePage() {
@@ -28,7 +29,13 @@ export default function EpisodePage() {
     <div className="min-h-full pb-12">
       <header className="px-4 pt-24 pb-8 md:px-8" style={{ background: glow(color, '77') }}>
         <div className="flex flex-col gap-6 md:flex-row md:items-end">
-          <img src={e.cover_url} alt="" className="size-48 rounded-none shadow-2xl md:size-56" />
+          {e.cover_url || e.show.cover_url ? (
+            <img src={e.cover_url || e.show.cover_url} alt="" className="size-48 rounded-none shadow-2xl md:size-56" />
+          ) : (
+            <span className="grid size-48 place-items-center bg-white/10 text-white/60 shadow-2xl md:size-56">
+              <Headphones className="size-14" />
+            </span>
+          )}
           <div className="min-w-0">
             <p className="text-sm font-bold">Episode {e.is_premium && '· Premium'}</p>
             <h1 className="my-3 text-3xl font-black tracking-tight md:text-5xl">{e.title}</h1>
@@ -40,11 +47,14 @@ export default function EpisodePage() {
       </header>
       <div className="px-4 py-6 md:px-8">
         <p className="flex items-center gap-3 text-sm text-rave-muted">
-          {fmt.date(e.published_at)} · {fmt.minutes(e.duration_ms)}
+          {fmt.date(e.published_at)}
+          {e.duration_ms > 0 && ` · ${fmt.minutes(e.duration_ms)}`}
           <span className="h-1 w-24 rounded-full bg-white/20" />
         </p>
         <div className="mt-5 flex items-center gap-6">
-          {locked ? (
+          {e.source === 'embed' && e.embed ? (
+            <EmbedPlayer embed={e.embed} title={e.title} className="w-full max-w-3xl" />
+          ) : locked ? (
             <span className="grid size-14 place-items-center rounded-full bg-white/20" aria-label={d.episode.locked}>
               <Lock className="size-6" />
             </span>

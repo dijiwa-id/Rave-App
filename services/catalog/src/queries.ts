@@ -79,6 +79,11 @@ export function isUuid(s: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 }
 
-export const SHOW_COLS = `s.id, s.kind, s.title, s.publisher, s.description, s.cover_url, s.category, s.age_rating, s.content_warning`;
+export const SHOW_COLS = `s.id, s.kind, s.title, s.publisher, s.description, s.cover_url, s.category, s.age_rating, s.content_warning, s.explicit`;
 export const EPISODE_COLS = `e.id, e.show_id, e.title, e.description, e.duration_ms, e.published_at, e.is_premium, e.season, e.episode_number,
-  coalesce(e.cover_url, (SELECT cover_url FROM shows WHERE id = e.show_id)) AS cover_url`;
+  coalesce(e.cover_url, (SELECT cover_url FROM shows WHERE id = e.show_id)) AS cover_url,
+  e.source, CASE WHEN e.source = 'embed' THEN json_build_object('provider', e.embed_provider, 'src', e.embed_url, 'kind', e.embed_kind, 'height', e.embed_height) END AS embed`;
+/** Episode terlihat publik: tayang & acaranya tidak disembunyikan moderator. */
+export const EPISODE_VISIBLE = `e.status = 'PUBLISHED' AND EXISTS (SELECT 1 FROM shows vs WHERE vs.id = e.show_id AND vs.status = 'ACTIVE')`;
+/** Acara terlihat publik: aktif & punya minimal satu episode tayang (acara kreator yang baru dibuat belum muncul). */
+export const SHOW_VISIBLE = `s.status = 'ACTIVE' AND EXISTS (SELECT 1 FROM episodes ve WHERE ve.show_id = s.id AND ve.status = 'PUBLISHED')`;

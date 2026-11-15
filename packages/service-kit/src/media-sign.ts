@@ -29,14 +29,16 @@ export const MEDIA_PREFIX = '/v1/catalog/media/';
 const FREE_RENDITION = /^[\w-]+\.(low|normal)\.m4a$/i;
 /** Gambar (artwork rilis, foto/sampul artis, sampul playlist). Upload artwork hanya menerima ekstensi ini. */
 const IMAGE_FILE = /^[\w-]+\.(jpe?g|png|webp)$/i;
+/** Audio kampanye iklan yang diunggah Back Office (`<id>.ad.mp3`) — konten siaran, bukan master berhak cipta. */
+const AD_AUDIO = /^[\w-]+\.ad\.(mp3|m4a|aac|ogg|opus)$/i;
 
 /**
- * Berkas di bucket uploads yang boleh disajikan tanpa tanda tangan: hanya rendisi gratis & gambar (daftar putih).
+ * Berkas di bucket uploads yang boleh disajikan tanpa tanda tangan: hanya rendisi gratis, gambar & audio iklan (daftar putih).
  * Selain itu — master asli apa pun ekstensinya (wav/flac/aiff/alac/mp3/ogg/opus/m4a), rendisi Premium,
  * atau berkas tak dikenal — wajib URL bertanda tangan (`signMediaUrl`).
  */
 export function isPublicMediaFile(file: string): boolean {
-  return FREE_RENDITION.test(file) || IMAGE_FILE.test(file);
+  return FREE_RENDITION.test(file) || IMAGE_FILE.test(file) || AD_AUDIO.test(file);
 }
 
 /**
