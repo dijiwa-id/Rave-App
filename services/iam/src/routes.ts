@@ -36,11 +36,13 @@ import {
   sha256,
   type Q,
 } from './core.js';
+import { consumeLoginCode } from './oauth.js';
 
 const otpBody = z.object({ channel: z.enum(['email', 'whatsapp']), destination: z.string().min(5).max(200) });
 const tokenBody = z.discriminatedUnion('grant_type', [
   z.object({ grant_type: z.literal('otp'), destination: z.string().min(5), code: z.string().regex(/^\d{6}$/) }),
   z.object({ grant_type: z.literal('refresh_token'), refresh_token: z.string().min(20) }),
+  z.object({ grant_type: z.literal('oauth_code'), code: z.string().min(20).max(200) }),
 ]);
 const ORG_TYPES = ['ARTIST', 'MANAGEMENT', 'LABEL', 'PROMOTOR'] as const;
 
@@ -172,6 +174,17 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         return issueTokens(tx, me);
       });
     }
+    if (b.grant_type === 'oauth_code') {
+      // Kode sekali pakai dari callback login sosial (oauth.ts) — diklaim atomik, berlaku 60 dtk.
+      return db.tx(async (tx) => {
+        const userId = await consumeLoginCode(tx, b.code);
+        if (!userId) throw unauthorized('Kode masuk tidak valid atau kedaluwarsa. Coba masuk lagi.');
+        const me = await buildMe(tx, userId);
+        if (!me) throw forbidden('Akun telah dihapus');
+        if (me.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan RAVE.');
+        return issueTokens(tx, me);
+      });
+    }
     // refresh_token: rotasi + deteksi reuse (revoke seluruh family)
     const rt = await db.one(`SELECT * FROM refresh_tokens WHERE token_hash = $1`, [sha256(b.refresh_token)]);
     if (!rt) throw unauthorized('Refresh token tidak valid');
@@ -203,10 +216,6 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       if (rt) await db.query(`UPDATE refresh_tokens SET revoked_at = coalesce(revoked_at, now()) WHERE family_id = $1`, [rt.family_id]);
     }
     return { ok: true };
-  });
-
-  app.post('/v1/auth/oauth/:provider', async () => {
-    throw new HttpError(501, 'Not Implemented', 'Login Google/Apple belum diaktifkan (adapter OIDC belum dipasang)');
   });
 
   // ---------------- Waitlist (REQ-WEB-02) ----------------

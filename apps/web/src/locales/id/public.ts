@@ -250,7 +250,7 @@ const dict = {
     nextEvent: 'Event terdekat',
     from: (price: string) => `mulai ${price}`,
     devCodeUnavailable: 'dev_code tidak tersedia (mode produksi)',
-    socialSoon: 'Login sosial segera hadir — sementara pakai kode email dulu ya.',
+    devProvider: 'Simulasi (dev)',
     headingSignup: {
       fan: 'Daftar gratis, langsung dengar.',
       artist: 'Bawa musikmu ke RAVE.',

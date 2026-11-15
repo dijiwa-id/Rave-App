@@ -6,6 +6,20 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 ## [Unreleased]
 
 ### Fitur
+- **Tema dipindah ke Pengaturan (web):** tombol cepat Gelap/Terang di header aplikasi dengar dihapus untuk pengguna
+  yang masuk — tema dipilih di **Pengaturan → Tampilan** (Gelap / Terang / Ikuti sistem, tersinkron ke akun).
+  Tamu (tanpa akses Pengaturan) tetap mendapat tombol cepat di header.
+- **Login sosial: Google, Facebook & Apple** (`services/iam/src/oauth.ts`) — alur authorization code di server
+  (state sekali pakai, PKCE + nonce untuk Google, client secret ES256 untuk Apple, cookie pengikat browser melawan
+  login-CSRF). Callback mengalihkan ke `/login?oauth_code=…`, lalu web menukar kode sekali pakai 60 dtk lewat
+  `POST /v1/auth/token` (`grant_type=oauth_code`), jadi token tidak pernah muncul di URL. Akun ditautkan lewat email terverifikasi; akun baru
+  juga mendapat identitas email (bisa masuk via OTP). Kredensial diatur di **Super Admin → Integrasi → Login
+  sosial** (terenkripsi, lengkap dengan Redirect URI siap salin; cadangan env `GOOGLE_CLIENT_ID`, …). Halaman Masuk
+  hanya menampilkan tombol provider yang aktif. Provider **Simulasi (dev)** untuk menguji alur tanpa pihak ketiga
+  (khusus development). Migrasi iam `008_oauth`, platform `003_social_integration`, iam `009_oauth_app`.
+  **Aplikasi desktop & mobile** memakai alur bergaya device flow: `POST /v1/auth/oauth/:provider/app` → browser sistem
+  (halaman konfirmasi dengan kode pencocokan, mencegah tautan masuk kiriman orang lain) → polling
+  `POST /v1/auth/oauth/poll` (428 menunggu · 200 token sekali ambil · 410 kedaluwarsa); tanpa deep link/perubahan native.
 - **Karaoke: kolom lirik bergulir mulus** (`components/fan/LyricScroller.tsx`) — pita lirik digeser satu transform GPU
   sehingga baris aktif meluncur ke tengah (bukan potongan antar-baris) dan berwarna mustard solid (tanpa sapuan/masking); baris lain lebih kecil (72%) & blur bertahap
   sesuai jarak dengan tunda bergelombang. Klik baris mana pun untuk lompat; roda/seret untuk menjelajah, kembali

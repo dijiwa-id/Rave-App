@@ -41,9 +41,13 @@ Endpoint internal antar-service memakai prefix `/internal/...` (TIDAK diekspos g
 | Method & Path | Auth | Body / Query | Respons |
 |---|---|---|---|
 | `POST /v1/auth/otp` | – | `{ channel: "email"\|"whatsapp", destination }` | `{ sent: true, expires_in: 300, dev_code?: "123456" }` (`dev_code` hanya NODE_ENV≠production) |
-| `POST /v1/auth/token` | – | `{ grant_type:"otp", destination, code }` atau `{ grant_type:"refresh_token", refresh_token }` | `TokenResponse` |
+| `POST /v1/auth/token` | – | `{ grant_type:"otp", destination, code }`, `{ grant_type:"refresh_token", refresh_token }`, atau `{ grant_type:"oauth_code", code }` (kode sekali pakai 60 dtk dari callback login sosial) | `TokenResponse` |
 | `POST /v1/auth/logout` | – | `{ refresh_token }` | `{ ok: true }` |
-| `POST /v1/auth/oauth/:provider` | – | google/apple | `501` (adapter belum dipasang) |
+| `GET /v1/auth/oauth/providers` | – | | `{ providers: ("google"\|"facebook"\|"apple"\|"dev")[] }` — provider berkredensial lengkap (Super Admin → Integrasi → Login sosial, cadangan env); `dev` = simulasi, hanya NODE_ENV≠production |
+| `GET /v1/auth/oauth/:provider/start` | – | `?next=/path&intent=fan\|artist\|promotor` | `302` ke provider; set cookie `rave_oauth` (pengikat browser, 10 mnt). Rate limit kelas OTP |
+| `GET\|POST /v1/auth/oauth/:provider/callback` | – | `code`, `state` (POST form untuk Apple) | `302` ke `<PUBLIC_WEB_URL>/login?oauth_code=…&next=…&intent=…` atau `?oauth_error=<pesan>`. Akun ditautkan lewat email terverifikasi; tanpa itu dibuat akun baru |
+| `POST /v1/auth/oauth/:provider/app` | – | `{ client: "desktop"\|"mobile" }` | `{ start_path, poll_token, user_code, expires_in: 600, interval: 2 }` — aplikasi membuka `<server>` + `start_path` di browser sistem (halaman konfirmasi menampilkan `user_code`). Rate limit kelas OTP |
+| `POST /v1/auth/oauth/poll` | – | `{ poll_token }` | `200 TokenResponse` (sekali) · `428 authorization_pending` · `400` gagal (detail) · `410` kedaluwarsa/sudah diambil |
 | `GET /v1/me` | ✓ | | `Me` |
 | `PATCH /v1/me` | ✓ | `{ display_name?, avatar_url?, city? }` | `Me` |
 | `POST /v1/me/onboarding` | ✓ | `{ city, genres: string[], artist_ids: string[] (min 3) }` | `Me` |

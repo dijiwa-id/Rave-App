@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, Copy, CreditCard, Eye, EyeOff, ExternalLink, KeyRound, Mail, PlugZap, RotateCcw, Send, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Copy, CreditCard, Eye, EyeOff, ExternalLink, KeyRound, LogIn, Mail, PlugZap, RotateCcw, Send, XCircle } from 'lucide-react';
 import { INTEGRATION_PROVIDERS, type IntegrationField, type IntegrationKind } from '@rave/domain/integrations';
 import { api, ApiError, fmt } from '@/lib/api';
 import { useDict } from '@/lib/i18n';
@@ -9,7 +9,7 @@ import { Badge, Button, Card, cx, Field, Input, PageHeader, Select, Textarea, to
 import { QueryState } from '@/components/b2b/common';
 
 /**
- * Platform → Integrasi (khusus Super Admin): email (OTP & notifikasi) dan payment gateway.
+ * Platform → Integrasi (khusus Super Admin): email (OTP & notifikasi), payment gateway, dan login sosial.
  * Rahasia tidak pernah dikirim kembali ke browser — hanya ••••1234; kolom kosong = pertahankan nilai tersimpan.
  */
 
@@ -29,9 +29,10 @@ interface IntegrationsResponse {
   data: IntegrationView[];
   history: { kind: string; provider: string; changed: string[]; reason: string; actor_name: string | null; at: string }[];
   webhook_url: string;
+  oauth_redirects?: Record<string, string>;
 }
 
-const ICON: Record<IntegrationKind, ComponentType<{ className?: string }>> = { email: Mail, payment: CreditCard };
+const ICON: Record<IntegrationKind, ComponentType<{ className?: string }>> = { email: Mail, payment: CreditCard, social: LogIn };
 
 export function PlatformIntegrations() {
   const t = useDict('admin').integrations;
@@ -43,7 +44,7 @@ export function PlatformIntegrations() {
         {q.data && (
           <div className="space-y-6">
             {q.data.data.map((v) => (
-              <IntegrationCard key={v.kind} view={v} webhookUrl={q.data!.webhook_url} />
+              <IntegrationCard key={v.kind} view={v} webhookUrl={q.data!.webhook_url} oauthRedirects={q.data!.oauth_redirects ?? {}} />
             ))}
             {q.data.history.length > 0 && (
               <Card title={t.history}>
@@ -68,7 +69,7 @@ export function PlatformIntegrations() {
   );
 }
 
-function IntegrationCard({ view, webhookUrl }: { view: IntegrationView; webhookUrl: string }) {
+function IntegrationCard({ view, webhookUrl, oauthRedirects }: { view: IntegrationView; webhookUrl: string; oauthRedirects: Record<string, string> }) {
   const t = useDict('admin').integrations;
   const qc = useQueryClient();
   const me = useAuth((s) => s.user);
@@ -297,7 +298,25 @@ function IntegrationCard({ view, webhookUrl }: { view: IntegrationView; webhookU
           )}
         </div>
       )}
-      {def.inert && <p className="mt-4 flex items-start gap-2 text-sm text-amber-700"><AlertTriangle className="mt-0.5 size-4 shrink-0" /> {view.kind === 'email' ? t.inertEmail : t.inertPayment}</p>}
+      {/* Login sosial: Redirect URI yang didaftarkan di konsol tiap provider */}
+      {view.kind === 'social' && provider === 'oauth' && (
+        <div className="mt-5">
+          <p className="mb-1.5 text-sm font-bold">{t.redirectUris}</p>
+          <ul className="space-y-2">
+            {Object.entries(oauthRedirects).map(([p, url]) => (
+              <li key={p} className="flex items-center gap-2">
+                <span className="w-20 shrink-0 text-xs font-bold capitalize text-b2b-muted">{p}</span>
+                <code className="flex h-10 min-w-0 flex-1 items-center truncate border border-b2b-line bg-b2b-card px-3 text-xs">{url}</code>
+                <Button size="sm" variant="outline-ink" icon={<Copy className="size-3.5" />} onClick={() => navigator.clipboard.writeText(url).then(() => toast.success(t.copied), () => toast.info(url))}>
+                  {t.copy}
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1 text-xs text-b2b-muted">{t.redirectHint}</p>
+        </div>
+      )}
+      {def.inert && <p className="mt-4 flex items-start gap-2 text-sm text-amber-700"><AlertTriangle className="mt-0.5 size-4 shrink-0" /> {view.kind === 'email' ? t.inertEmail : view.kind === 'social' ? t.inertSocial : t.inertPayment}</p>}
 
       {/* Simpan */}
       <div className="mt-6 grid gap-3 border-t border-b2b-line pt-5 md:grid-cols-[1fr_auto] md:items-end">
@@ -319,7 +338,7 @@ function IntegrationCard({ view, webhookUrl }: { view: IntegrationView; webhookU
       {/* Uji */}
       <div className="mt-5 border border-dashed border-b2b-line p-4">
         <p className="flex items-center gap-2 text-sm font-bold">
-          <PlugZap className="size-4" /> {view.kind === 'email' ? t.testEmailTitle : t.testPaymentTitle}
+          <PlugZap className="size-4" /> {view.kind === 'email' ? t.testEmailTitle : view.kind === 'social' ? t.testSocialTitle : t.testPaymentTitle}
         </p>
         {view.source !== 'dashboard' || dirty ? (
           <p className="mt-1 text-sm text-b2b-muted">{t.saveFirst}</p>
@@ -331,7 +350,7 @@ function IntegrationCard({ view, webhookUrl }: { view: IntegrationView; webhookU
               </div>
             )}
             <Button variant="outline-ink" icon={<Send className="size-4" />} loading={busy === 'test'} onClick={test}>
-              {view.kind === 'email' ? t.sendTest : t.testConnection}
+              {view.kind === 'email' ? t.sendTest : view.kind === 'social' ? t.checkConfig : t.testConnection}
             </Button>
           </div>
         )}

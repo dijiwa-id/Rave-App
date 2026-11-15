@@ -4,8 +4,8 @@
  * (EMAIL_FROM, RESEND_API_KEY, MIDTRANS_SERVER_KEY, …) sehingga konfigurasi dasbor dan env saling menggantikan.
  */
 
-export type IntegrationKind = 'email' | 'payment';
-export const INTEGRATION_KINDS: IntegrationKind[] = ['email', 'payment'];
+export type IntegrationKind = 'email' | 'payment' | 'social';
+export const INTEGRATION_KINDS: IntegrationKind[] = ['email', 'payment', 'social'];
 
 export interface IntegrationField {
   key: string;
@@ -83,6 +83,25 @@ export const INTEGRATION_PROVIDERS: Record<IntegrationKind, Record<string, Integ
       ],
     },
   },
+  social: {
+    off: { label: 'Nonaktif', description: 'Hanya login OTP email. Tombol Google/Facebook/Apple disembunyikan.', fields: [], inert: true },
+    oauth: {
+      label: 'OAuth / OpenID Connect',
+      description:
+        'Isi kredensial provider yang ingin diaktifkan — provider dengan field lengkap langsung tampil di halaman Masuk. Daftarkan Redirect URI di bawah pada konsol masing-masing provider.',
+      docs: 'https://console.cloud.google.com/apis/credentials',
+      fields: [
+        { key: 'GOOGLE_CLIENT_ID', label: 'Google · Client ID', type: 'text', placeholder: '1234…apps.googleusercontent.com', hint: 'Google Cloud Console → APIs & Services → Credentials → OAuth client ID (Web application).' },
+        { key: 'GOOGLE_CLIENT_SECRET', label: 'Google · Client secret', type: 'secret', placeholder: 'GOCSPX-…' },
+        { key: 'FACEBOOK_APP_ID', label: 'Facebook · App ID', type: 'text', placeholder: '123456789012345', hint: 'developers.facebook.com → App → Facebook Login → Settings (Valid OAuth Redirect URIs).' },
+        { key: 'FACEBOOK_APP_SECRET', label: 'Facebook · App secret', type: 'secret' },
+        { key: 'APPLE_SERVICES_ID', label: 'Apple · Services ID', type: 'text', placeholder: 'id.rave.web', hint: 'Apple Developer → Identifiers → Services IDs (Sign in with Apple, Return URLs).' },
+        { key: 'APPLE_TEAM_ID', label: 'Apple · Team ID', type: 'text', placeholder: 'ABCDE12345' },
+        { key: 'APPLE_KEY_ID', label: 'Apple · Key ID', type: 'text', placeholder: 'XYZ987ABCD' },
+        { key: 'APPLE_PRIVATE_KEY', label: 'Apple · Private key (.p8)', type: 'secret', hint: 'Tempel isi berkas AuthKey_….p8 (boleh satu baris; baris BEGIN/END PRIVATE KEY ikut).' },
+      ],
+    },
+  },
   payment: {
     sandbox: { label: 'Sandbox (simulasi)', description: 'Tidak ada uang yang berpindah. Simulasi bayar hanya tersedia di development.', fields: [], inert: true },
     midtrans: {
@@ -109,7 +128,20 @@ export const INTEGRATION_PROVIDERS: Record<IntegrationKind, Record<string, Integ
   },
 };
 
-export const INTEGRATION_LABEL: Record<IntegrationKind, string> = { email: 'Email (OTP & notifikasi)', payment: 'Payment gateway' };
+export const INTEGRATION_LABEL: Record<IntegrationKind, string> = { email: 'Email (OTP & notifikasi)', payment: 'Payment gateway', social: 'Login sosial (Google, Facebook, Apple)' };
+
+/** Provider login sosial & field kredensial wajibnya (provider aktif bila semua field ini terisi). */
+export type SocialProvider = 'google' | 'facebook' | 'apple';
+export const SOCIAL_PROVIDERS: SocialProvider[] = ['google', 'facebook', 'apple'];
+export const SOCIAL_FIELDS: Record<SocialProvider, string[]> = {
+  google: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
+  facebook: ['FACEBOOK_APP_ID', 'FACEBOOK_APP_SECRET'],
+  apple: ['APPLE_SERVICES_ID', 'APPLE_TEAM_ID', 'APPLE_KEY_ID', 'APPLE_PRIVATE_KEY'],
+};
+/** Provider yang kredensialnya lengkap, dari pembaca nilai (dasbor atau env). */
+export function enabledSocialProviders(get: (key: string) => string | undefined): SocialProvider[] {
+  return SOCIAL_PROVIDERS.filter((p) => SOCIAL_FIELDS[p].every((k) => !!get(k)?.trim()));
+}
 
 /**
  * Validasi konfigurasi. `config` = nilai non-rahasia; `secretKeys` = kunci rahasia yang akan tersimpan setelah
@@ -133,6 +165,16 @@ export function validateIntegration(kind: IntegrationKind, provider: string, con
     if (f.type === 'url' && !/^https:\/\/\S+$/i.test(v) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/\S*)?$/i.test(v)) errors.push({ path: f.key, message: 'Harus URL https:// (http hanya untuk localhost)' });
     if (f.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) errors.push({ path: f.key, message: 'Email tidak valid' });
     if (f.type === 'select' && f.options && !f.options.some((o) => o.value === v)) errors.push({ path: f.key, message: 'Pilihan tidak valid' });
+  }
+  if (kind === 'social' && provider === 'oauth') {
+    const has = (k: string) => !!config[k]?.trim() || secretKeys.has(k);
+    const complete = enabledSocialProviders((k) => (has(k) ? 'x' : undefined));
+    if (!complete.length) errors.push({ path: 'GOOGLE_CLIENT_ID', message: 'Lengkapi kredensial minimal satu provider (Google, Facebook, atau Apple)' });
+    for (const p of SOCIAL_PROVIDERS) {
+      const f = SOCIAL_FIELDS[p];
+      const n = f.filter(has).length;
+      if (n > 0 && n < f.length) for (const k of f.filter((k) => !has(k))) errors.push({ path: k, message: 'Wajib diisi agar provider ini aktif' });
+    }
   }
   if (kind === 'email' && config.EMAIL_FROM && !/[^\s@<]+@[^\s@>]+\.[^\s@>]+/.test(config.EMAIL_FROM)) errors.push({ path: 'EMAIL_FROM', message: 'Alamat pengirim harus memuat email, mis. RAVE <no-reply@rave.id>' });
   return errors;

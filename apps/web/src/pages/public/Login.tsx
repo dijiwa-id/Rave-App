@@ -2,7 +2,7 @@ import { useEffect, useState, type ComponentType, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, Headphones, Landmark, MapPin, Mic2, Monitor, Moon, Radio, Search, ShieldCheck, Sun, Ticket, TrendingUp } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, FlaskConical, Headphones, Landmark, MapPin, Mic2, Monitor, Moon, Radio, Search, ShieldCheck, Sun, Ticket, TrendingUp } from 'lucide-react';
 import { AppleLogo, Facebook } from '@/components/fan/BrandIcons';
 import CodeSlots, { type CodeSlotsStatus } from '@/components/reactbits/CodeSlots';
 import { api, fmt } from '@/lib/api';
@@ -193,6 +193,15 @@ function Showcase({ intent }: { intent: Intent }) {
   );
 }
 
+type SocialId = 'google' | 'apple' | 'facebook' | 'dev';
+/** Urutan tombol login sosial; hanya yang diaktifkan server yang tampil. */
+const SOCIALS: { id: SocialId; label: string; Icon: ComponentType }[] = [
+  { id: 'google', label: 'Google', Icon: GoogleG },
+  { id: 'apple', label: 'Apple', Icon: () => <AppleLogo className="size-5" /> },
+  { id: 'facebook', label: 'Facebook', Icon: () => <Facebook className="size-5 text-[#1877f2]" /> },
+  { id: 'dev', label: 'Dev', Icon: () => <FlaskConical className="size-5 text-rave-accent" /> },
+];
+
 export default function Login() {
   const [params, setParams] = useSearchParams();
   const nav = useNavigate();
@@ -224,6 +233,44 @@ export default function Login() {
   }, [step]);
   const left = Math.max(0, Math.round((expiresAt - now) / 1000));
   const cooldown = Math.max(0, Math.round((resendAt - now) / 1000));
+
+  // Login sosial: penyedia aktif (server memutuskan; `dev` = simulasi khusus development).
+  const oauth = useQuery({
+    queryKey: ['oauth-providers'],
+    queryFn: () => api<{ providers: SocialId[] }>('/v1/auth/oauth/providers', { auth: false }),
+    staleTime: 60_000,
+  });
+  const socials = SOCIALS.filter((p) => oauth.data?.providers.includes(p.id));
+
+  function startSocial(id: SocialId) {
+    const q = new URLSearchParams({ intent });
+    const next = params.get('next');
+    if (next) q.set('next', next);
+    window.location.assign(`/v1/auth/oauth/${id}/start?${q}`);
+  }
+
+  // Kembali dari provider: ?oauth_code (tukar jadi token) atau ?oauth_error (tampilkan). Parameter dibuang dari URL.
+  useEffect(() => {
+    const code = params.get('oauth_code');
+    const error = params.get('oauth_error');
+    if (!code && !error) return;
+    const clean = new URLSearchParams(params);
+    clean.delete('oauth_code');
+    clean.delete('oauth_error');
+    clean.delete('intent');
+    setParams(clean, { replace: true });
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    const as = params.get('intent');
+    setBusy(true);
+    api<TokenResponse>('/v1/auth/token', { body: { grant_type: 'oauth_code', code }, auth: false })
+      .then((t) => done(t, as === 'artist' || as === 'promotor' || as === 'fan' ? as : intent))
+      .catch((err) => toast.error(err))
+      .finally(() => setBusy(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sekali saat kembali dari provider
+  }, []);
 
   function done(t: TokenResponse, as: Intent = intent) {
     setSession(t);
@@ -292,7 +339,6 @@ export default function Login() {
     }
   }
 
-  const soon = () => toast.info(d.socialSoon);
   const social = 'b2b-surface flex h-11 flex-1 items-center justify-center gap-2 rounded-none border border-b2b-line text-sm font-bold text-b2b-ink transition hover:-translate-y-0.5 hover:border-rave-accent/40';
   const step$ = {
     initial: reduce ? false : { opacity: 0, x: 16 },
@@ -428,20 +474,23 @@ export default function Login() {
                     </button>
                   </form>
 
-                  <div className="my-6 flex items-center gap-4 text-xs font-bold text-b2b-muted">
-                    <hr className="flex-1 border-b2b-line" /> {d.orContinue} <hr className="flex-1 border-b2b-line" />
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={soon} className={social} aria-label={d.continueWith('Google')}>
-                      <GoogleG /> <span className="hidden sm:inline">Google</span>
-                    </button>
-                    <button onClick={soon} className={social} aria-label={d.continueWith('Apple')}>
-                      <AppleLogo className="size-5" /> <span className="hidden sm:inline">Apple</span>
-                    </button>
-                    <button onClick={soon} className={social} aria-label={d.continueWith('Facebook')}>
-                      <Facebook className="size-5 text-[#1877f2]" /> <span className="hidden sm:inline">Facebook</span>
-                    </button>
-                  </div>
+                  {socials.length > 0 && (
+                    <>
+                      <div className="my-6 flex items-center gap-4 text-xs font-bold text-b2b-muted">
+                        <hr className="flex-1 border-b2b-line" /> {d.orContinue} <hr className="flex-1 border-b2b-line" />
+                      </div>
+                      <div className="flex gap-2">
+                        {socials.map(({ id, label, Icon }) => {
+                          const name = id === 'dev' ? d.devProvider : label;
+                          return (
+                            <button key={id} type="button" disabled={busy} onClick={() => startSocial(id)} className={social} aria-label={d.continueWith(name)} title={d.continueWith(name)}>
+                              <Icon /> <span className="hidden sm:inline">{name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
 
                   {import.meta.env.DEV && (
                     <div className="mt-7 rounded-none border border-dashed border-b2b-line p-4">

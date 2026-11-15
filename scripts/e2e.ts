@@ -134,6 +134,66 @@ const reuse = await callOtpClass('POST', '/v1/auth/token', { grant_type: 'refres
 check('refresh token berotasi & reuse ditolak', ref.status === 200 && reuse.status === 401, [ref.status, reuse.status]);
 const F = ref.data.access_token as string;
 
+console.log('\n▶ Login sosial (provider simulasi dev)');
+{
+  /** GET tanpa mengikuti redirect; Location dikembalikan sebagai path (origin web PUBLIC_WEB_URL bisa berbeda dari gateway). */
+  const hop = async (path: string, cookie?: string) => {
+    for (let attempt = 0; ; attempt++) {
+      const r = await fetch(BASE + path, { redirect: 'manual', headers: cookie ? { cookie } : {} });
+      if (r.status === 429 && attempt < 2) {
+        await new Promise((res) => setTimeout(res, 31_000));
+        continue;
+      }
+      const loc = r.headers.get('location') ?? '';
+      const u = loc ? new URL(loc, 'http://x') : null;
+      return { status: r.status, path: u ? u.pathname + u.search : '', params: u?.searchParams ?? new URLSearchParams(), setCookie: r.headers.get('set-cookie') ?? '' };
+    }
+  };
+  const flow = async (email: string, next = '/app/library', name = 'Pendengar Sosial') => {
+    const s = await hop(`/v1/auth/oauth/dev/start?${new URLSearchParams({ next, intent: 'fan' })}`);
+    const cookie = /rave_oauth=[^;]+/.exec(s.setCookie)?.[0] ?? '';
+    const a = await hop(`/v1/auth/oauth/dev/authorize?${new URLSearchParams({ state: s.params.get('state') ?? '', email, name })}`, cookie);
+    const cb = await hop(a.path, cookie);
+    return { s, cookie, a, cb };
+  };
+  const prov = await call(null, 'GET', '/v1/auth/oauth/providers');
+  check('provider aktif memuat "dev" (development)', prov.status === 200 && prov.data?.providers?.includes('dev'), prov.data);
+  const email = `sosial.${Date.now()}@rave.test`;
+  const f1 = await flow(email);
+  check('start: 302 ke halaman otorisasi + cookie pengikat HttpOnly', f1.s.status === 302 && f1.s.path.startsWith('/v1/auth/oauth/dev/authorize') && /HttpOnly/i.test(f1.s.setCookie) && !!f1.cookie, [f1.s.status, f1.s.path, f1.s.setCookie]);
+  check('callback: kembali ke /login dengan kode sekali pakai, next & intent dipertahankan', f1.cb.status === 302 && f1.cb.path.startsWith('/login?') && !!f1.cb.params.get('oauth_code') && f1.cb.params.get('next') === '/app/library' && f1.cb.params.get('intent') === 'fan', f1.cb.path);
+  const tk = await call(null, 'POST', '/v1/auth/token', { grant_type: 'oauth_code', code: f1.cb.params.get('oauth_code') });
+  check('kode ditukar menjadi token; akun baru memakai email terverifikasi & nama provider', tk.status === 200 && tk.data?.user?.email === email && tk.data?.user?.display_name === 'Pendengar Sosial' && !!tk.data?.refresh_token, tk.data?.user ?? tk.data);
+  const again = await call(null, 'POST', '/v1/auth/token', { grant_type: 'oauth_code', code: f1.cb.params.get('oauth_code') });
+  check('kode masuk sekali pakai (pemakaian kedua 401)', again.status === 401, again.status);
+  const replay = await hop(f1.a.path, f1.cookie);
+  check('state sekali pakai: callback diulang → oauth_error', !!replay.params.get('oauth_error') && !replay.params.get('oauth_code'), replay.path);
+  const s2 = await hop('/v1/auth/oauth/dev/start');
+  const a2 = await hop(`/v1/auth/oauth/dev/authorize?${new URLSearchParams({ state: s2.params.get('state') ?? '', email })}`);
+  const noCookie = await hop(a2.path);
+  check('callback dari browser lain (tanpa cookie pengikat) ditolak', !!noCookie.params.get('oauth_error') && !noCookie.params.get('oauth_code'), noCookie.path);
+  const link = await flow(SEED.emails.fan, '//evil.example/x');
+  const lt = await call(null, 'POST', '/v1/auth/token', { grant_type: 'oauth_code', code: link.cb.params.get('oauth_code') });
+  check('email terverifikasi yang sudah terdaftar ditautkan ke akun yang sama', lt.status === 200 && lt.data?.user?.id === fan.user.id, [lt.status, lt.data?.user?.id, fan.user.id]);
+  check('next ke origin lain dibuang (cegah open redirect)', link.cb.params.get('next') === null, link.cb.path);
+  const bad = await hop('/v1/auth/oauth/google/start');
+  check('provider tanpa kredensial → kembali ke /login dengan pesan', bad.status === 302 && !!bad.params.get('oauth_error'), bad.path);
+  // Alur aplikasi desktop/mobile: peluncuran → konfirmasi kode di browser → polling token.
+  const ln = await call(null, 'POST', '/v1/auth/oauth/dev/app', { client: 'mobile' });
+  check('aplikasi: peluncuran berisi start_path relatif, poll_token & kode pencocokan', ln.status === 200 && ln.data?.start_path?.startsWith('/v1/auth/oauth/dev/start?app=') && /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(ln.data?.user_code ?? ''), ln.data);
+  const poll = () => call(null, 'POST', '/v1/auth/oauth/poll', { poll_token: ln.data?.poll_token });
+  check('aplikasi: polling sebelum login → 428 authorization_pending', (await poll()).status === 428);
+  const conf = await fetch(BASE + ln.data.start_path).then((r) => r.text());
+  check('aplikasi: browser menampilkan konfirmasi dengan kode yang sama', conf.includes(ln.data.user_code) && conf.includes('confirm=1'));
+  const as = await hop(`${ln.data.start_path}&confirm=1`);
+  const aa = await hop(`/v1/auth/oauth/dev/authorize?${new URLSearchParams({ state: as.params.get('state') ?? '', email: `app.${Date.now()}@rave.test`, name: 'Pengguna Aplikasi' })}`);
+  const done = await fetch(BASE + aa.path).then(async (r) => ({ status: r.status, html: await r.text() }));
+  check('aplikasi: callback tanpa cookie diterima & menampilkan "Berhasil masuk"', done.status === 200 && done.html.includes('Berhasil masuk'), done.status);
+  const pt = await poll();
+  check('aplikasi: polling setelah login → token akun baru', pt.status === 200 && pt.data?.user?.display_name === 'Pengguna Aplikasi' && !!pt.data?.refresh_token, pt.data?.user ?? pt.data);
+  check('aplikasi: token hanya bisa diambil sekali (410)', (await poll()).status === 410);
+}
+
 console.log('\n▶ Streaming (fan)');
 const home = await call(F, 'GET', '/v1/catalog/home?city=Bandung');
 check('beranda: quick picks & section', home.data?.quick_picks?.length === 6 && home.data?.sections?.length > 0);

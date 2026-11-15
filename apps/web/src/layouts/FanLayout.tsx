@@ -214,7 +214,10 @@ function SearchBox() {
   );
 }
 
-/** Saklar cepat Gelap ↔ Terang di header (disembunyikan bila Super Admin mengunci tema). */
+/**
+ * Saklar cepat Gelap ↔ Terang — hanya untuk TAMU (Pengaturan wajib login). Pengguna yang masuk memilih tema di
+ * Pengaturan → Tampilan (Gelap / Terang / Sistem, tersinkron ke akun). Disembunyikan bila Super Admin mengunci tema.
+ */
 function ThemeQuickToggle() {
   const accountTheme = useAuth((s) => s.user?.theme);
   const { resolved, allowUser } = usePlayerTheme(accountTheme);
@@ -254,7 +257,7 @@ function GlobalHeader() {
             <Sparkles className="size-3.5" /> {d.shell.premium}
           </Link>
         )}
-        <ThemeQuickToggle />
+        {!token && <ThemeQuickToggle />}
         <a href="/#unduh" title={d.layout.installApp} aria-label={d.layout.installApp} className={cx(HDR_BTN, 'hidden xl:grid')}>
           <Download className="size-4" />
         </a>

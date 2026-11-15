@@ -146,6 +146,8 @@ type RateClass = 'otp' | 'hls' | 'ingest' | 'tix' | '';
 function rateClass(path: string): RateClass {
   // Penerbitan OTP dan penukaran kode/refresh token sama-sama ketat (tebakan kode OTP, penyalahgunaan biaya kirim).
   if (/^\/v1\/auth\/(otp|token)(\/|$)/.test(path)) return 'otp';
+  // Mulai login sosial / peluncuran aplikasi menulis baris → bucket ketat yang sama (callback hanya mengonsumsi state).
+  if (/^\/v1\/auth\/oauth\/[^/]+\/(start|app)(\/|$)/.test(path)) return 'otp';
   if (/^\/v1\/live\/hls\//.test(path)) return 'hls';
   if (/^\/v1\/live\/studio\/streams\/[^/]+\/ingest\//.test(path)) return 'ingest';
   if (/^\/v1\/ticketing\/orders(\/|$)/.test(path)) return 'tix';

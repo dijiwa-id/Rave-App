@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { INTEGRATION_KINDS, INTEGRATION_PROVIDERS, validateIntegration, type IntegrationKind } from '@rave/domain/integrations';
+import { enabledSocialProviders, INTEGRATION_KINDS, INTEGRATION_PROVIDERS, SOCIAL_PROVIDERS, validateIntegration, type IntegrationKind } from '@rave/domain/integrations';
 import {
   audit,
   badRequest,
@@ -27,7 +27,7 @@ import {
  * - Tanpa baris di DB → service memakai env (perilaku lama); sumber aktif ditampilkan di dasbor.
  */
 
-const kindParam = z.object({ kind: z.enum(['email', 'payment']) });
+const kindParam = z.object({ kind: z.enum(['email', 'payment', 'social']) });
 const actorName = (req: FastifyRequest) => req.user?.name ?? req.user?.email ?? req.user?.sub ?? null;
 
 async function load(db: Db, kind: IntegrationKind): Promise<IntegrationConfig | null> {
@@ -46,6 +46,10 @@ async function load(db: Db, kind: IntegrationKind): Promise<IntegrationConfig | 
 /** Ringkasan env (tanpa nilai rahasia) — ditampilkan bila dasbor belum diatur. */
 function envSummary(kind: IntegrationKind) {
   if (kind === 'email') return { provider: emailProvider(), from: process.env.EMAIL_FROM ?? null };
+  if (kind === 'social') {
+    const on = enabledSocialProviders((k) => process.env[k]);
+    return { provider: on.length ? 'oauth' : 'off', providers: on.join(', ') || null };
+  }
   return { provider: (process.env.PAYMENT_PROVIDER ?? 'sandbox').toLowerCase(), mode: process.env.MIDTRANS_MODE ?? null };
 }
 
@@ -93,7 +97,7 @@ export async function integrationRoutes(app: FastifyInstance, { db }: ServiceCon
         out.push(view(kind, row, await load(db, kind), ok));
       }
       const history = await db.query(`SELECT kind, provider, changed, reason, actor_name, at FROM integration_history ORDER BY at DESC LIMIT 20`);
-      return { data: out, history, webhook_url: `${(process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').replace(/\/$/, '')}/v1/webhooks/pg/midtrans` };
+      return { data: out, history, webhook_url: `${(process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').replace(/\/$/, '')}/v1/webhooks/pg/midtrans`, oauth_redirects: Object.fromEntries(SOCIAL_PROVIDERS.map((p) => [p, `${(process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').replace(/\/$/, '')}/v1/auth/oauth/${p}/callback`])) };
     });
 
     /**
@@ -193,6 +197,13 @@ export async function integrationRoutes(app: FastifyInstance, { db }: ServiceCon
             result = { ok: false, message: e?.message ?? String(e) };
           }
         }
+      } else if (kind === 'social') {
+        // Tidak ada API "cek kredensial" lintas provider — tampilkan provider aktif & Redirect URI yang harus didaftarkan.
+        const on = cfg.provider === 'oauth' ? enabledSocialProviders((k) => cfg.secrets[k] || cfg.config[k] || undefined) : [];
+        const base = (process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').replace(/\/$/, '');
+        result = on.length
+          ? { ok: true, message: `Aktif: ${on.join(', ')}. Redirect URI: ${on.map((p) => `${base}/v1/auth/oauth/${p}/callback`).join(' · ')}` }
+          : { ok: false, message: 'Belum ada provider dengan kredensial lengkap.' };
       } else {
         result = await callService<{ ok: boolean; message: string }>('platform', 'finance', '/internal/payment/test', {
           method: 'POST',

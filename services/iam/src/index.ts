@@ -3,6 +3,7 @@ import { routes } from './routes.js';
 import { adminRoutes } from './admin.js';
 import { reportRoutes } from './reports.js';
 import { seed } from './seed.js';
+import { oauthRoutes } from './oauth.js';
 
 const svc = createService({
   name: 'iam',
@@ -11,6 +12,7 @@ const svc = createService({
   migrationsDir: new URL('../migrations/', import.meta.url),
   routes: async (app, ctx) => {
     await routes(app, ctx);
+    await oauthRoutes(app, ctx);
     await adminRoutes(app, ctx);
     await reportRoutes(app, ctx);
   },
@@ -21,6 +23,9 @@ const svc = createService({
       run: async ({ db }) => {
         await db.query(`DELETE FROM otp_codes WHERE expires_at < now() - interval '1 day'`);
         await db.query(`DELETE FROM refresh_tokens WHERE expires_at < now() - interval '7 days'`);
+        await db.query(`DELETE FROM oauth_flows WHERE expires_at < now()`);
+        await db.query(`DELETE FROM oauth_app_launches WHERE expires_at < now() - interval '1 hour'`);
+        await db.query(`DELETE FROM oauth_login_codes WHERE expires_at < now() - interval '1 day'`);
       },
     },
   ],

@@ -251,7 +251,7 @@ const dict: Shape<typeof id> = {
     nextEvent: 'Next event',
     from: (price) => `from ${price}`,
     devCodeUnavailable: 'dev_code unavailable (production mode)',
-    socialSoon: 'Social login is coming soon — please use an email code for now.',
+    devProvider: 'Simulated (dev)',
     headingSignup: {
       fan: 'Sign up free, start listening.',
       artist: 'Bring your music to RAVE.',

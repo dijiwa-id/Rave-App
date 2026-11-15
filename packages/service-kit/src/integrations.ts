@@ -9,7 +9,7 @@ import { callService } from './helpers.js';
  * gateway) dengan cache singkat. Bila belum diatur di dasbor → `null` → pemanggil memakai env (perilaku lama).
  */
 
-export type IntegrationKind = 'email' | 'payment';
+export type IntegrationKind = 'email' | 'payment' | 'social';
 
 export interface IntegrationConfig {
   kind: IntegrationKind;
