@@ -5,6 +5,12 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+### Diperbaiki
+- **Iklan "setiap lagu" tier Gratis berhenti setelah beberapa lagu**: promosi internal RAVE kini tidak terkena frequency
+  cap harian (dirotasi: yang paling jarang tampil ke pendengar hari itu), sehingga slot iklan tetap terisi setelah
+  kampanye berbayar mencapai batas 3×/hari. Klien web menunggu event `complete` terkirim (maks 2 dtk) sebelum meminta
+  jeda iklan agar lagu sudah tercatat.
+
 ### Fitur
 - **Tier Gratis: tidak bisa menggeser lagu** (pengaturan publik baru `streaming.free_seek_enabled`, default mati): di web,
   desktop & mobile, slider progres hanya tampilan (ikon kunci + toast "Geser lagu khusus Premium"); pintasan keyboard,

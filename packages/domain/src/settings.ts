@@ -349,7 +349,7 @@ export const SETTINGS: SettingDef[] = [
   { key: 'ads.max_display_seconds', group: 'ads', label: 'Durasi maksimum iklan display', description: 'Lama kartu iklan display tampil di pemutar.', type: 'number', default: 15, min: 5, max: 30, unit: 'detik', consumers: ['ads'] },
   { key: 'ads.skip_after_seconds', group: 'ads', label: 'Bisa dilewati setelah', description: 'Iklan display dapat dilewati setelah detik ini. 0 = langsung.', type: 'number', default: 5, min: 0, max: 30, unit: 'detik', public: true, consumers: ['ads', 'web'] },
   { key: 'ads.audio_skippable', group: 'ads', label: 'Iklan audio dapat dilewati', description: 'Praktik umum tier gratis: iklan audio tidak dapat dilewati.', type: 'boolean', default: false, public: true, consumers: ['ads', 'web'] },
-  { key: 'ads.frequency_cap_per_day', group: 'ads', label: 'Frequency cap per kampanye', description: 'Berapa kali satu kampanye boleh tampil ke pendengar yang sama per hari.', type: 'number', default: 3, min: 1, max: 20, unit: 'kali', consumers: ['ads'] },
+  { key: 'ads.frequency_cap_per_day', group: 'ads', label: 'Frequency cap per kampanye', description: 'Berapa kali satu kampanye berbayar boleh tampil ke pendengar yang sama per hari. Promosi internal RAVE tidak dibatasi (dirotasi) agar slot iklan setiap lagu tetap terisi.', type: 'number', default: 3, min: 1, max: 20, unit: 'kali', consumers: ['ads'] },
   {
     key: 'ads.blocked_categories',
     group: 'ads',

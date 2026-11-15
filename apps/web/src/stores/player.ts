@@ -90,9 +90,13 @@ function queueEvent(type: 'start' | 'progress' | 'complete' | 'skip') {
     played_ms: Math.round(playedMs),
     at: new Date().toISOString(),
   });
-  if (type !== 'progress' || pending.length >= 4) void flushEvents();
+  if (type !== 'progress' || pending.length >= 4) lastFlush = flushEvents();
   else ensureFlushTimer();
 }
+/** Pengiriman event terakhir yang dipicu langsung (`complete`) — ditunggu (maks 2 dtk) sebelum jeda iklan agar lagu
+ *  sudah tercatat server; tanpa ini jeda "setiap lagu" bisa terlewat bila event progres belum terkirim. */
+let lastFlush: Promise<void> | null = null;
+const settleEvents = () => Promise.race([lastFlush ?? Promise.resolve(), new Promise<void>((r) => setTimeout(r, 2000))]).catch(() => {});
 // Interval 30 dtk hanya hidup selama ada event tertunda.
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 function ensureFlushTimer() {
@@ -229,6 +233,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
   async function onEnded() {
     queueEvent('complete');
+    await settleEvents();
     const { repeat, current, queue, index, muted, volume } = get();
     useAds.getState().setVolume(muted ? 0 : volume);
     if (repeat === 'one' && current) {

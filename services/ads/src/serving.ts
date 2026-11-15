@@ -69,7 +69,9 @@ export async function eligibility(db: Db, ctx: ServeContext): Promise<Eligibilit
       const maxDur = c.type === 'audio' ? settings.num('ads.max_audio_seconds') : settings.num('ads.max_display_seconds');
       if (c.duration_s > maxDur) return `Durasi ${c.duration_s} dtk melebihi batas ${maxDur} dtk`;
       if (c.type === 'audio' && !c.audio_url) return 'Iklan audio tanpa berkas audio';
-      if (c.user_today >= cap) return `Frequency cap tercapai (${cap}×/hari)`;
+      // Promosi internal = pengisi inventori tak terjual → tanpa frequency cap (dirotasi di pick()), agar kebijakan
+      // "iklan setiap lagu" tier Gratis tidak berhenti setelah kampanye berbayar mencapai batas hariannya.
+      if (!c.is_house && c.user_today >= cap) return `Frequency cap tercapai (${cap}×/hari)`;
       if (ctx.contentWarning && settings.bool('ads.sensitive_adjacency') && !c.is_house) return 'Keamanan merek: setelah konten sensitif hanya promosi internal';
       if (c.target_genres.length && !c.target_genres.some((g: string) => ctx.genres.includes(g))) return 'Genre konten tidak cocok (kontekstual)';
       if (c.target_cities.length) {
@@ -99,8 +101,11 @@ export function pick(eligible: Eligibility[], slots: number) {
   }
   // Inventori tak terjual diisi satu promosi internal saja (tidak menambah ad load hanya demi mengisi slot).
   if (!chosen.length) {
+    // Rotasi: promosi yang paling jarang tampil ke pendengar ini hari ini (acak bila seri).
     const house = ok.filter((e) => e.is_house);
-    if (house.length) chosen.push(house[Math.floor(Math.random() * house.length)]);
+    const least = Math.min(...house.map((e) => Number(e.row?.user_today ?? 0)));
+    const fresh = house.filter((e) => Number(e.row?.user_today ?? 0) === least);
+    if (fresh.length) chosen.push(fresh[Math.floor(Math.random() * fresh.length)]);
   }
   return chosen;
 }
