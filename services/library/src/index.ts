@@ -1,5 +1,6 @@
 import { createService, config, type Consumers } from '@rave/service-kit';
 import { routes } from './routes.js';
+import { editorialRoutes } from './editorial.js';
 import { seed } from './seed.js';
 
 const consumers = (): Consumers => ({
@@ -23,7 +24,10 @@ const svc = createService({
   schema: 'library',
   port: config.ports.library,
   migrationsDir: new URL('../migrations/', import.meta.url),
-  routes,
+  routes: async (app, ctx) => {
+    await routes(app, ctx);
+    await editorialRoutes(app, ctx);
+  },
   consumers,
   stats: async ({ db }) => (await db.one(
     `SELECT (SELECT count(*) FROM playlists)::int AS playlists,

@@ -49,6 +49,7 @@ export const ROUTES: [prefix: string, upstream: Upstream][] = [
   ['/v1/admin/reports/subscription', 'iam'],
   ['/v1/admin/reports/pro', 'iam'],
   ['/v1/library', 'library'],
+  ['/v1/admin/library', 'library'],
   ['/v1/playback', 'playback'],
   ['/v1/events/play', 'playback'],
   ['/v1/analytics', 'playback'],

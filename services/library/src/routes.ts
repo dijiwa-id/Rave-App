@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { badRequest, forbidden, notFound, publish, requireAuth, requireService, unprocessable, uuidv7, z, type ServiceContext } from '@rave/service-kit';
+import { badRequest, forbidden, hasPermission, notFound, publish, requireAuth, requireService, unprocessable, uuidv7, z, type ServiceContext } from '@rave/service-kit';
 import { hydrateTracks } from './hydrate.js';
 
 const MAX_ITEMS = 10_000;
@@ -17,6 +17,7 @@ function summary(p: any) {
     visibility: p.visibility,
     track_count: p.track_count ?? 0,
     is_editorial: p.is_editorial,
+    ...(p.is_editorial ? { tags: p.tags ?? [], sort_order: p.sort_order ?? 0, published: p.published !== false, updated_at: p.updated_at } : {}),
   };
 }
 
@@ -42,14 +43,18 @@ export async function routes(app: FastifyInstance, { db, log }: ServiceContext) 
     return p;
   }
 
-  async function canEdit(p: any, userId: string, itemsOnly = false) {
+  async function canEdit(p: any, req: FastifyRequest, itemsOnly = false) {
+    const userId = req.user!.sub;
+    // Playlist editorial (pemilik 'rave') diubah kurator Back Office berizin library.curate.
+    if (p.is_editorial) return hasPermission(req.user, 'library.curate');
     if (p.owner_id === userId) return true;
     if (itemsOnly && p.visibility === 'COLLAB') return !!(await db.one(`SELECT 1 FROM playlist_collaborators WHERE playlist_id = $1 AND user_id = $2`, [p.id, userId]));
     return false;
   }
 
   function canView(p: any, req: FastifyRequest) {
-    if (p.is_editorial || p.visibility !== 'PRIVATE') return true;
+    if (p.is_editorial) return p.published !== false || hasPermission(req.user, 'library.curate');
+    if (p.visibility !== 'PRIVATE') return true;
     return req.user?.sub === p.owner_id || req.user?.roles.includes('admin');
   }
 
@@ -63,7 +68,7 @@ export async function routes(app: FastifyInstance, { db, log }: ServiceContext) 
 
   app.get('/v1/library/playlists/featured', async (req) => {
     const { tag } = req.query as { tag?: string };
-    const rows = await db.query(`${PLAYLIST_SELECT} WHERE p.is_editorial AND ($1::text IS NULL OR $1 = ANY(p.tags)) ORDER BY p.sort_order, p.created_at`, [tag ?? null]);
+    const rows = await db.query(`${PLAYLIST_SELECT} WHERE p.is_editorial AND p.published AND ($1::text IS NULL OR $1 = ANY(p.tags)) ORDER BY p.sort_order, p.created_at`, [tag ?? null]);
     return { data: await withCovers(rows) };
   });
 
@@ -197,7 +202,7 @@ export async function routes(app: FastifyInstance, { db, log }: ServiceContext) 
     a.patch('/v1/library/playlists/:id', async (req) => {
       const { id } = req.params as { id: string };
       const p = await loadPlaylist(uuid.parse(id));
-      if (!(await canEdit(p, uid(req)))) throw forbidden('Hanya pemilik playlist');
+      if (!(await canEdit(p, req))) throw forbidden('Hanya pemilik playlist');
       const b = plBody.partial().parse(req.body);
       await db.query(
         `UPDATE playlists SET title = coalesce($2, title), description = CASE WHEN $3 THEN $4 ELSE description END,
@@ -210,7 +215,7 @@ export async function routes(app: FastifyInstance, { db, log }: ServiceContext) 
     a.delete('/v1/library/playlists/:id', async (req) => {
       const { id } = req.params as { id: string };
       const p = await loadPlaylist(uuid.parse(id));
-      if (!(await canEdit(p, uid(req)))) throw forbidden('Hanya pemilik playlist');
+      if (!(await canEdit(p, req))) throw forbidden('Hanya pemilik playlist');
       await db.query(`DELETE FROM playlists WHERE id = $1`, [id]);
       return { ok: true };
     });
@@ -221,7 +226,7 @@ export async function routes(app: FastifyInstance, { db, log }: ServiceContext) 
       const item = await db.tx(async (tx) => {
         const p = (await tx.query(`SELECT * FROM playlists WHERE id = $1 FOR UPDATE`, [uuid.parse(id)])).rows[0];
         if (!p) throw notFound('Playlist');
-        if (!(await canEdit(p, uid(req), true))) throw forbidden('Tidak dapat mengubah playlist ini');
+        if (!(await canEdit(p, req, true))) throw forbidden('Tidak dapat mengubah playlist ini');
         const agg = (await tx.query(`SELECT count(*)::int AS n, coalesce(max(position), 0) AS maxpos FROM playlist_items WHERE playlist_id = $1`, [id])).rows[0];
         if (agg.n >= MAX_ITEMS) throw unprocessable(`Batas ${MAX_ITEMS} lagu per playlist`);
         const r = (
@@ -244,7 +249,7 @@ export async function routes(app: FastifyInstance, { db, log }: ServiceContext) 
     a.delete('/v1/library/playlists/:id/items/:itemId', async (req) => {
       const { id, itemId } = req.params as { id: string; itemId: string };
       const p = await loadPlaylist(uuid.parse(id));
-      if (!(await canEdit(p, uid(req), true))) throw forbidden('Tidak dapat mengubah playlist ini');
+      if (!(await canEdit(p, req, true))) throw forbidden('Tidak dapat mengubah playlist ini');
       await db.query(`DELETE FROM playlist_items WHERE playlist_id = $1 AND id = $2`, [id, uuid.parse(itemId)]);
       return { ok: true };
     });
@@ -257,7 +262,7 @@ export async function routes(app: FastifyInstance, { db, log }: ServiceContext) 
       await db.tx(async (tx) => {
         const p = (await tx.query(`SELECT * FROM playlists WHERE id = $1 FOR UPDATE`, [uuid.parse(id)])).rows[0];
         if (!p) throw notFound('Playlist');
-        if (!(await canEdit(p, uid(req), true))) throw forbidden('Tidak dapat mengubah playlist ini');
+        if (!(await canEdit(p, req, true))) throw forbidden('Tidak dapat mengubah playlist ini');
         let pos: number;
         if (!after_item_id) {
           const r = (await tx.query(`SELECT coalesce(min(position), 1) AS m FROM playlist_items WHERE playlist_id = $1 AND id <> $2`, [id, itemId])).rows[0];

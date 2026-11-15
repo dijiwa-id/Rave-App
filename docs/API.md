@@ -150,8 +150,29 @@ Split = { id, type: "MASTER"|"PUBLISHING", party_name, email, pct, approved_at }
 | `GET /v1/library/history` | | `{ data: Track[] }` |
 
 ```ts
-PlaylistSummary = { id, title, description, cover_url, owner: { id, name }, visibility, track_count, is_editorial }
+PlaylistSummary = { id, title, description, cover_url, owner: { id, name }, visibility, track_count, is_editorial }  // editorial: + tags, sort_order, published, updated_at
 Playlist = PlaylistSummary & { items: { item_id, added_at, track: Track }[] }
+```
+
+### Editor playlist editorial (Back Office, izin `library.curate`)
+
+Super Admin selalu boleh; default juga peran **Editorial** (Peran & Akses → Konten). Semua perubahan tercatat di audit log
+(`editorial.create|update|publish|unpublish|reorder|items_add|delete`). Playlist editorial berpemilik `rave`; draf
+(`published=false`) tidak tampil di `/featured` dan 404 untuk publik. Hapus/pindah satu lagu memakai
+`DELETE …/items/:itemId` & `POST …/items/:itemId/move` di atas (kurator diizinkan untuk playlist editorial).
+
+| Method & Path | Body / Query | Respons |
+|---|---|---|
+| `GET /v1/admin/library/playlists` | `?status=all\|published\|draft&q=` | `{ data: EditorialPlaylist[] }` urut `sort_order` |
+| `POST /v1/admin/library/playlists` | `{ title, description?, cover_url?, tags?: string[] (≤12, a-z0-9-), published?: false }` | `201 EditorialPlaylist & { items }` (urutan terakhir) |
+| `GET /v1/admin/library/playlists/:id` | | `EditorialPlaylist & { items }` |
+| `PATCH /v1/admin/library/playlists/:id` | sebagian field POST; `cover_url: null` = sampul otomatis | `EditorialPlaylist & { items }` |
+| `DELETE /v1/admin/library/playlists/:id` | | `{ ok }` |
+| `PUT /v1/admin/library/playlists/order` | `{ ids: uuid[] }` — yang disebut di depan, sisanya mengikuti urutan lama | `{ data: EditorialPlaylist[] }` |
+| `POST /v1/admin/library/playlists/:id/items` | `{ track_ids: uuid[] (1–200) }` — duplikat dilewati, lagu tak tersedia → 422 | `201 { added: PlaylistItem[], skipped_duplicates }` |
+
+```ts
+EditorialPlaylist = { id, title, description, cover_url, has_custom_cover, tags, sort_order, published, track_count, created_at, updated_at }
 ```
 
 ## 4. Playback & Analytics (REQ-STR-01/02, REQ-WEB-04, REQ-STU-03)

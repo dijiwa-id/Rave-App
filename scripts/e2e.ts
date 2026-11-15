@@ -911,6 +911,46 @@ for (const id of [LS, BS]) await call(artistTok, 'DELETE', `/v1/live/studio/stre
 const ovLive = await call(S, 'GET', '/v1/admin/platform/overview');
 check('dasbor Super Admin: service live sehat + KPI siaran', ovLive.data?.services?.some((x: any) => x.name === 'live' && x.ok) && ovLive.data.kpis.streams_live >= 1, ovLive.data?.kpis?.streams_live);
 
+console.log('\n▶ Editor playlist editorial (Back Office, izin library.curate)');
+{
+  const SA = sa.access_token;
+  const feat = await call(null, 'GET', '/v1/library/playlists/featured');
+  const src = await call(null, 'GET', `/v1/library/playlists/${feat.data?.data?.[0]?.id}`);
+  const trackIds: string[] = (src.data?.items ?? []).slice(0, 3).map((i: any) => i.track.id);
+  check('fan tidak bisa membuka editor (403)', (await call(fan.access_token, 'GET', '/v1/admin/library/playlists')).status === 403);
+  const cr = await call(SA, 'POST', '/v1/admin/library/playlists', { title: 'Uji Editorial', description: 'dibuat e2e', tags: ['uji-e2e'] });
+  const PID = cr.data?.id;
+  check('buat playlist editorial → draf, urutan terakhir, tag tersimpan', cr.status === 201 && cr.data?.published === false && cr.data?.tags?.[0] === 'uji-e2e' && cr.data?.track_count === 0, cr.data);
+  const hidden = await call(null, 'GET', '/v1/library/playlists/featured');
+  const anonDraft = await call(null, 'GET', `/v1/library/playlists/${PID}`);
+  check('draf tidak tampil di beranda & tidak bisa dibuka publik', !hidden.data?.data?.some((p: any) => p.id === PID) && anonDraft.status === 404, anonDraft.status);
+  const add = await call(SA, 'POST', `/v1/admin/library/playlists/${PID}/items`, { track_ids: trackIds });
+  const dup = await call(SA, 'POST', `/v1/admin/library/playlists/${PID}/items`, { track_ids: [trackIds[0]] });
+  const bad = await call(SA, 'POST', `/v1/admin/library/playlists/${PID}/items`, { track_ids: ['00000000-0000-7000-8000-000000000000'] });
+  check('tambah lagu sekaligus; duplikat dilewati; lagu tak dikenal 422', add.status === 201 && add.data?.added?.length === trackIds.length && dup.data?.added?.length === 0 && dup.data?.skipped_duplicates === 1 && bad.status === 422, [add.data?.added?.length, dup.data, bad.status]);
+  const fanAdd = await call(fan.access_token, 'POST', `/v1/library/playlists/${PID}/items`, { track_id: trackIds[0] });
+  check('fan tidak bisa mengubah lagu playlist editorial (403)', fanAdd.status === 403, fanAdd.status);
+  const last = add.data?.added?.at(-1)?.item_id;
+  const mv = await call(SA, 'POST', `/v1/library/playlists/${PID}/items/${last}/move`, { after_item_id: null });
+  const det = await call(SA, 'GET', `/v1/admin/library/playlists/${PID}`);
+  check('kurator memindah lagu lewat endpoint playlist biasa', mv.status === 200 && det.data?.items?.[0]?.item_id === last, det.data?.items?.map((i: any) => i.item_id));
+  const pub = await call(SA, 'PATCH', `/v1/admin/library/playlists/${PID}`, { published: true, title: 'Uji Editorial Tayang', cover_url: 'http://bukan-https.example/x.jpg' });
+  check('sampul non-https ditolak (400)', pub.status === 400, pub.status);
+  const pub2 = await call(SA, 'PATCH', `/v1/admin/library/playlists/${PID}`, { published: true, title: 'Uji Editorial Tayang' });
+  const shown = await call(null, 'GET', '/v1/library/playlists/featured');
+  check('tayang → muncul di beranda dengan judul baru & sampul otomatis', pub2.data?.published === true && shown.data?.data?.some((p: any) => p.id === PID && p.title === 'Uji Editorial Tayang' && !!p.cover_url), pub2.data);
+  const ord = await call(SA, 'PUT', '/v1/admin/library/playlists/order', { ids: [PID] });
+  const home = await call(null, 'GET', '/v1/library/playlists/featured');
+  check('urutan tampil: playlist dipindah ke posisi pertama beranda', ord.status === 200 && home.data?.data?.[0]?.id === PID, home.data?.data?.map((p: any) => p.title).slice(0, 3));
+  const aud = await call(SA, 'GET', `/v1/admin/library/playlists`);
+  check('daftar admin memuat draf & tayang', aud.data?.data?.some((p: any) => p.id === PID && p.published), aud.status);
+  const del = await call(SA, 'DELETE', `/v1/admin/library/playlists/${PID}`);
+  const gone = await call(SA, 'GET', `/v1/admin/library/playlists/${PID}`);
+  check('hapus playlist editorial', del.data?.ok === true && gone.status === 404, gone.status);
+  // Kembalikan urutan awal beranda.
+  if (feat.data?.data?.length) await call(SA, 'PUT', '/v1/admin/library/playlists/order', { ids: feat.data.data.map((p: any) => p.id) });
+}
+
 console.log('\n▶ Iklan: kebijakan penayangan tier Gratis');
 const adAnon = await call(null, 'POST', '/v1/ads/break', { placement: 'between_tracks' });
 check('iklan: anonim tidak pernah diberi iklan', adAnon.data?.outcome === 'anonymous' && adAnon.data.ads.length === 0, adAnon.data);

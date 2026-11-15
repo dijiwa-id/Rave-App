@@ -6,6 +6,11 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 ## [Unreleased]
 
 ### Fitur
+- **Editor playlist editorial (API Back Office)** (`services/library/src/editorial.ts`, izin baru `library.curate`
+  untuk Super Admin & peran Editorial): `/v1/admin/library/playlists` — daftar (termasuk draf), buat (default draf),
+  ubah judul/deskripsi/sampul/tag, tayang/draf, hapus, urutan tampil di beranda, tambah lagu sekaligus (duplikat
+  dilewati, lagu tak tersedia ditolak). Hapus/pindah lagu memakai endpoint playlist biasa. Draf tidak tampil di
+  beranda; semua perubahan tercatat di audit log. Migrasi library `005_editorial_publish`.
 - **Tema dipindah ke Pengaturan (web):** tombol cepat Gelap/Terang di header aplikasi dengar dihapus untuk pengguna
   yang masuk — tema dipilih di **Pengaturan → Tampilan** (Gelap / Terang / Ikuti sistem, tersinkron ke akun).
   Tamu (tanpa akses Pengaturan) tetap mendapat tombol cepat di header.
