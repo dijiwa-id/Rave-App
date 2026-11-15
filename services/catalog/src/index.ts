@@ -8,10 +8,12 @@ import { seed } from './seed.js';
 import { syncGenres } from './genres-sync.js';
 import { studioRoutes } from './studio.js';
 import { transcodeJob } from './audio.js';
+import { spectrumJob, spectrumRoutes } from './spectrum.js';
 
 async function routes(app: FastifyInstance, ctx: ServiceContext) {
   await syncGenres(ctx);
   await publicRoutes(app, ctx);
+  await spectrumRoutes(app, ctx);
   await studioRoutes(app, ctx);
   await adminRoutes(app, ctx);
   await reportRoutes(app, ctx);
@@ -24,7 +26,7 @@ const svc = createService({
   migrationsDir: new URL('../migrations/', import.meta.url),
   routes,
   consumers,
-  jobs: [scheduledReleaseJob, listenersDecayJob, transcodeJob],
+  jobs: [scheduledReleaseJob, listenersDecayJob, transcodeJob, spectrumJob],
   stats: async ({ db }) =>
     (await db.one(
       `SELECT (SELECT count(*) FROM artists)::int AS artists,

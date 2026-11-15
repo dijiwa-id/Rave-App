@@ -1,9 +1,11 @@
 import type { FastifyInstance } from 'fastify';
-import { audit, badRequest, config, conflict, isSuperAdmin, forbidden, notFound, publish, requirePermission, settings, unauthorized, z, type Client, type Job, type ServiceContext } from '@rave/service-kit';
+import { audit, badRequest, config, conflict, isSuperAdmin, forbidden, notFound, publish, requirePermission, settings, unauthorized, wakeJob, z, type Client, type Job, type ServiceContext } from '@rave/service-kit';
 import { isUuid, releaseFull, releasesFull } from './queries.js';
 import { open as fsOpen } from 'node:fs/promises';
 import { join } from 'node:path';
 import { imageSize, UPLOAD_DIR } from './storage.js';
+import { requestLossless } from './audio.js';
+import { queueReleaseSpectra } from './spectrum.js';
 
 /** Dimensi artwork dari header berkas lokal (tanpa memuat seluruh gambar). null = eksternal / tidak terbaca. */
 async function artworkSize(url: string | null): Promise<{ width: number; height: number; bytes: number } | null> {
@@ -58,6 +60,8 @@ export async function goLive(tx: Client, releaseId: string) {
   const rel = r.rows[0];
   if (!rel) return false;
   const t = await tx.query(`SELECT id FROM tracks WHERE release_id = $1 ORDER BY track_number`, [releaseId]);
+  // Amplop spektrum LCD pemutar dibuat di latar (worker track-spectrum); tidak memblokir penayangan.
+  await queueReleaseSpectra(tx, releaseId);
   await publish(tx, 'catalog.release.published', releaseId, {
     releaseId,
     artistId: rel.artist_id,
@@ -444,6 +448,20 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
       );
       if (!t) throw notFound('Lagu');
       return t;
+    });
+
+    // Premium meminta Lossless yang belum ada (transcoding.lossless_mode = on_demand) → antrekan pembuatan FLAC.
+    s.post('/internal/tracks/:id/lossless', async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isUuid(id)) throw notFound('Lagu');
+      const u = await db.one<{ id: string }>(
+        `SELECT u.id FROM tracks t JOIN uploads u ON u.stored_name = split_part(t.audio_url, '/v1/catalog/media/', 2) WHERE t.id = $1`,
+        [id],
+      );
+      if (!u) return { queued: false };
+      const queued = await requestLossless(db, u.id);
+      if (queued) await wakeJob(db, 'audio-transcode');
+      return { queued };
     });
 
     s.get('/internal/episodes/:id/media', async (req) => {

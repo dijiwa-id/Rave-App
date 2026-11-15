@@ -29,11 +29,11 @@ export default function Liked() {
         </div>
       </header>
       <div>
-        <ActionBar>{tracks.length > 0 && <PlayFab size="lg" onClick={() => playQueue(tracks.map(trackToPlayable))} />}</ActionBar>
+        <ActionBar>{tracks.length > 0 && <PlayFab size="lg" playKey="liked" onClick={() => playQueue(tracks.map(trackToPlayable), 0, 'liked')} />}</ActionBar>
         {q.isLoading && <PageLoader />}
         {q.isError && <DarkError error={q.error} retry={() => q.refetch()} />}
         {!q.isLoading && !tracks.length && <EmptyState title={d.liked.emptyTitle} body={d.liked.emptyBody} icon={<Heart className="size-12" />} />}
-        {tracks.length > 0 && <TrackTable tracks={tracks} />}
+        {tracks.length > 0 && <TrackTable tracks={tracks} context="liked" />}
       </div>
     </div>
   );

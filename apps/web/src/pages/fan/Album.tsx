@@ -53,12 +53,12 @@ export default function Album() {
       />
       <div>
         <ActionBar>
-          <PlayFab size="lg" onClick={() => playQueue(r.tracks.map(trackToPlayable))} />
+          <PlayFab size="lg" playKey={`release:${r.id}`} onClick={() => playQueue(r.tracks.map(trackToPlayable), 0, `release:${r.id}`)} />
           <button onClick={toggleSave} aria-label={saved ? d.album.remove : d.album.save} className={saved ? 'text-rave-primary-text' : 'text-rave-muted hover:text-white'}>
             {saved ? <CheckCircle2 className="size-8" /> : <PlusCircle className="size-8" />}
           </button>
         </ActionBar>
-        <TrackTable tracks={r.tracks} showAlbum={false} showCover={false} />
+        <TrackTable tracks={r.tracks} showAlbum={false} showCover={false} context={`release:${r.id}`} />
         <div className="mt-8 px-4 text-xs text-rave-muted md:px-8">
           <p>{new Date(r.release_date).toLocaleDateString(localeTag(), { day: 'numeric', month: 'long', year: 'numeric' })}</p>
           <p className="mt-1">

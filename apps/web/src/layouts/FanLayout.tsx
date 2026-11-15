@@ -1,31 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
-import { LanguageSwitch } from '@/components/LanguageSwitch';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, Bookmark, ChevronDown, ChevronLeft, ChevronRight, Download, Heart, Home, Library, LogOut, Plus, Radio, Search, Ticket, User } from 'lucide-react';
+import { Bell, ChevronDown, Moon, Sun, ChevronLeft, ChevronRight, Download, Heart, Home, LayoutGrid, Library, LogOut, Radio, Search, Sparkles, Ticket, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useDict } from '@/lib/i18n';
-import type { PlaylistSummary } from '@/lib/types';
 import { hasRole, isSuperAdmin, useAuth } from '@/stores/auth';
 import { RaveLogo } from '@/components/ui/RaveLogo';
-import { cx, toast } from '@/components/ui';
+import { cx } from '@/components/ui';
 import { usePlayer } from '@/stores/player';
+import { usePrefs } from '@/stores/prefs';
 import { PlatformBanner } from '@/components/PlatformBanner';
 import { setting, usePlatformConfig } from '@/lib/platform';
 import { useAnyLive } from '@/components/live/common';
 import { useModule } from '@/components/ModuleGate';
 import { useMediaSession, usePlayerShortcuts } from '@/lib/playerControls';
 import { PlayerBar } from './PlayerBar';
+import { useApplyPlayerTheme, usePlayerTheme } from '@/lib/theme';
+import { setPlayerTheme } from '@/lib/playerTheme';
 import { AdBreakOverlay } from './AdBreak';
-
-function SideLink({ to, icon: Icon, children, end }: { to: string; icon: any; children: string; end?: boolean }) {
-  return (
-    <NavLink to={to} end={end} className={({ isActive }) => cx('relative mx-3 flex items-center gap-4 rounded-none px-3 py-2 text-sm font-bold transition', isActive ? 'bg-white/[0.07] text-white before:absolute before:inset-y-2 before:-left-3 before:w-1 before:rounded-r before:bg-rave-primary' : 'text-rave-muted hover:bg-white/[0.04] hover:text-white')}>
-      <Icon className="size-6" />
-      {children}
-    </NavLink>
-  );
-}
+import { LEFT, RIGHT, useLayout, useLeftRoomy, useMediaQuery, useRightDocked, useRightOpen } from '@/stores/layout';
+import { LibraryPanel } from './shell/LibraryPanel';
+import { NowPlayingPanel } from './shell/NowPlayingPanel';
+import { ResizeHandle } from './shell/bits';
 
 /** Menu "Live" (disembunyikan bila modules.live mati) dengan titik merah saat ada yang sedang live. */
 function useLiveNav() {
@@ -40,122 +36,6 @@ function LiveDot() {
       <span className="absolute inline-flex size-full animate-ping rounded-full bg-red-500 opacity-75" />
       <span className="relative inline-flex size-2 rounded-full bg-red-500" />
     </span>
-  );
-}
-
-function Sidebar() {
-  const token = useAuth((s) => s.accessToken);
-  const nav = useNavigate();
-  const qc = useQueryClient();
-  // Modul podcast & ticketing bisa dimatikan Super Admin (modules.*).
-  const podcasts = useModule('podcasts');
-  const ticketing = useModule('ticketing');
-  const live = useLiveNav();
-  const d = useDict('common');
-  const { data } = useQuery({
-    queryKey: ['library-summary'],
-    queryFn: () => api<{ playlists: PlaylistSummary[] }>('/v1/library/summary'),
-    enabled: !!token,
-  });
-  async function createPlaylist() {
-    if (!token) return nav('/login');
-    try {
-      const pl = await api<PlaylistSummary>('/v1/library/playlists', { body: { title: d.layout.newPlaylist((data?.playlists.length ?? 0) + 1) } });
-      qc.invalidateQueries({ queryKey: ['library-summary'] });
-      nav(`/app/playlist/${pl.id}`);
-    } catch (e) {
-      toast.error(e);
-    }
-  }
-  return (
-    <aside className="hidden w-[240px] shrink-0 flex-col border-r border-white/[0.06] bg-rave-black pt-6 md:flex">
-      <Link to="/" className="mb-7 px-6" aria-label={d.layout.homeAria}>
-        <RaveLogo className="!h-9" />
-      </Link>
-      <p className="rave-label mb-2 px-6 text-rave-subtle">{d.layout.menu}</p>
-      <nav className="flex flex-col gap-0.5">
-        <SideLink to="/app" icon={Home} end>
-          {d.layout.home}
-        </SideLink>
-        <SideLink to="/app/search" icon={Search}>
-          {d.layout.search}
-        </SideLink>
-        <SideLink to="/app/library" icon={Library}>
-          {d.layout.yourLibrary}
-        </SideLink>
-        {live.enabled && (
-          <NavLink to="/app/live" className={({ isActive }) => cx('relative mx-3 flex items-center gap-4 rounded-none px-3 py-2 text-sm font-bold transition', isActive ? 'bg-white/[0.07] text-white before:absolute before:inset-y-2 before:-left-3 before:w-1 before:rounded-r before:bg-rave-primary' : 'text-rave-muted hover:bg-white/[0.04] hover:text-white')}>
-            <Radio className="size-6" />
-            {d.layout.live}
-            {live.anyLive && <LiveDot />}
-          </NavLink>
-        )}
-      </nav>
-      <p className="rave-label mt-6 mb-2 px-6 text-rave-subtle">{d.layout.library}</p>
-      <div className="flex flex-col gap-0.5">
-        <button onClick={createPlaylist} className="group mx-3 flex items-center gap-4 rounded-none px-3 py-1.5 text-sm font-bold text-rave-muted transition hover:bg-white/[0.04] hover:text-white">
-          <span className="grid size-6 place-items-center rounded-none bg-rave-muted text-black group-hover:bg-white">
-            <Plus className="size-4" />
-          </span>
-          {d.layout.createPlaylist}
-        </button>
-        <NavLink to="/app/liked" className={({ isActive }) => cx('mx-3 flex items-center gap-4 rounded-none px-3 py-1.5 text-sm font-bold transition', isActive ? 'bg-white/[0.07] text-white' : 'text-rave-muted hover:bg-white/[0.04] hover:text-white')}>
-          <span className="grid size-6 place-items-center rounded-none bg-gradient-to-br from-[#5B2A6E] to-[#F4C21F]">
-            <Heart className="size-3 fill-white text-white" />
-          </span>
-          {d.layout.likedSongs}
-        </NavLink>
-        {podcasts && (
-          <NavLink to="/app/podcasts" className={({ isActive }) => cx('mx-3 flex items-center gap-4 rounded-none px-3 py-1.5 text-sm font-bold transition', isActive ? 'bg-white/[0.07] text-white' : 'text-rave-muted hover:bg-white/[0.04] hover:text-white')}>
-            <span className="grid size-6 place-items-center rounded-none bg-[#5B2A6E]">
-              <Bookmark className="size-3 fill-rave-primary-text text-rave-primary-text" />
-            </span>
-            {d.layout.podcasts}
-          </NavLink>
-        )}
-        {ticketing && (
-          <NavLink to="/app/events" className={({ isActive }) => cx('mx-3 flex items-center gap-4 rounded-none px-3 py-1.5 text-sm font-bold transition', isActive ? 'bg-white/[0.07] text-white' : 'text-rave-muted hover:bg-white/[0.04] hover:text-white')}>
-            <span className="grid size-6 place-items-center rounded-none bg-rave-pink">
-              <Ticket className="size-3 text-white" />
-            </span>
-            {d.layout.events}
-          </NavLink>
-        )}
-      </div>
-      <hr className="mx-6 my-3 border-white/10" />
-      <div className="rave-scroll flex-1 overflow-y-auto px-6">
-        {token ? (
-          <ul className="space-y-3 py-1">
-            {data?.playlists.map((p) => (
-              <li key={p.id}>
-                <NavLink to={`/app/playlist/${p.id}`} className={({ isActive }) => cx('block truncate text-sm', isActive ? 'text-white' : 'text-rave-muted hover:text-white')}>
-                  {p.title}
-                </NavLink>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="space-y-3 pt-2 text-[11px] text-rave-muted">
-            <div className="flex flex-wrap gap-x-4 gap-y-2">
-              <Link to="/ketentuan" className="hover:text-white">{d.layout.legal}</Link>
-              <Link to="/bantuan" className="hover:text-white">{d.layout.help}</Link>
-              <Link to="/privasi" className="hover:text-white">{d.layout.privacy}</Link>
-              <Link to="/cookie" className="hover:text-white">{d.layout.cookie}</Link>
-              <Link to="/iklan" className="hover:text-white">{d.layout.aboutAds}</Link>
-            </div>
-            <LanguageSwitch className="mt-4" />
-          </div>
-        )}
-      </div>
-      <div className="p-4">
-        <a
-          href="/#unduh"
-          className="rave-label flex items-center justify-center gap-2 rounded-none border border-rave-primary/70 px-4 py-3 !text-[11px] text-rave-primary-text transition hover:bg-rave-primary hover:text-rave-on-primary"
-        >
-          <Download className="size-4" /> {d.layout.installApp}
-        </a>
-      </div>
-    </aside>
   );
 }
 
@@ -267,29 +147,159 @@ function UserMenu() {
   );
 }
 
-function TopBar({ scrolled }: { scrolled: boolean }) {
+/** Kotak cari global (header ≥ md): mengetik membuka /app/search?q=… (debounce); Ctrl+K atau "/" memfokuskan. */
+function SearchBox() {
+  const nav = useNavigate();
+  const loc = useLocation();
+  const d = useDict('common');
+  const onSearch = loc.pathname.startsWith('/app/search');
+  const urlQ = onSearch ? (new URLSearchParams(loc.search).get('q') ?? '') : '';
+  const [q, setQ] = useState(urlQ);
+  const ref = useRef<HTMLInputElement>(null);
+  const typed = useRef(false);
+  // Keluar dari halaman cari → kosongkan; masuk dengan ?q= → isi.
+  useEffect(() => {
+    if (!typed.current) setQ(urlQ);
+  }, [urlQ]);
+  useEffect(() => {
+    if (!typed.current) return;
+    const t = setTimeout(() => {
+      typed.current = false;
+      const to = q ? `/app/search?q=${encodeURIComponent(q)}` : '/app/search';
+      nav(to, { replace: onSearch });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      const typing = t?.closest?.('input, textarea, select, [contenteditable="true"]');
+      if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') || (e.key === '/' && !typing)) {
+        e.preventDefault();
+        ref.current?.focus();
+        ref.current?.select();
+      }
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
+  return (
+    <form
+      role="search"
+      onSubmit={(e) => {
+        e.preventDefault();
+        typed.current = false;
+        nav(q ? `/app/search?q=${encodeURIComponent(q)}` : '/app/search', { replace: onSearch });
+      }}
+      className="group relative w-full max-w-[480px]"
+    >
+      <Search className="pointer-events-none absolute top-1/2 left-3.5 size-5 -translate-y-1/2 text-rave-muted transition-colors group-focus-within:text-rave-primary" />
+      <input
+        ref={ref}
+        value={q}
+        onChange={(e) => {
+          typed.current = true;
+          setQ(e.target.value);
+        }}
+        onFocus={() => !onSearch && !q && nav('/app/search')}
+        placeholder={d.layout.searchPlaceholder}
+        aria-label={d.layout.search}
+        title="Ctrl+K"
+        className="h-11 w-full border-2 border-rave-ink bg-[#1e1c1f] pr-14 pl-11 text-[15px] text-rave-paper shadow-[3px_3px_0_#0b0a0c] outline outline-1 -outline-offset-3 outline-white/[0.06] transition placeholder:text-rave-subtle hover:bg-[#242126] focus:border-rave-primary focus:bg-[#242126] focus:shadow-[3px_3px_0_#F4C21F] focus:outline-none"
+      />
+      <Link to="/app/search" title={d.shell.browse} aria-label={d.shell.browse} className="absolute inset-y-[2px] right-[2px] grid w-11 place-items-center border-l border-white/10 text-rave-muted transition hover:bg-rave-primary hover:text-rave-on-primary">
+        <LayoutGrid className="size-5" />
+      </Link>
+    </form>
+  );
+}
+
+/** Saklar cepat Gelap ↔ Terang di header (disembunyikan bila Super Admin mengunci tema). */
+function ThemeQuickToggle() {
+  const accountTheme = useAuth((s) => s.user?.theme);
+  const { resolved, allowUser } = usePlayerTheme(accountTheme);
+  const d = useDict('common').shell;
+  if (!allowUser) return null;
+  const toLight = resolved === 'dark';
+  const label = toLight ? d.themeToLight : d.themeToDark;
+  return (
+    <button type="button" onClick={() => void setPlayerTheme(toLight ? 'light' : 'dark')} title={label} aria-label={label} className={HDR_BTN}>
+      {toLight ? <Sun className="size-4" /> : <Moon className="size-4" />}
+    </button>
+  );
+}
+
+/** Header global (≥ md): logo · Beranda + cari · Premium, notifikasi, akun. */
+function GlobalHeader() {
+  const token = useAuth((s) => s.accessToken);
+  const lightTheme = usePlayerTheme(useAuth((s) => s.user?.theme)).resolved === 'light';
+  const premium = useAuth((s) => !!s.user?.premium);
+  const d = useDict('common');
+  return (
+    <header className="hidden h-16 shrink-0 items-center gap-4 px-4 md:flex">
+      <div className="flex w-[200px] shrink-0 items-center lg:w-[260px]">
+        <Link to="/" aria-label={d.layout.homeAria}>
+          <RaveLogo className="!h-9" dark={lightTheme} />
+        </Link>
+      </div>
+      <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
+        <NavLink to="/app" end aria-label={d.layout.home} title={d.layout.home} className={({ isActive }) => cx(HDR_BTN, '!size-11', isActive && '!bg-rave-primary !text-rave-on-primary')}>
+          <Home className="size-5" />
+        </NavLink>
+        <SearchBox />
+      </div>
+      <div className="flex shrink-0 items-center justify-end gap-3 lg:min-w-[260px]">
+        {token && !premium && (
+          <Link to="/premium" className="rave-btn hidden -rotate-2 items-center gap-1.5 border-2 border-rave-ink bg-rave-paper px-3 py-1.5 font-label text-[11px] font-bold tracking-[0.1em] text-rave-ink uppercase hover:rotate-0 lg:flex">
+            <Sparkles className="size-3.5" /> {d.shell.premium}
+          </Link>
+        )}
+        <ThemeQuickToggle />
+        <a href="/#unduh" title={d.layout.installApp} aria-label={d.layout.installApp} className={cx(HDR_BTN, 'hidden xl:grid')}>
+          <Download className="size-4" />
+        </a>
+        {token ? (
+          <UserMenu />
+        ) : (
+          <div className="flex items-center gap-2">
+            <Link to="/login?signup=1" className="px-3 text-sm font-bold text-white/70 transition hover:text-rave-paper">
+              {d.layout.signUp}
+            </Link>
+            <Link to="/login" className="rave-label border-2 border-rave-ink bg-rave-primary px-5 py-2.5 !text-[11.5px] text-rave-on-primary shadow-[3px_3px_0_#0b0a0c] transition hover:-translate-y-px hover:bg-rave-paper">
+              {d.layout.logIn}
+            </Link>
+          </div>
+        )}
+      </div>
+    </header>
+  );
+}
+
+/** Bar di dalam panel tengah: maju/mundur (semua layar); akun & kotak cari halaman Cari hanya di ponsel. */
+function PanelBar({ scrolled }: { scrolled: boolean }) {
   const nav = useNavigate();
   const loc = useLocation();
   const token = useAuth((s) => s.accessToken);
   const onSearch = loc.pathname.startsWith('/app/search');
   const d = useDict('common');
   const [q, setQ] = useState(new URLSearchParams(loc.search).get('q') ?? '');
+  const mobile = !useMediaQuery('(min-width: 768px)');
   useEffect(() => {
-    if (!onSearch) return;
+    if (!onSearch || !mobile) return;
     const t = setTimeout(() => nav(q ? `/app/search?q=${encodeURIComponent(q)}` : '/app/search', { replace: true }), 250);
     return () => clearTimeout(t);
   }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <header className={cx('sticky top-0 z-30 flex h-16 items-center justify-between gap-4 px-4 transition-colors md:px-8', scrolled ? 'border-b border-white/[0.06] bg-rave-base/90 backdrop-blur-md' : 'bg-transparent')}>
+    <header className={cx('sticky top-0 z-30 flex h-16 items-center justify-between gap-4 px-4 transition-colors md:px-6', scrolled ? 'border-b border-white/[0.06] bg-rave-base/90 backdrop-blur-md' : 'bg-transparent')}>
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <button onClick={() => nav(-1)} aria-label={d.layout.back} title={d.layout.back} className={HDR_BTN}>
           <ChevronLeft className="size-5" />
         </button>
-        <button onClick={() => nav(1)} aria-label={d.layout.forward} title={d.layout.forward} className={HDR_BTN}>
+        <button onClick={() => nav(1)} aria-label={d.layout.forward} title={d.layout.forward} className={cx(HDR_BTN, onSearch && mobile && 'hidden')}>
           <ChevronRight className="size-5" />
         </button>
-        {onSearch && (
-          <label className="relative ml-2 w-full max-w-[364px]">
+        {onSearch && mobile && (
+          <label className="relative ml-1 min-w-0 flex-1">
             <Search className="absolute top-1/2 left-3 size-5 -translate-y-1/2 text-black" />
             <input
               autoFocus
@@ -301,21 +311,20 @@ function TopBar({ scrolled }: { scrolled: boolean }) {
           </label>
         )}
       </div>
-      {token ? (
-        <UserMenu />
-      ) : (
-        <div className="flex items-center gap-2">
-          <Link to="/login?signup=1" className="px-3 text-sm font-bold text-white/70 transition hover:text-rave-paper">
-            {d.layout.signUp}
-          </Link>
-          <Link
-            to="/login"
-            className="rave-label border-2 border-rave-ink bg-rave-primary px-5 py-2.5 !text-[11.5px] text-rave-on-primary shadow-[3px_3px_0_#0b0a0c] transition hover:-translate-y-px hover:bg-rave-paper"
-          >
-            {d.layout.logIn}
-          </Link>
-        </div>
-      )}
+      <div className="md:hidden">
+        {token ? (
+          <UserMenu />
+        ) : (
+          <div className="flex items-center gap-2">
+            <Link to="/login?signup=1" className="px-3 text-sm font-bold text-white/70 transition hover:text-rave-paper">
+              {d.layout.signUp}
+            </Link>
+            <Link to="/login" className="rave-label border-2 border-rave-ink bg-rave-primary px-5 py-2.5 !text-[11.5px] text-rave-on-primary shadow-[3px_3px_0_#0b0a0c] transition hover:-translate-y-px hover:bg-rave-paper">
+              {d.layout.logIn}
+            </Link>
+          </div>
+        )}
+      </div>
     </header>
   );
 }
@@ -375,31 +384,123 @@ function MobileNav() {
   );
 }
 
-/** Shell aplikasi fan RAVE (rave-website/index.html): sidebar hitam, kanvas ink bergradien plum, player bar bawah. */
+/** "[" ciutkan/bentangkan Library, "]" buka/tutup panel Sedang Diputar (bukan saat mengetik). */
+function usePanelShortcuts() {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+      const t = e.target as HTMLElement;
+      if (t?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+      if (e.key === '[') useLayout.getState().toggleLeft();
+      else if (e.key === ']') useLayout.getState().toggleRight('now');
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
+}
+
+/**
+ * Shell aplikasi fan RAVE — 3 panel (≥ md):
+ *   [Side A · Library]  ┃  [kanvas halaman]  ┃  [Side B · Sedang Diputar]
+ * Library bisa diciutkan jadi rel ikon & diubah lebarnya (seret/klik-ganda pegangan, tombol "["); md–lg selalu rel.
+ * Panel kanan menempel di ≥ 1280px dan menjadi laci di atas kanvas di bawahnya ("]" / tombol di pemutar).
+ * < md: tata letak ponsel lama (kanvas penuh + mini-player + nav bawah).
+ */
 export function FanLayout() {
   const token = useAuth((s) => s.accessToken);
+  const accountTheme = useAuth((s) => s.user?.theme);
+  const theme = usePlayerTheme(accountTheme);
+  useApplyPlayerTheme(theme.resolved);
   const hasCurrent = usePlayer((s) => !!s.current);
   useMediaSession();
   usePlayerShortcuts();
+  usePanelShortcuts();
   const mainRef = useRef<HTMLDivElement>(null);
   const [scrolled, setScrolled] = useState(false);
   const loc = useLocation();
+  const desktop = useMediaQuery('(min-width: 768px)');
+  const roomy = useLeftRoomy();
+  const docked = useRightDocked();
+  const L = useLayout();
+  const rightAvailable = useMediaQuery('(min-width: 1024px)');
+  const rail = !roomy || L.leftCollapsed;
+  const rightOpen = useRightOpen();
+  const showRight = rightAvailable && rightOpen;
+  const d = useDict('common');
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
   }, [loc.pathname]);
+  // Preferensi "Buka panel Sedang Diputar saat memutar": lagu baru mulai → buka Side B (hanya mode menempel).
+  useEffect(
+    () =>
+      usePlayer.subscribe((s, prev) => {
+        if (!s.current || s.current.id === prev.current?.id) return;
+        if (!usePrefs.getState().autoOpenNowPlaying || !window.matchMedia('(min-width: 1280px)').matches) return;
+        const l = useLayout.getState();
+        if (!l.rightOpen) useLayout.setState({ rightOpen: true, rightView: 'now' });
+      }),
+    [],
+  );
+  // Laci kanan (layar sedang): pindah halaman → tutup.
+  useEffect(() => {
+    if (useLayout.getState().drawerOpen) useLayout.setState({ drawerOpen: false });
+  }, [loc.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <div className="flex h-full flex-col bg-rave-black">
+    <div data-fan-shell className="flex h-full flex-col bg-rave-black">
       <PlatformBanner />
-      <div className="relative flex min-h-0 flex-1">
-        <Sidebar />
-        <main ref={mainRef} onScroll={(e) => setScrolled((e.target as HTMLElement).scrollTop > 40)} className="rave-scroll rave-app-canvas relative min-w-0 flex-1 overflow-y-auto">
-          <TopBar scrolled={scrolled} />
-          <div className="-mt-16">
-            <Outlet />
-          </div>
-        </main>
-        {/* Jeda iklan tier Gratis — menutupi kanvas, pemutar tetap terlihat (docs/API.md §11) */}
-        <AdBreakOverlay />
+      <GlobalHeader />
+      <div className="relative flex min-h-0 flex-1 md:px-2 md:pb-2">
+        {desktop && (
+          <>
+            <div className="h-full shrink-0" style={{ width: rail ? LEFT.rail : L.leftWidth }}>
+              <LibraryPanel rail={rail} />
+            </div>
+            {roomy ? (
+              <ResizeHandle
+                side="left"
+                width={rail ? LEFT.rail : L.leftWidth}
+                label={d.shell.resize}
+                onResize={(w) => {
+                  if (rail && w > LEFT.rail + 60) L.setLeftCollapsed(false);
+                  if (!rail) L.setLeftWidth(w);
+                }}
+                onRelease={(raw) => !rail && raw < LEFT.min - 70 && L.setLeftCollapsed(true)}
+                onToggle={L.toggleLeft}
+              />
+            ) : (
+              <div className="w-2 shrink-0" />
+            )}
+          </>
+        )}
+        <div className="shell-main relative min-w-0 flex-1 overflow-hidden md:border-white/[0.06]">
+          <main ref={mainRef} onScroll={(e) => setScrolled((e.target as HTMLElement).scrollTop > 40)} className="rave-scroll rave-app-canvas relative h-full overflow-y-auto">
+            <PanelBar scrolled={scrolled} />
+            <div className="-mt-16">
+              <Outlet />
+            </div>
+          </main>
+          {/* Jeda iklan tier Gratis — menutupi kanvas, pemutar tetap terlihat (docs/API.md §11) */}
+          <AdBreakOverlay />
+          {showRight && !docked && (
+            <>
+              <button aria-label={d.shell.closePanel} onClick={L.closeRight} className="absolute inset-0 z-30 bg-black/40 backdrop-blur-[1px]" />
+              <div className="shell-drawer absolute inset-y-0 right-0 z-40 shadow-[-12px_0_32px_rgb(0_0_0/0.5)]" style={{ width: L.rightWidth }}>
+                <NowPlayingPanel />
+              </div>
+            </>
+          )}
+        </div>
+        {showRight && docked && (
+          <>
+            <ResizeHandle side="right" width={L.rightWidth} label={d.shell.resize} onResize={L.setRightWidth} onRelease={(raw) => raw < RIGHT.min - 80 && L.closeRight()} onToggle={L.closeRight} />
+            <div className="h-full shrink-0" style={{ width: L.rightWidth }}>
+              <NowPlayingPanel />
+            </div>
+          </>
+        )}
       </div>
       {(token || hasCurrent) && <PlayerBar />}
       {!token && <PreviewBanner />}

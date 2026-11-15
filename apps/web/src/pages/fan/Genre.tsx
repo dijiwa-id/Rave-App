@@ -33,21 +33,21 @@ export default function Genre() {
         {!!playlists.data?.data.length && (
           <Shelf title={t.shared.playlist}>
             {playlists.data.data.map((p) => (
-              <MediaCard key={p.id} title={p.title} subtitle={p.description ?? ''} image={p.cover_url} href={`/app/playlist/${p.id}`} onPlay={() => play({ id: p.id, kind: 'playlist' })} />
+              <MediaCard key={p.id} title={p.title} subtitle={p.description ?? ''} image={p.cover_url} href={`/app/playlist/${p.id}`} playKey={`playlist:${p.id}`} onPlay={() => play({ id: p.id, kind: 'playlist' })} />
             ))}
           </Shelf>
         )}
         {(browse.isLoading || !!d?.artists.length) && (
           <Shelf title={t.shared.artist} loading={browse.isLoading}>
             {(d?.artists ?? []).map((a) => (
-              <MediaCard key={a.id} title={a.name} subtitle={a.city ?? t.shared.artist} image={a.image_url} href={`/app/artist/${a.slug}`} round onPlay={() => play({ id: a.id, kind: 'artist' })} />
+              <MediaCard key={a.id} title={a.name} subtitle={a.city ?? t.shared.artist} image={a.image_url} href={`/app/artist/${a.slug}`} variant="artist" playKey={`artist:${a.id}`} onPlay={() => play({ id: a.id, kind: 'artist' })} />
             ))}
           </Shelf>
         )}
         {!!d?.releases.length && (
           <Shelf title={t.genre.releases}>
             {d.releases.map((r) => (
-              <MediaCard key={r.id} title={r.title} subtitle={`${r.release_date?.slice(0, 4)} · ${r.artist.name}`} image={r.cover_url} href={`/app/album/${r.id}`} onPlay={() => play({ id: r.id, kind: 'release' })} />
+              <MediaCard key={r.id} title={r.title} subtitle={`${r.release_date?.slice(0, 4)} · ${r.artist.name}`} image={r.cover_url} href={`/app/album/${r.id}`} playKey={`release:${r.id}`} onPlay={() => play({ id: r.id, kind: 'release' })} />
             ))}
           </Shelf>
         )}

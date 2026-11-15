@@ -5,6 +5,29 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+### Fitur
+- **Karaoke: kolom lirik bergulir mulus** (`components/fan/LyricScroller.tsx`) — pita lirik digeser satu transform GPU
+  sehingga baris aktif meluncur ke tengah (bukan potongan antar-baris) dan berwarna mustard solid (tanpa sapuan/masking); baris lain lebih kecil (72%) & blur bertahap
+  sesuai jarak dengan tunda bergelombang. Klik baris mana pun untuk lompat; roda/seret untuk menjelajah, kembali
+  mengikuti lagu otomatis setelah 4 dtk atau lewat tombol "Ikuti lirik". Tepi atas/bawah memudar; hover hanya aktif
+  saat mouse bergerak; gerak dikurangi → tanpa transisi/blur.
+- **Panggung karaoke lebih bersih:** orbit, garis gelombang titik & cincin denyut dihapus (gradien & overlay titik halus
+  dipertahankan); piringan hitam realistis kini jelas, menyembul sebagian dari tepi kanan & berputar pelan (14 dtk/putaran).
+  Logo + "KARAOKE" dan lirik tepat di tengah (tracking diimbangi); tombol keluar disederhanakan jadi ikon X (Esc tetap).
+- **Karaoke: spektrum EQ asli** — panggung karaoke kini memakai spektrum yang mengikuti lagu (sama dengan LCD pemutar &
+  desktop), menggantikan equalizer dekoratif.
+- **Kaset realistis di "pita masih kosong"** (`components/fan/Cassette.tsx`): kaset SVG berproporsi asli — cangkang
+  plastik asap bertekstur, sekrup Phillips, label kertas pita ungu RAVE + sisi A, jendela kaca dengan gulungan pita &
+  hub bergigi, area head bawah; gulungan berputar pelan saat di-hover (gerak dikurangi → diam).
+- **Artist Studio: wizard rilis baru** (`pages/studio/NewRelease.tsx`) — 6 langkah (Info → Lagu → Artwork → Lirik →
+  Split → Tinjau) dengan validasi per langkah, daftar periksa sebelum kirim, dan draf tersimpan otomatis per artis
+  (dilanjutkan saat kembali ke halaman).
+- **Studio: dek unggah master** (`components/studio/upload-deck.tsx`) — antrean 2 unggahan sekaligus, progres byte nyata
+  (XHR), tahap pemeriksaan server, polling status transcoding, batal & coba lagi.
+- **Studio: meja kerja lirik** (`components/studio/lyrics-workbench.tsx`, `lib/lrc.ts` + tes) — teks biasa ↔ LRC
+  tersinkron, impor .lrc/.txt, ketuk waktu sambil memutar pratinjau (Enter/Spasi), geser ±100 ms, validasi per baris
+  (cermin aturan server), pratinjau ala pemutar. Format simpan tidak berubah.
+
 ## [0.3.0] — 2026-11-13
 
 ### Fitur

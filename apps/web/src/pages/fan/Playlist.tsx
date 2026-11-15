@@ -7,7 +7,7 @@ import type { Playlist as PlaylistT, Track } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
 import { trackToPlayable, usePlayer } from '@/stores/player';
 import { ActionBar, colorFor, DarkError, HeroHeader, PlayFab, TrackTable } from '@/components/fan';
-import { Button, EmptyState, Input, Modal, PageLoader, toast } from '@/components/ui';
+import { Button, confirmDialog, EmptyState, Input, Modal, PageLoader, toast } from '@/components/ui';
 import { useDict } from '@/lib/i18n';
 import { IMAGE_ACCEPT, uploadFile } from '@/lib/upload';
 
@@ -124,11 +124,19 @@ export default function Playlist() {
     }
   }
   async function destroy() {
-    if (!confirm(d.playlist.confirmDelete)) return;
+    const ok = await confirmDialog({
+      title: d.playlist.deleteTitle,
+      body: d.playlist.deleteBody(p.title, p.items.length),
+      confirmLabel: d.playlist.deleteCta,
+      danger: true,
+      image: p.cover_url ?? null,
+    });
+    if (!ok) return;
     try {
       await api(`/v1/library/playlists/${id}`, { method: 'DELETE' });
       qc.invalidateQueries({ queryKey: ['library-summary'] });
       nav('/app/library');
+      toast.success(d.playlist.deleted(p.title), { image: p.cover_url });
     } catch (e) {
       toast.error(e);
     }
@@ -154,7 +162,7 @@ export default function Playlist() {
       />
       <div>
         <ActionBar>
-          {tracks.length > 0 && <PlayFab size="lg" onClick={() => playQueue(tracks.map(trackToPlayable))} />}
+          {tracks.length > 0 && <PlayFab size="lg" playKey={`playlist:${id}`} onClick={() => playQueue(tracks.map(trackToPlayable), 0, `playlist:${id}`)} />}
           {mine && (
             <>
               <button
@@ -197,7 +205,7 @@ export default function Playlist() {
             </>
           )}
         </ActionBar>
-        {tracks.length ? <TrackTable tracks={tracks} playlistId={id} onRemove={mine ? remove : undefined} onMove={mine ? move : undefined} /> : <EmptyState title={d.playlist.empty} body={mine ? d.playlist.emptyBody : undefined} />}
+        {tracks.length ? <TrackTable tracks={tracks} playlistId={id} context={`playlist:${id}`} onRemove={mine ? remove : undefined} onMove={mine ? move : undefined} /> : <EmptyState title={d.playlist.empty} body={mine ? d.playlist.emptyBody : undefined} />}
         {mine && <AddTracks playlistId={id} onAdded={refresh} />}
       </div>
       <Modal open={edit} onClose={() => setEdit(false)} title={d.playlist.editDetails} theme="dark">

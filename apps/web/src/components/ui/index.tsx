@@ -1,4 +1,4 @@
-import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { X } from 'lucide-react';
 import { useBranding } from '@/lib/platform';
 import { dict, useDict } from '@/lib/i18n';
@@ -188,8 +188,15 @@ export function Badge({ children, tone = 'neutral', className }: { children: Rea
 }
 
 // ---------- Modal ----------
-export function Modal({ open, onClose, title, children, theme = 'light', wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean } & Theme) {
+export function Modal({ open, onClose, title, children, theme = 'light', wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean | 'xl' } & Theme) {
   const d = useDict('common');
+  // Aplikasi fan (tema gelap) memakai panel dialog RAVE standar.
+  if (theme === 'dark')
+    return (
+      <Dialog open={open} onClose={onClose} title={title} size={wide ? 'lg' : 'md'}>
+        <div className="text-white">{children}</div>
+      </Dialog>
+    );
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 grid animate-[rave-fade_.18s_ease-out] place-items-center bg-black/55 p-4 backdrop-blur-sm" onClick={onClose} role="dialog" aria-modal aria-label={title}>
@@ -197,8 +204,8 @@ export function Modal({ open, onClose, title, children, theme = 'light', wide }:
         onClick={(e) => e.stopPropagation()}
         className={cx(
           'max-h-[90vh] w-full animate-[rave-pop_.22s_cubic-bezier(.22,1,.36,1)] overflow-y-auto rounded-none p-6 shadow-2xl',
-          wide ? 'max-w-3xl' : 'max-w-lg',
-          theme === 'dark' ? 'bg-rave-highlight text-white' : 'b2b-chrome border border-b2b-line text-b2b-ink',
+          wide === 'xl' ? 'max-w-5xl' : wide ? 'max-w-3xl' : 'max-w-lg',
+          'b2b-chrome border border-b2b-line text-b2b-ink',
         )}
       >
         <div className="mb-4 flex items-center justify-between">
@@ -214,43 +221,286 @@ export function Modal({ open, onClose, title, children, theme = 'light', wide }:
 }
 
 // ---------- Toast ----------
-interface ToastItem {
+/**
+ * Notifikasi konfirmasi khas RAVE: "stiker" kertas bertepi ink + bayangan sablon, label kicker Space Mono
+ * (BERES! / WADUH / CATAT), sampul opsional, tombol aksi (mis. Urungkan/Lihat), dan pita hitung-mundur.
+ * Maks. 3 sekaligus; hover menahan hitung mundur. API lama `toast.success(text)` tetap berlaku.
+ */
+export interface ToastOptions {
+  /** Judul tebal di atas teks (opsional). */
+  title?: string;
+  /** Sampul kecil (lagu/playlist/artis) di kiri. */
+  image?: string | null;
+  action?: { label: string; onClick: () => void };
+  /** Durasi tampil (ms). */
+  duration?: number;
+}
+interface ToastItem extends ToastOptions {
   id: number;
   kind: 'success' | 'error' | 'info';
   text: string;
 }
-export const useToast = create<{ items: ToastItem[]; push: (kind: ToastItem['kind'], text: string) => void; remove: (id: number) => void }>((set, get) => ({
+export const useToast = create<{ items: ToastItem[]; paused: number | null; push: (kind: ToastItem['kind'], text: string, o?: ToastOptions) => void; remove: (id: number) => void }>((set, get) => ({
   items: [],
-  push(kind, text) {
+  paused: null,
+  push(kind, text, o = {}) {
     const id = Date.now() + Math.random();
-    set({ items: [...get().items, { id, kind, text }] });
-    setTimeout(() => get().remove(id), 4500);
+    // Pesan sama beruntun (mis. klik ganda) → ganti yang lama, jangan menumpuk.
+    const items = get().items.filter((t) => t.text !== text);
+    set({ items: [...items, { id, kind, text, ...o }].slice(-3) });
   },
   remove: (id) => set({ items: get().items.filter((t) => t.id !== id) }),
 }));
 export const toast = {
-  success: (t: string) => useToast.getState().push('success', t),
-  error: (t: unknown) => useToast.getState().push('error', typeof t === 'string' ? t : ((t as any)?.message ?? dict('common').ui.genericError)),
-  info: (t: string) => useToast.getState().push('info', t),
+  success: (t: string, o?: ToastOptions) => useToast.getState().push('success', t, o),
+  error: (t: unknown, o?: ToastOptions) => useToast.getState().push('error', typeof t === 'string' ? t : ((t as any)?.message ?? dict('common').ui.genericError), o),
+  info: (t: string, o?: ToastOptions) => useToast.getState().push('info', t, o),
 };
+
+const TOAST_TONE = {
+  success: { box: 'bg-rave-primary text-rave-ink', kicker: 'bg-rave-ink text-rave-primary', bar: 'bg-rave-ink', rot: '-rotate-1' },
+  info: { box: 'bg-rave-paper text-rave-ink', kicker: 'bg-rave-purple text-rave-paper', bar: 'bg-rave-purple', rot: 'rotate-1' },
+  error: { box: 'bg-rave-berry text-white', kicker: 'bg-rave-ink text-[#ff9a9a]', bar: 'bg-white/80', rot: '-rotate-1' },
+} as const;
+
+function ToastCard({ t }: { t: ToastItem }) {
+  const remove = useToast((s) => s.remove);
+  const d = useDict('common').ui;
+  const [hover, setHover] = useState(false);
+  const duration = t.duration ?? (t.action ? 6000 : t.kind === 'error' ? 6000 : 3800);
+  const tone = TOAST_TONE[t.kind];
+  return (
+    <div
+      role={t.kind === 'error' ? 'alert' : 'status'}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className={cx('rave-toast pointer-events-auto relative flex w-[min(92vw,380px)] items-stretch overflow-hidden border-2 border-rave-ink shadow-[5px_5px_0_#0b0a0c]', tone.box, tone.rot)}
+    >
+      {t.image && <img src={t.image} alt="" className="w-14 shrink-0 border-r-2 border-rave-ink object-cover" />}
+      <div className="min-w-0 flex-1 py-2.5 pr-2 pl-3">
+        <span className={cx('inline-block px-1.5 py-px font-label text-[10px] font-bold tracking-[0.16em] uppercase', tone.kicker)}>
+          {t.kind === 'success' ? d.toastOk : t.kind === 'error' ? d.toastErr : d.toastInfo}
+        </span>
+        {t.title && <p className="mt-1 truncate font-display text-lg leading-none uppercase">{t.title}</p>}
+        <p className={cx('text-sm leading-snug font-semibold', t.title ? 'mt-0.5 opacity-80' : 'mt-1')}>{t.text}</p>
+      </div>
+      {t.action && (
+        <button
+          type="button"
+          onClick={() => {
+            t.action!.onClick();
+            remove(t.id);
+          }}
+          className="shrink-0 self-center border-2 border-rave-ink bg-rave-ink px-2.5 py-1 font-label text-[11px] font-bold tracking-wider text-rave-paper uppercase transition hover:bg-transparent hover:text-current"
+        >
+          {t.action.label}
+        </button>
+      )}
+      <button type="button" onClick={() => remove(t.id)} aria-label={d.close} className="shrink-0 self-start p-2 opacity-60 hover:opacity-100">
+        <X className="size-4" />
+      </button>
+      <span
+        aria-hidden
+        onAnimationEnd={() => remove(t.id)}
+        className={cx('rave-toast__bar absolute bottom-0 left-0 h-[3px] w-full origin-left', tone.bar)}
+        style={{ animationDuration: `${duration}ms`, animationPlayState: hover ? 'paused' : 'running' }}
+      />
+    </div>
+  );
+}
+
+// ---------- Dialog RAVE ----------
+/**
+ * Panel dialog standar aplikasi fan RAVE — bersih & konsisten:
+ *  - latar ink 72% + blur tipis; panel gelap bertepi ink 2px + bayangan sablon 6px; bilah aksen atas
+ *    (mustard = normal, berry = berbahaya);
+ *  - header: kicker Space Mono (opsional) + judul Staatliches + tombol tutup kotak; media opsional (sampul) di kiri;
+ *  - body bebas; footer kanan untuk aksi (pakai <DialogButton/>).
+ * Aksesibel: role dialog/alertdialog, aria-labelledby, fokus awal (`initialFocus`), Tab terkunci di dalam panel,
+ * Escape & klik latar menutup, fokus dikembalikan ke pemicu, scroll halaman dikunci.
+ */
+export interface DialogProps {
+  open: boolean;
+  onClose: () => void;
+  title: ReactNode;
+  kicker?: ReactNode;
+  tone?: 'default' | 'danger';
+  media?: ReactNode;
+  children?: ReactNode;
+  footer?: ReactNode;
+  size?: 'sm' | 'md' | 'lg';
+  /** role="alertdialog" untuk konfirmasi. */
+  alert?: boolean;
+  /** Selektor elemen yang difokuskan saat dibuka (default: elemen fokusable pertama di footer/body). */
+  initialFocus?: string;
+}
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+export function Dialog({ open, onClose, title, kicker, tone = 'default', media, children, footer, size = 'md', alert, initialFocus }: DialogProps) {
+  const d = useDict('common');
+  const ref = useRef<HTMLDivElement>(null);
+  const titleId = useRef(`rave-dlg-${Math.random().toString(36).slice(2, 8)}`).current;
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.activeElement as HTMLElement | null;
+    const panel = ref.current!;
+    const first = (initialFocus && panel.querySelector<HTMLElement>(initialFocus)) || panel.querySelector<HTMLElement>('[data-autofocus]') || panel.querySelector<HTMLElement>(`[data-dialog-body] ${FOCUSABLE}`) || panel.querySelector<HTMLElement>(FOCUSABLE);
+    first?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        closeRef.current();
+      } else if (e.key === 'Tab') {
+        const els = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+        if (!els.length) return;
+        const [f, l] = [els[0], els[els.length - 1]];
+        if (e.shiftKey && document.activeElement === f) (e.preventDefault(), l.focus());
+        else if (!e.shiftKey && document.activeElement === l) (e.preventDefault(), f.focus());
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      document.body.style.overflow = overflow;
+      prev?.focus?.();
+    };
+  }, [open, initialFocus]);
+  if (!open) return null;
+  const danger = tone === 'danger';
+  return (
+    <div className="fixed inset-0 z-[70] grid animate-[rave-fade_.16s_ease-out] place-items-center bg-[rgb(10_9_11/0.72)] p-4 backdrop-blur-[3px]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        ref={ref}
+        role={alert ? 'alertdialog' : 'dialog'}
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className={cx(
+          'rave-dialog relative flex max-h-[88dvh] w-full flex-col border-2 border-rave-ink bg-[#1a171c] text-white',
+          size === 'sm' ? 'max-w-sm' : size === 'lg' ? 'max-w-3xl' : 'max-w-md',
+        )}
+      >
+        <span aria-hidden className={cx('h-1 w-full shrink-0', danger ? 'bg-rave-berry' : 'bg-rave-primary')} />
+        <header className="flex items-start gap-4 px-5 pt-5">
+          {media && <div className="shrink-0">{media}</div>}
+          <div className="min-w-0 flex-1">
+            {kicker && <p className={cx('font-label text-[10px] font-bold tracking-[0.18em] uppercase', danger ? 'text-[#ff8f8f]' : 'text-rave-primary')}>{kicker}</p>}
+            <h2 id={titleId} className="mt-1 font-display text-[28px] leading-[1] tracking-wide text-rave-paper uppercase">
+              {title}
+            </h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label={d.ui.close} className="-mt-1 -mr-1 grid size-9 shrink-0 place-items-center text-rave-muted transition hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-rave-primary">
+            <X className="size-5" />
+          </button>
+        </header>
+        {children != null && (
+          <div data-dialog-body className="rave-scroll min-h-0 overflow-y-auto px-5 pt-3 pb-5 text-sm leading-relaxed text-white/75">
+            {children}
+          </div>
+        )}
+        {footer && <footer className="flex flex-wrap items-center justify-end gap-2.5 border-t border-white/[0.08] bg-black/20 px-5 py-4">{footer}</footer>}
+      </div>
+    </div>
+  );
+}
+
+/** Tombol aksi dialog: `primary` (mustard), `danger` (berry), `ghost` (garis). Tinggi 40px, gaya sablon RAVE. */
+export function DialogButton({ variant = 'ghost', className, ...p }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'danger' | 'ghost' }) {
+  return (
+    <button
+      type="button"
+      {...p}
+      className={cx(
+        'rave-btn inline-flex h-10 min-w-24 items-center justify-center gap-2 border-2 px-4 text-sm font-bold disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rave-primary',
+        variant === 'primary' && 'border-rave-ink bg-rave-primary text-rave-on-primary hover:bg-rave-primary-hover',
+        variant === 'danger' && 'border-rave-ink bg-rave-berry text-white hover:brightness-110',
+        variant === 'ghost' && 'rave-btn--flat border-white/20 bg-transparent text-white hover:border-white/50 hover:bg-white/[0.06]',
+        className,
+      )}
+    />
+  );
+}
+
+/**
+ * Konfirmasi berbasis Promise (pengganti `window.confirm`) di atas <Dialog/>:
+ * `if (!(await confirmDialog({ title, body, confirmLabel, danger: true }))) return;`
+ * Aksi berbahaya: fokus awal di "Batal" (aman bila Enter tak sengaja ditekan).
+ */
+export interface ConfirmOptions {
+  title: string;
+  body?: ReactNode;
+  confirmLabel: string;
+  cancelLabel?: string;
+  danger?: boolean;
+  /** Sampul kecil di kiri judul (null = kotak plum kosong). */
+  image?: string | null;
+  /** Ringkasan item (mis. "Playlist · 7 lagu") di bawah judul, dalam kotak info. */
+  detail?: ReactNode;
+}
+const useConfirm = create<{ req: (ConfirmOptions & { resolve: (ok: boolean) => void }) | null }>(() => ({ req: null }));
+export function confirmDialog(o: ConfirmOptions): Promise<boolean> {
+  return new Promise((resolve) => {
+    useConfirm.getState().req?.resolve(false);
+    useConfirm.setState({ req: { ...o, resolve } });
+  });
+}
+function ConfirmHost() {
+  const req = useConfirm((s) => s.req);
+  const d = useDict('common').ui;
+  const close = (ok: boolean) => {
+    const r = useConfirm.getState().req;
+    useConfirm.setState({ req: null });
+    r?.resolve(ok);
+  };
+  if (!req) return null;
+  return (
+    <Dialog
+      open
+      alert
+      size="sm"
+      tone={req.danger ? 'danger' : 'default'}
+      kicker={d.confirmKicker}
+      title={req.title}
+      onClose={() => close(false)}
+      initialFocus={req.danger ? '[data-cancel]' : '[data-confirm]'}
+      media={
+        req.image !== undefined &&
+        (req.image ? (
+          <img src={req.image} alt="" className="size-16 border-2 border-rave-ink object-cover shadow-[3px_3px_0_#0b0a0c]" />
+        ) : (
+          <div className="rave-dots size-16 border-2 border-rave-ink bg-gradient-to-br from-rave-purple to-rave-plum shadow-[3px_3px_0_#0b0a0c]" />
+        ))
+      }
+      footer={
+        <>
+          <DialogButton data-cancel onClick={() => close(false)}>
+            {req.cancelLabel ?? d.cancel}
+          </DialogButton>
+          <DialogButton data-confirm variant={req.danger ? 'danger' : 'primary'} onClick={() => close(true)}>
+            {req.confirmLabel}
+          </DialogButton>
+        </>
+      }
+    >
+      {req.body && <p>{req.body}</p>}
+      {req.detail && <div className="mt-3 border-l-2 border-rave-primary bg-white/[0.04] px-3 py-2 font-label text-[11px] tracking-[0.06em] text-white/70 uppercase">{req.detail}</div>}
+    </Dialog>
+  );
+}
+
 export function Toaster() {
   const items = useToast((s) => s.items);
   return (
-    <div className="pointer-events-none fixed bottom-28 left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-2" aria-live="polite">
+    <>
+    <ConfirmHost />
+    <div className="pointer-events-none fixed top-[max(0.75rem,env(safe-area-inset-top))] left-1/2 z-[60] flex -translate-x-1/2 flex-col items-center gap-3 md:top-[76px] md:right-6 md:left-auto md:translate-x-0 md:items-end" aria-live="polite">
       {items.map((t) => (
-        <div
-          key={t.id}
-          className={cx(
-            'pointer-events-auto rounded-none px-4 py-3 text-sm font-semibold shadow-xl',
-            t.kind === 'success' && 'bg-rave-primary text-rave-on-primary',
-            t.kind === 'error' && 'bg-[#dc2626] text-white',
-            t.kind === 'info' && 'bg-[#1F5C52] text-white',
-          )}
-        >
-          {t.text}
-        </div>
+        <ToastCard key={t.id} t={t} />
       ))}
     </div>
+    </>
   );
 }
 

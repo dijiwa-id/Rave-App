@@ -1,10 +1,10 @@
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Play } from 'lucide-react';
+
 import { api } from '@/lib/api';
 import type { ArtistSummary, Category, Episode, Paged, ReleaseSummary, Show, Track } from '@/lib/types';
 import { trackToPlayable, usePlayer } from '@/stores/player';
-import { DarkError, FanPage, MediaCard, Shelf, TrackTable } from '@/components/fan';
+import { DarkError, FanPage, MediaCard, PlayFab, Shelf, TrackTable } from '@/components/fan';
 import { EmptyState, Skeleton } from '@/components/ui';
 import { usePlayMedia } from '@/components/fan/usePlayMedia';
 import { useModule } from '@/components/ModuleGate';
@@ -36,13 +36,15 @@ function Browse() {
     <FanPage>
       <h1 className="mb-6 text-2xl font-bold">{d.search.browseAll}</h1>
       {q.isError && <DarkError error={q.error} retry={() => q.refetch()} />}
-      <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+      <div className="@container">
+      <div className="grid grid-cols-2 gap-6 @[520px]:grid-cols-3 @[760px]:grid-cols-4 @[1000px]:grid-cols-5">
         {q.isLoading && Array.from({ length: 10 }).map((_, i) => <Skeleton key={i} className="aspect-square" />)}
         {q.data?.data
           .filter((c) => podcasts || !c.href.startsWith('/app/podcasts'))
           .map((c) => (
             <CategoryTile key={c.id} c={c} />
           ))}
+      </div>
       </div>
     </FanPage>
   );
@@ -60,21 +62,20 @@ function TopResult({ r }: { r: SearchResult }) {
   const href = isArtist ? `/app/artist/${a.slug}` : `/app/track/${t.id}`;
   return (
     <div onClick={() => nav(href)} className="group relative cursor-pointer rounded-none bg-rave-elevated p-5 transition hover:bg-rave-highlight">
-      <img src={(isArtist ? a.image_url : t.release.cover_url) ?? ''} alt="" decoding="async" width={96} height={96} className={`mb-5 size-24 object-cover shadow-xl ${isArtist ? 'rounded-full' : 'rounded-none'}`} />
+      <img src={(isArtist ? a.image_url : t.release.cover_url) ?? ''} alt="" decoding="async" width={96} height={96} className={`mb-5 size-24 object-cover shadow-xl rounded-none border-2 border-rave-ink`} />
       <p className="truncate text-3xl font-bold">{isArtist ? a.name : t.title}</p>
       <p className="mt-1 text-sm text-rave-muted">
         {isArtist ? d.shared.artist : t.artist.name} <span className="ml-2 rounded-none bg-black/40 px-3 py-1 text-xs font-bold text-white">{isArtist ? d.shared.artist : d.shared.song}</span>
       </p>
-      <button
-        aria-label={d.search.playTopResult}
+      <PlayFab
+        playKey={isArtist ? `artist:${a.id}` : `track:${t.id}`}
+        label={d.search.playTopResult}
         onClick={(e) => {
           e.stopPropagation();
           isArtist ? play({ id: a.id, kind: 'artist' }) : playQueue([trackToPlayable(t)]);
         }}
-        className="absolute right-5 bottom-5 grid size-12 translate-y-2 place-items-center rounded-full bg-rave-primary text-rave-on-primary opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100"
-      >
-        <Play className="ml-0.5 size-5 fill-current" />
-      </button>
+        className="absolute right-5 bottom-5 opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 aria-pressed:opacity-100"
+      />
     </div>
   );
 }
@@ -98,8 +99,8 @@ function Results({ q }: { q: string }) {
   const empty = !r.artists.length && !r.tracks.length && !r.releases.length && !r.shows.length && !r.episodes.length;
   if (empty) return <EmptyState title={d.search.noResults(q)} body={d.search.noResultsBody} />;
   return (
-    <div className="pt-20 pb-12">
-      <div className="grid gap-6 px-4 md:px-8 lg:grid-cols-[2fr_3fr]">
+    <div className="@container pt-20 pb-12">
+      <div className="grid gap-6 px-4 md:px-8 @[880px]:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <section>
           <h2 className="mb-4 text-2xl font-bold">{d.search.topResult}</h2>
           <TopResult r={r} />
@@ -117,14 +118,14 @@ function Results({ q }: { q: string }) {
         {r.artists.length > 0 && (
           <Shelf title={d.shared.artist}>
             {r.artists.slice(0, 6).map((a) => (
-              <MediaCard key={a.id} title={a.name} subtitle={d.shared.artist} image={a.image_url} href={`/app/artist/${a.slug}`} round onPlay={() => play({ id: a.id, kind: 'artist' })} />
+              <MediaCard key={a.id} title={a.name} subtitle={d.shared.artist} image={a.image_url} href={`/app/artist/${a.slug}`} variant="artist" playKey={`artist:${a.id}`} onPlay={() => play({ id: a.id, kind: 'artist' })} />
             ))}
           </Shelf>
         )}
         {r.releases.length > 0 && (
           <Shelf title={d.search.albumsReleases}>
             {r.releases.slice(0, 6).map((a) => (
-              <MediaCard key={a.id} title={a.title} subtitle={`${a.release_date?.slice(0, 4)} · ${a.artist.name}`} image={a.cover_url} href={`/app/album/${a.id}`} onPlay={() => play({ id: a.id, kind: 'release' })} />
+              <MediaCard key={a.id} title={a.title} subtitle={`${a.release_date?.slice(0, 4)} · ${a.artist.name}`} image={a.cover_url} href={`/app/album/${a.id}`} playKey={`release:${a.id}`} onPlay={() => play({ id: a.id, kind: 'release' })} />
             ))}
           </Shelf>
         )}

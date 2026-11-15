@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { masterLabel, plannedRenditions, resolvePlayback, type AudioMeta, type Renditions } from './audio.js';
+import { losslessTarget, masterLabel, plannedRenditions, resolvePlayback, type AudioMeta, type Renditions } from './audio.js';
 
 const flac24: AudioMeta = { format: 'flac', codec: 'flac', lossless: true, sample_rate: 96000, bit_depth: 24, channels: 2, bitrate_kbps: 2900, duration_ms: 200_000 };
 const mp3128: AudioMeta = { format: 'mp3', codec: 'mp3', lossless: false, sample_rate: 44100, bit_depth: 0, channels: 2, bitrate_kbps: 128, duration_ms: 200_000 };
@@ -61,5 +61,42 @@ describe('rendisi & label', () => {
     expect(masterLabel(flac24)).toBe('FLAC 24/96');
     expect(masterLabel({ ...flac24, codec: 'pcm_s16le', format: 'wav', bit_depth: 16, sample_rate: 44100 })).toBe('WAV 16/44.1');
     expect(masterLabel(mp3128)).toBe('MP3 128');
+  });
+});
+
+describe('kebijakan kualitas Free vs Premium (efisiensi storage & bandwidth)', () => {
+  const wav24: AudioMeta = { format: 'wav', codec: 'pcm_s24le', lossless: true, sample_rate: 96000, bit_depth: 24, channels: 2, bitrate_kbps: 4608, duration_ms: 200_000 };
+  const flac16: AudioMeta = { ...flac24, sample_rate: 44100, bit_depth: 16, bitrate_kbps: 900 };
+  const lossy: Renditions = { low: full.low, normal: full.normal, high: full.high };
+
+  it('Free dibatasi freeMax (bisa diturunkan ke Hemat) dan tidak pernah Lossless walau pengaturan salah', () => {
+    expect(resolvePlayback({ ...base, requested: 'normal', policy: { freeMax: 'low' } })).toMatchObject({ quality: 'low', capped: 'premium' });
+    expect(resolvePlayback({ ...base, requested: 'lossless', policy: { freeMax: 'lossless' } })).toMatchObject({ quality: 'high', capped: 'premium' });
+  });
+  it('Premium dibatasi premiumMax → alasan disabled', () => {
+    expect(resolvePlayback({ ...base, premium: true, requested: 'lossless', policy: { premiumMax: 'high' } })).toMatchObject({ quality: 'high', capped: 'disabled' });
+  });
+  it('on_demand: FLAC belum ada → Premium mendapat AAC 320 + needs lossless (bukan WAV mentah)', () => {
+    const r = resolvePlayback({ ...base, premium: true, requested: 'lossless', renditions: lossy, master: { url: '/m/x.wav', meta: wav24 } });
+    expect(r).toMatchObject({ quality: 'high', url: '/m/x.high.m4a', needs: 'lossless', capped: 'unavailable' });
+  });
+  it('master FLAC dalam batas resolusi dipakai ulang sebagai Lossless (tanpa salinan kedua)', () => {
+    const r = resolvePlayback({ ...base, premium: true, requested: 'lossless', renditions: lossy, master: { url: '/m/x.flac', meta: flac16 }, policy: { losslessCap: '16_44' } });
+    expect(r).toMatchObject({ quality: 'lossless', url: '/m/x.flac', capped: null });
+  });
+  it('master FLAC hi-res di atas batas tidak dikirim; diminta versi FLAC sesuai batas', () => {
+    const r = resolvePlayback({ ...base, premium: true, requested: 'lossless', renditions: lossy, master: { url: '/m/x.flac', meta: flac24 }, policy: { losslessCap: '16_44' } });
+    expect(r).toMatchObject({ quality: 'high', needs: 'lossless' });
+  });
+  it('plannedRenditions: on_demand melewati FLAC kecuali sudah diminta; master yang bisa dipakai ulang tak pernah di-encode', () => {
+    const all = ['low', 'normal', 'high', 'lossless'] as const;
+    expect(plannedRenditions(wav24, [...all], { losslessMode: 'on_demand' })).toEqual(['low', 'normal', 'high']);
+    expect(plannedRenditions(wav24, [...all], { losslessMode: 'on_demand' }, true)).toEqual([...all]);
+    expect(plannedRenditions(wav24, [...all], { losslessMode: 'eager' })).toEqual([...all]);
+    expect(plannedRenditions(flac16, [...all], { losslessMode: 'eager', losslessCap: '24_96' })).toEqual(['low', 'normal', 'high']);
+  });
+  it('losslessTarget menurunkan resolusi ke batas', () => {
+    expect(losslessTarget(wav24, '24_48')).toEqual({ bit_depth: 24, sample_rate: 48000 });
+    expect(losslessTarget(wav24, '16_44')).toEqual({ bit_depth: 16, sample_rate: 44100 });
   });
 });

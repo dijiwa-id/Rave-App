@@ -17,6 +17,7 @@
     "./ads": "./src/ads.ts",
     "./landing": "./src/landing.ts",
     "./audio": "./src/audio.ts",
+    "./spectrum": "./src/spectrum.ts",
     "./integrations": "./src/integrations.ts",
     "./reports": "./src/reports.ts"
   }

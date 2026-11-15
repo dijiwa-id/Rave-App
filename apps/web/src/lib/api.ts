@@ -31,6 +31,8 @@ type Opts = {
   raw?: boolean;
   /** Teruskan ke fetch: permintaan tetap terkirim saat halaman ditutup (flush event pagehide). */
   keepalive?: boolean;
+  /** Batalkan permintaan (mis. ganti lagu sebelum data selesai dimuat). */
+  signal?: AbortSignal;
 };
 
 let refreshing: Promise<boolean> | null = null;
@@ -94,6 +96,7 @@ export async function api<T = any>(path: string, opts: Opts = {}): Promise<T> {
       headers,
       body: opts.body === undefined ? undefined : opts.body instanceof Blob ? opts.body : JSON.stringify(opts.body),
       keepalive: opts.keepalive,
+      signal: opts.signal,
     });
   };
   // Idempotency key harus sama saat retry setelah refresh token.

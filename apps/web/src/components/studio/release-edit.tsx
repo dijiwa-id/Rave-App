@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { FileUp, Play, Timer, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { api, ApiError, fmt } from '@/lib/api';
 import type { Release, Track } from '@/lib/types';
-import { Button, Card, Field, Input, Modal, Select, Textarea, cx, toast } from '@/components/ui';
+import { Button, Card, Field, Input, Modal, Select, confirmDialog, toast } from '@/components/ui';
+import { LyricsWorkbench, lyricsErrors, type LyricsValue } from './lyrics-workbench';
 import { genreName, GENRES } from '@/components/b2b/common';
 import { useDict } from '@/lib/i18n';
 
@@ -178,82 +179,60 @@ export function PendingChanges({ r }: { r: Release }) {
 
 // ---------------------------------------------------------------- Lirik
 
-const TAG = /^(\s*\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\])+\s*/;
-const fmtLrc = (ms: number) => {
-  const cs = Math.max(0, Math.round(ms / 10));
-  return `${String(Math.floor(cs / 6000)).padStart(2, '0')}:${String(Math.floor(cs / 100) % 60).padStart(2, '0')}.${String(cs % 100).padStart(2, '0')}`;
+type LyricsRes = {
+  lyrics: {
+    synced: boolean;
+    language: string | null;
+    line_count: number;
+    text: string;
+    updated_at?: string;
+  } | null;
 };
-/** Baris yang bisa diberi stempel waktu (bukan kosong & bukan tag metadata LRC seperti [ar:…]). */
-const stampable = (line: string) => line.trim() !== '' && !/^\s*\[[a-z]+:.*\]\s*$/i.test(line);
 
-type LyricsRes = { lyrics: { synced: boolean; language: string | null; line_count: number; text: string; updated_at?: string } | null };
-const LANGS = ['id', 'en', 'jv', 'su', 'ms', 'ko', 'ja'];
-
-/** Editor lirik satu lagu: teks biasa / LRC, impor berkas, dan alat sinkron ketuk-waktu memakai pratinjau audio. */
+/** Editor lirik satu lagu (rilis yang sudah dibuat): memuat, menyimpan, dan menghapus lirik lewat API Studio. */
 export function LyricsEditor({ track, open, onClose }: { track: Track; open: boolean; onClose: () => void }) {
   const t = useDict('b2b').studio.release.lyrics;
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ['studio-lyrics', track.id], queryFn: () => api<LyricsRes>(`/v1/studio/tracks/${track.id}/lyrics`), enabled: open });
-  const [mode, setMode] = useState<'plain' | 'synced'>('plain');
-  const [text, setText] = useState('');
-  const [lang, setLang] = useState('id');
+  const q = useQuery({
+    queryKey: ['studio-lyrics', track.id],
+    queryFn: () => api<LyricsRes>(`/v1/studio/tracks/${track.id}/lyrics`),
+    enabled: open,
+  });
+  const [value, setValue] = useState<LyricsValue>({
+    mode: 'plain',
+    text: '',
+    lang: 'id',
+  });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [src, setSrc] = useState<string | null>(null);
-  const [cursor, setCursor] = useState(0);
-  const audio = useRef<HTMLAudioElement>(null);
+  const [seed, setSeed] = useState(0);
 
   useEffect(() => {
     if (!q.data) return;
     const l = q.data.lyrics;
-    setMode(l?.synced ? 'synced' : 'plain');
-    setText(l?.text ?? '');
-    setLang(l?.language ?? 'id');
-    setCursor(0);
+    setValue({
+      mode: l?.synced ? 'synced' : 'plain',
+      text: l?.text ?? '',
+      lang: l?.language ?? 'id',
+    });
     setErr(null);
+    setSeed((n) => n + 1);
   }, [q.data]);
 
-  const rows = text.split('\n');
-  const targets = rows.map((l, i) => (stampable(l) ? i : -1)).filter((i) => i >= 0);
+  const blocking = lyricsErrors(value, track.duration_ms);
 
-  async function loadAudio() {
-    try {
-      const p = await api<{ url: string }>(`/v1/studio/tracks/${track.id}/preview`);
-      setSrc(p.url);
-    } catch (e) {
-      toast.error(e);
-    }
-  }
-  function toSynced() {
-    setText(
-      rows
-        .filter((l) => l.trim())
-        .map((l) => (TAG.test(l) ? l : `[00:00.00] ${l.trim()}`))
-        .join('\n'),
-    );
-    setMode('synced');
-    setCursor(0);
-  }
-  function stamp() {
-    const a = audio.current;
-    if (!a || cursor >= targets.length) return;
-    const i = targets[cursor]!;
-    const next = [...rows];
-    next[i] = `[${fmtLrc(a.currentTime * 1000)}] ${next[i]!.replace(TAG, '').trim()}`;
-    setText(next.join('\n'));
-    setCursor(cursor + 1);
-  }
-  async function importFile(f: File) {
-    const s = await f.text();
-    setText(s.replace(/\r\n?/g, '\n').trim());
-    setMode(/\[\d{1,3}:\d{1,2}/.test(s) ? 'synced' : 'plain');
-    setCursor(0);
-  }
   async function save() {
     setBusy(true);
     setErr(null);
     try {
-      await api(`/v1/studio/tracks/${track.id}/lyrics`, { method: 'PUT', body: { mode, text, language: lang || null } });
+      await api(`/v1/studio/tracks/${track.id}/lyrics`, {
+        method: 'PUT',
+        body: {
+          mode: value.mode,
+          text: value.text,
+          language: value.lang || null,
+        },
+      });
       qc.invalidateQueries({ queryKey: ['studio-lyrics', track.id] });
       qc.invalidateQueries({ queryKey: ['studio-releases'] });
       toast.success(t.saved);
@@ -265,7 +244,15 @@ export function LyricsEditor({ track, open, onClose }: { track: Track; open: boo
     }
   }
   async function remove() {
-    if (!confirm(t.removeConfirm)) return;
+    if (
+      !(await confirmDialog({
+        title: t.removeConfirm,
+        confirmLabel: t.remove,
+        cancelLabel: t.close,
+        danger: true,
+      }))
+    )
+      return;
     setBusy(true);
     try {
       await api(`/v1/studio/tracks/${track.id}/lyrics`, { method: 'DELETE' });
@@ -281,97 +268,41 @@ export function LyricsEditor({ track, open, onClose }: { track: Track; open: boo
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={t.title(track.title)} wide>
+    <Modal open={open} onClose={onClose} title={t.title(track.title)} wide="xl">
       {q.isLoading ? (
         <p className="text-sm text-b2b-muted">…</p>
       ) : q.error ? (
         <p className="text-sm text-red-600">{t.loadError}</p>
       ) : (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <div role="radiogroup" className="inline-flex border border-b2b-line">
-              {(['plain', 'synced'] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  role="radio"
-                  aria-checked={mode === m}
-                  onClick={() => (m === 'synced' && mode === 'plain' && text.trim() && !TAG.test(text) ? toSynced() : setMode(m))}
-                  className={cx('px-3 py-1.5 text-xs font-bold', mode === m ? 'bg-b2b-ink text-b2b-on-ink' : 'text-b2b-muted hover:text-b2b-ink')}
-                >
-                  {m === 'plain' ? t.modePlain : t.modeSynced}
-                </button>
-              ))}
-            </div>
-            <Select aria-label={t.language} value={lang} onChange={(e) => setLang(e.target.value)} className="w-24">
-              {LANGS.map((l) => (
-                <option key={l} value={l}>
-                  {l.toUpperCase()}
-                </option>
-              ))}
-            </Select>
-            <label className="inline-flex cursor-pointer items-center gap-1.5 border border-b2b-line px-3 py-1.5 text-xs font-bold text-b2b-ink hover:border-b2b-ink">
-              <FileUp className="size-3.5" /> {t.import}
-              <input
-                type="file"
-                accept=".lrc,.txt,text/plain"
-                className="sr-only"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  e.target.value = '';
-                  if (f) void importFile(f);
-                }}
-              />
-            </label>
-            <span className="ml-auto text-xs text-b2b-muted">{t.lines(rows.filter((l) => l.trim()).length)}</span>
-          </div>
-          <p className="text-xs text-b2b-muted">{mode === 'plain' ? t.plainHint : t.syncedHint}</p>
-
-          {mode === 'synced' && (
-            <div className="flex flex-wrap items-center gap-2 border border-dashed border-b2b-line p-2">
-              {src ? (
-                <audio ref={audio} controls src={src} className="h-8 min-w-0 flex-1" />
-              ) : (
-                <Button type="button" size="sm" variant="outline-ink" onClick={loadAudio}>
-                  <Play className="size-3.5" /> {t.play}
-                </Button>
-              )}
-              <Button type="button" size="sm" variant="ink" disabled={!src || cursor >= targets.length} onClick={stamp}>
-                <Timer className="size-3.5" /> {t.stamp}
-              </Button>
-              <span className="text-xs text-b2b-muted tabular-nums">{cursor >= targets.length ? t.stampDone : t.stampHint(cursor + 1, targets.length)}</span>
-            </div>
-          )}
-
-          <Textarea
-            rows={14}
-            value={text}
-            spellCheck={false}
-            placeholder={mode === 'plain' ? t.placeholderPlain : t.placeholderSynced}
-            onChange={(e) => setText(e.target.value)}
-            className={cx('font-mono text-[13px] leading-relaxed', err && 'border-red-500')}
-            aria-invalid={!!err}
-            aria-describedby={err ? 'lyrics-err' : undefined}
+          <LyricsWorkbench
+            key={seed}
+            value={value}
+            onChange={setValue}
+            durationMs={track.duration_ms}
+            loadAudio={async () => {
+              try {
+                return (await api<{ url: string }>(`/v1/studio/tracks/${track.id}/preview`)).url;
+              } catch (e) {
+                toast.error(e);
+                return null;
+              }
+            }}
           />
-          {mode === 'synced' && cursor < targets.length && src && (
-            <p className="truncate text-xs">
-              <span className="font-bold text-rave-accent">▶ </span>
-              {rows[targets[cursor]!]?.replace(TAG, '')}
-            </p>
-          )}
           {err && (
-            <p id="lyrics-err" className="text-sm font-bold text-red-600">
+            <p className="border-l-4 border-red-500 bg-red-50 px-3 py-2 text-sm font-bold text-red-700" role="alert">
               {err}
             </p>
           )}
           <p className="text-xs text-b2b-muted">{t.liveNote}</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="ink" size="sm" loading={busy} disabled={!text.trim()} onClick={save}>
+          <div className="flex flex-wrap items-center gap-2 border-t-2 border-dashed border-b2b-line pt-3">
+            <Button type="button" variant="ink" size="sm" loading={busy} disabled={!value.text.trim() || blocking > 0} onClick={save}>
               {t.save}
             </Button>
             <Button type="button" variant="outline-ink" size="sm" onClick={onClose}>
               {t.close}
             </Button>
+            {blocking > 0 && !!value.text.trim() && <span className="text-xs font-bold text-red-600">{t.issueSummary(blocking)}</span>}
             {q.data?.lyrics && (
               <button type="button" disabled={busy} onClick={remove} className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-b2b-muted hover:text-red-600">
                 <Trash2 className="size-3.5" /> {t.remove}

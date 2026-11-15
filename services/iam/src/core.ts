@@ -113,6 +113,8 @@ export async function buildMe(q: Q, userId: string) {
     city: u.city,
     /** Bahasa antarmuka pilihan ('id' | 'en'); null = ikuti perangkat / default platform. */
     locale: (u.locale as 'id' | 'en' | null) ?? null,
+    /** Tema aplikasi dengar pilihan pengguna ('light' | 'dark' | 'system'); null = default platform (appearance.player_theme). */
+    theme: (u.theme as 'light' | 'dark' | 'system' | null) ?? null,
     genres: u.genres,
     roles: deriveRoles(u.admin_role ?? (u.is_admin ? 'OPS' : null), orgs),
     orgs: orgs.map((o) => ({ id: o.id, type: o.type, name: o.name, role: o.role, artist_id: o.artist_id })),

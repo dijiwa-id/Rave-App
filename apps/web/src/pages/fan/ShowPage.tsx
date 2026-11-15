@@ -1,10 +1,10 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Lock, Play } from 'lucide-react';
+import { AlertTriangle, Lock } from 'lucide-react';
 import { api, fmt } from '@/lib/api';
 import type { Episode, Show } from '@/lib/types';
 import { usePlayer, type Playable } from '@/stores/player';
-import { colorFor, DarkError, HeroHeader } from '@/components/fan';
+import { colorFor, DarkError, HeroHeader, PlayFab } from '@/components/fan';
 import { PageLoader } from '@/components/ui';
 import { useDict } from '@/lib/i18n';
 
@@ -48,9 +48,7 @@ export default function ShowPage() {
                   </Link>
                   <p className="mt-1 line-clamp-2 text-sm text-rave-muted">{e.description}</p>
                   <div className="mt-3 flex items-center gap-4 text-sm text-rave-muted">
-                    <button onClick={() => playOne(episodeToPlayable(e, s))} aria-label={d.shared.play(e.title)} className="grid size-8 place-items-center rounded-full bg-white text-black hover:scale-105">
-                      <Play className="ml-0.5 size-4 fill-current" />
-                    </button>
+                    <PlayFab size="xs" playKey={`episode:${e.id}`} label={d.shared.play(e.title)} onClick={() => playOne(episodeToPlayable(e, s))} />
                     {e.is_premium && (
                       <span className="inline-flex items-center gap-1 rounded-none bg-rave-orange/20 px-2 py-0.5 text-xs font-bold text-rave-orange">
                         <Lock className="size-3" /> Premium

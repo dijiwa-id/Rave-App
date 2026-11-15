@@ -49,7 +49,7 @@ export default function EpisodePage() {
               <Lock className="size-6" />
             </span>
           ) : (
-            <PlayFab size="lg" playing={isCurrent && playing} onClick={() => (isCurrent ? toggle() : playOne(episodeToPlayable(e, e.show)))} />
+            <PlayFab size="lg" playKey={`episode:${e.id}`} onClick={() => playOne(episodeToPlayable(e, e.show))} />
           )}
         </div>
         {(locked || (isCurrent && error?.includes('Premium'))) && (

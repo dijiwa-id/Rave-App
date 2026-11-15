@@ -15,7 +15,7 @@ import { usePlayMedia } from '@/components/fan/usePlayMedia';
 import { cx, PageLoader, toast } from '@/components/ui';
 import { LivePill, liveHref, useLiveSettings, useLiveStreams } from '@/components/live/common';
 import { useModule } from '@/components/ModuleGate';
-import { localeTag, useDict } from '@/lib/i18n';
+import { dict, localeTag, useDict } from '@/lib/i18n';
 
 /** Nama merek platform (tidak diterjemahkan). */
 const PLATFORM_LABEL: Record<string, string> = {
@@ -45,7 +45,7 @@ function BandHeader({ a }: { a: Artist }) {
   const img = a.cover_url ?? a.image_url;
   const cat = `RV-ART-${a.id.replace(/[^a-z0-9]/gi, '').slice(-4).toUpperCase()}`;
   return (
-    <header className="relative isolate flex h-[46vh] min-h-[360px] items-end overflow-hidden" style={{ clipPath: HEADER_TORN, backgroundColor: tint }}>
+    <header className="fan-dark-island relative isolate flex h-[46vh] min-h-[360px] items-end overflow-hidden" style={{ clipPath: HEADER_TORN, backgroundColor: tint }}>
       {img ? (
         <img src={img} alt="" className="absolute inset-0 -z-20 size-full object-cover grayscale contrast-[1.3] brightness-[1.05]" />
       ) : (
@@ -114,6 +114,9 @@ export default function ArtistPage() {
     try {
       await api(`/v1/library/follows/${a!.id}`, { method: following ? 'DELETE' : 'PUT' });
       qc.invalidateQueries({ queryKey: ['library-summary'] });
+      const sh = dict('common').shell;
+      if (following) toast.info(sh.unfollowedToast(a!.name), { image: a!.image_url });
+      else toast.success(sh.followedToast(a!.name), { image: a!.image_url });
     } catch (e) {
       qc.setQueryData(['follow', a!.id], { following });
       toast.error(e);
@@ -124,7 +127,7 @@ export default function ArtistPage() {
     <div className="min-h-full pb-12">
       <BandHeader a={a} />
       <div className="flex flex-wrap items-center gap-6 px-4 py-6 md:px-8">
-        {a.top_tracks.length > 0 && <PlayFab size="lg" playing={playingThis && playing} onClick={() => (playingThis ? toggle() : playQueue(a.top_tracks.map(trackToPlayable)))} />}
+        {a.top_tracks.length > 0 && <PlayFab size="lg" playKey={`artist:${a.id}`} onClick={() => playQueue(a.top_tracks.map(trackToPlayable), 0, `artist:${a.id}`)} />}
         <button onClick={toggleFollow} aria-pressed={following} className={cx('rounded-none border px-4 py-1.5 text-sm font-bold tracking-wide transition hover:scale-105', following ? 'border-white text-white' : 'border-rave-muted text-white hover:border-white')}>
           {following ? d.artist.following : d.artist.follow}
         </button>
@@ -182,7 +185,7 @@ export default function ArtistPage() {
 
       <section className="mb-10">
         <h2 className="mb-4 px-4 text-2xl font-bold md:px-8">{d.artist.popular}</h2>
-        {a.top_tracks.length ? <TrackTable tracks={showAll ? a.top_tracks : a.top_tracks.slice(0, 5)} showAlbum={false} /> : <p className="px-8 text-rave-muted">{d.artist.noSongs}</p>}
+        {a.top_tracks.length ? <TrackTable tracks={showAll ? a.top_tracks : a.top_tracks.slice(0, 5)} showAlbum={false} context={`artist:${a.id}`} /> : <p className="px-8 text-rave-muted">{d.artist.noSongs}</p>}
         {a.top_tracks.length > 5 && (
           <button onClick={() => setShowAll(!showAll)} className="mt-3 px-8 text-sm font-bold text-rave-muted hover:text-white">
             {showAll ? d.artist.showLess : d.artist.showMore}
@@ -193,7 +196,7 @@ export default function ArtistPage() {
       <div className="px-4 md:px-8">
         <Shelf title={d.artist.discography}>
           {a.releases.map((r) => (
-            <MediaCard key={r.id} title={r.title} subtitle={`${r.release_date?.slice(0, 4)} · ${r.type === 'SINGLE' ? d.album.types.SINGLE : r.type}`} image={r.cover_url} href={`/app/album/${r.id}`} onPlay={() => play({ id: r.id, kind: 'release' })} />
+            <MediaCard key={r.id} title={r.title} subtitle={`${r.release_date?.slice(0, 4)} · ${r.type === 'SINGLE' ? d.album.types.SINGLE : r.type}`} image={r.cover_url} href={`/app/album/${r.id}`} playKey={`release:${r.id}`} onPlay={() => play({ id: r.id, kind: 'release' })} />
           ))}
         </Shelf>
 

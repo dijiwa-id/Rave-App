@@ -115,6 +115,16 @@ const admin = await login(SEED.emails.admin);
 check('login OTP 4 akun demo', !!fan.access_token && !!manager.access_token && !!promotor.access_token && !!admin.access_token);
 check('manajer mendapat akses artis Senja', manager.user.orgs.some((o: any) => o.artist_id === SEED.artists[0].id), manager.user.orgs);
 check('promotor KYC terverifikasi', promotor.user.kyc_status === 'VERIFIED', promotor.user.kyc_status);
+// Tema aplikasi dengar tersimpan di akun (web/desktop/mobile ikut); null = default platform appearance.player_theme.
+{
+  const t1 = await call(fan.access_token, 'PATCH', '/v1/me', { theme: 'light' });
+  const t2 = await call(fan.access_token, 'GET', '/v1/me');
+  const tBad = await call(fan.access_token, 'PATCH', '/v1/me', { theme: 'neon' });
+  const t3 = await call(fan.access_token, 'PATCH', '/v1/me', { theme: null });
+  check('tema akun: simpan light, tolak nilai tak dikenal (400), reset ke default', t1.data?.theme === 'light' && t2.data?.theme === 'light' && tBad.status === 400 && t3.status === 200 && t3.data?.theme === null, [t1.data?.theme, t2.data?.theme, tBad.status, t3.data?.theme]);
+  const cfgT = await call(null, 'GET', '/v1/platform/config');
+  check('default tema aplikasi dengar publik = dark', cfgT.data?.settings?.['appearance.player_theme'] === 'dark', cfgT.data?.settings?.['appearance.player_theme']);
+}
 const bad = await call('rusak.token.x', 'GET', '/v1/me');
 check('token rusak ditolak di gateway (401)', bad.status === 401);
 const internal = await call(null, 'GET', '/internal/tracks/x/media');
@@ -161,7 +171,9 @@ console.log('\n▶ Master multi-format & rendisi (Artist Studio)');
   const up = await put.json();
   check('upload master FLAC 24/96: probe lossless + antre transcoding', put.status === 200 && up.meta?.lossless === true && up.meta?.bit_depth === 24 && up.meta?.sample_rate === 96000 && up.transcode_status === 'pending', up);
   const done = await until(() => call(AT, 'GET', `/v1/studio/uploads/${init.data?.upload_id}`), (r) => ['done', 'failed'].includes(r.data?.transcode_status), 90_000, 1000);
-  check('transcoding → AAC 64/160/320 + FLAC 24/96', done.data?.transcode_status === 'done' && Object.keys(done.data.renditions ?? {}).sort().join() === 'high,lossless,low,normal' && done.data.renditions.lossless?.codec_label === 'FLAC 24/96', done.data);
+  // Kebijakan kualitas (default transcoding.lossless_mode = on_demand, batas 24/96): master FLAC 24/96 sudah di dalam batas
+  // → dipakai ulang sebagai versi Lossless, tidak ada salinan FLAC kedua (hemat storage). Rendisi lossy tetap dibuat.
+  check('transcoding → AAC 64/160/320; master FLAC 24/96 dipakai ulang (tanpa salinan FLAC)', done.data?.transcode_status === 'done' && Object.keys(done.data.renditions ?? {}).sort().join() === 'high,low,normal', done.data);
   const baseUrl = String(up.public_url).replace(/\.flac$/, '');
   // Batch 2 — split hak wajib disetujui semua pihak sebelum QC meloloskan rilis; undangan dikirim ke pihak.
   {
@@ -199,6 +211,31 @@ console.log('\n▶ Master multi-format & rendisi (Artist Studio)');
     const approved = await call(admin.access_token, 'POST', `/v1/admin/qc/releases/${rel.data?.id}/decision`, { approve: true });
     check('setelah semua split disetujui, QC menyetujui rilis', approved.status === 200 && ['LIVE', 'SCHEDULED'].includes(approved.data?.status), [approved.status, approved.data?.status]);
     await call(saSplit.access_token, 'POST', '/v1/admin/platform/settings/reset', { keys: ['catalog.qc_require_split_approval'], reason: 'selesai uji e2e split' });
+    // Amplop spektrum LCD pemutar (kontrak bersama web/desktop/mobile): rilis LIVE → worker membuat amplop di latar.
+    {
+      const path = `/v1/catalog/tracks/${trackId}/spectrum`;
+      const first = await call(null, 'GET', path);
+      check('spektrum: lagu LIVE → 202 {status:pending} atau langsung 200', (first.status === 202 && first.data?.status === 'pending') || first.status === 200, [first.status, first.data]);
+      const sp = await until(() => call(null, 'GET', path), (r) => r.status === 200, 60_000, 1000);
+      const bytes = Buffer.from(String(sp.data?.data ?? ''), 'base64');
+      const frames = Math.ceil((sp.data?.duration_ms / 1000) * 20);
+      check(
+        'spektrum: 200 dengan bentuk kontrak (fps 20, 32 pita, frames = ceil(durasi×fps), data = frames×bands byte)',
+        sp.status === 200 && sp.data.track_id === trackId && sp.data.version === 1 && sp.data.fps === 20 && sp.data.bands === 32 &&
+          Math.abs(sp.data.duration_ms - 3000) <= 50 && sp.data.frames === frames && bytes.length === sp.data.frames * 32,
+        [sp.status, sp.data && { ...sp.data, data: String(sp.data.data).slice(0, 40) }],
+      );
+      // Master e2e = sinus 440 Hz → pita terkuat di tengah lagu = pita 440 Hz (indeks 12 dari 32, log 40 Hz–16 kHz).
+      const mid = [...bytes.subarray(30 * 32, 31 * 32)];
+      check('spektrum: sinus 440 Hz menyalakan pita yang tepat (frame-major)', mid.indexOf(Math.max(...mid)) === 12 && Math.max(...mid) >= 250, mid);
+      const etag = sp.headers.get('etag');
+      check('spektrum: cache publik 1 hari + ETag track_id+versi', /public, max-age=86400/.test(sp.headers.get('cache-control') ?? '') && etag === `"${trackId}-v1"`, [sp.headers.get('cache-control'), etag]);
+      const nm = await fetch(BASE + path, { headers: { 'if-none-match': etag ?? '' } });
+      check('spektrum: If-None-Match → 304', nm.status === 304, nm.status);
+      const unknown = await call(null, 'GET', `/v1/catalog/tracks/${crypto.randomUUID()}/spectrum`);
+      const junk = await call(null, 'GET', '/v1/catalog/tracks/bukan-uuid/spectrum');
+      check('spektrum: lagu tidak dikenal / id rusak → 404 {error:not_found}', unknown.status === 404 && unknown.data?.error === 'not_found' && junk.status === 404, [unknown.status, unknown.data, junk.status]);
+    }
     // Ganti sampul: rilis LIVE → menunggu QC (sampul lama tetap tayang); URL eksternal ditolak.
     const ext = await call(AT, 'PUT', `/v1/studio/releases/${rel.data?.id}/cover`, { cover_url: 'https://example.com/x.jpg' });
     check('sampul dari URL eksternal ditolak (422)', ext.status === 422, ext.status);
@@ -281,6 +318,8 @@ console.log('\n▶ Master multi-format & rendisi (Artist Studio)');
         sub3.data?.status === 'IN_REVIEW' && wd.status === 200 && wd.data?.status === 'DRAFT' && wd2.status === 409 && edit.status === 200 && edit.data?.title === 'E2E Withdraw (diedit)',
         [sub3.status, sub3.data?.status ?? sub3.data?.errors, wd.status, wd.data?.status, wd2.status, edit.status],
       );
+      const hidden = await call(null, 'GET', `/v1/catalog/tracks/${t2}/spectrum`);
+      check('spektrum: lagu dari rilis yang belum tayang (DRAFT) → 404', hidden.status === 404 && hidden.data?.error === 'not_found', [hidden.status, hidden.data]);
     }
     // Profil artis (Artist Studio): foto/banner hanya unggahan Studio; tautan sosial divalidasi & tampil di API publik.
     {

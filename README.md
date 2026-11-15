@@ -87,7 +87,7 @@ cp .env.example .env          # ubah RAVE_PGPORT + DATABASE_URL bila port 55432 
 ```
 
 Langkah manual yang setara dengan `./rave start` (berguna untuk debugging):
-
+npm run seed
 ```bash
 npm run db:start      # cluster Postgres milik user di 127.0.0.1:55432 (data di ~/.rave/pgdata)
 npm run seed          # migrasi + data demo untuk semua service (idempoten)

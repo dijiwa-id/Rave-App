@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Play } from 'lucide-react';
+
 import { api } from '@/lib/api';
 import type { ArtistSummary, Paged, PlaylistSummary, ReleaseSummary, Show, Track } from '@/lib/types';
 import { trackToPlayable, usePlayer } from '@/stores/player';
-import { CardSkeleton, DarkError, FanPage, MediaCard } from '@/components/fan';
+import { CardSkeleton, ChoiceChips, DarkError, FanPage, MediaCard, PlayFab } from '@/components/fan';
+import { Disc3, ListMusic, MicVocal, Podcast } from 'lucide-react';
 import { usePlayMedia } from '@/components/fan/usePlayMedia';
 import { cx, EmptyState } from '@/components/ui';
 import { useModule } from '@/components/ModuleGate';
@@ -21,6 +22,7 @@ interface Summary {
 
 type Tab = 'playlists' | 'podcasts' | 'artists' | 'albums';
 const TABS: Tab[] = ['playlists', 'podcasts', 'artists', 'albums'];
+const TAB_ICON: Record<Tab, any> = { playlists: ListMusic, podcasts: Podcast, artists: MicVocal, albums: Disc3 };
 
 /** Kartu besar "Lagu yang Disukai" (mockup Spotify 8). */
 function LikedCard({ count }: { count: number }) {
@@ -49,16 +51,16 @@ function LikedCard({ count }: { count: number }) {
         <p className="mt-1 text-sm">{d.library.likedCount(count)}</p>
       </div>
       {preview.length > 0 && (
-        <button
-          aria-label={d.library.playLiked}
+        <PlayFab
+          size="lg"
+          playKey="liked"
+          label={d.library.playLiked}
           onClick={(e) => {
             e.stopPropagation();
-            playQueue((likes.data?.data ?? []).map(trackToPlayable));
+            playQueue((likes.data?.data ?? []).map(trackToPlayable), 0, 'liked');
           }}
-          className="absolute right-5 bottom-5 grid size-14 translate-y-2 place-items-center rounded-full bg-rave-primary text-rave-on-primary opacity-0 shadow-xl transition group-hover:translate-y-0 group-hover:opacity-100"
-        >
-          <Play className="ml-0.5 size-6 fill-current" />
-        </button>
+          className="absolute right-5 bottom-5 opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 aria-pressed:opacity-100"
+        />
       )}
     </div>
   );
@@ -76,7 +78,7 @@ function ArtistsTab({ ids }: { ids: string[] }) {
   return (
     <>
       {(q.data?.data ?? []).map((a) => (
-        <MediaCard key={a.id} title={a.name} subtitle={d.shared.artist} image={a.image_url} href={`/app/artist/${a.slug}`} round onPlay={() => play({ id: a.id, kind: 'artist' })} />
+        <MediaCard key={a.id} title={a.name} subtitle={d.shared.artist} image={a.image_url} href={`/app/artist/${a.slug}`} variant="artist" playKey={`artist:${a.id}`} onPlay={() => play({ id: a.id, kind: 'artist' })} />
       ))}
     </>
   );
@@ -97,7 +99,7 @@ function AlbumsTab({ ids }: { ids: string[] }) {
   return (
     <>
       {q.data.data.map((r) => (
-        <MediaCard key={r.id} title={r.title} subtitle={r.artist.name} image={r.cover_url} href={`/app/album/${r.id}`} onPlay={() => play({ id: r.id, kind: 'release' })} />
+        <MediaCard key={r.id} title={r.title} subtitle={r.artist.name} image={r.cover_url} href={`/app/album/${r.id}`} playKey={`release:${r.id}`} onPlay={() => play({ id: r.id, kind: 'release' })} />
       ))}
     </>
   );
@@ -131,28 +133,24 @@ export default function Library() {
   const q = useQuery({ queryKey: ['library-summary'], queryFn: () => api<Summary>('/v1/library/summary') });
   return (
     <FanPage>
-      <div className="mb-6 flex flex-wrap gap-2" role="tablist" aria-label={d.library.tablistLabel}>
-        {tabs.map((k) => (
-          <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)} className={cx('rounded-none px-4 py-2 text-sm font-bold', tab === k ? 'bg-rave-highlight text-white' : 'text-white hover:bg-white/10')}>
-            {d.library.tabs[k]}
-          </button>
-        ))}
-      </div>
+      <ChoiceChips value={tab} onChange={setTab} options={tabs.map((k) => ({ value: k, label: d.library.tabs[k], icon: TAB_ICON[k] }))} label={d.library.tablistLabel} className="mb-6" />
       <h1 className="mb-4 text-2xl font-bold">{d.library.tabs[tab]}</h1>
       {q.isError && <DarkError error={q.error} retry={() => q.refetch()} />}
-      <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+      <div className="@container">
+      <div className="grid grid-cols-2 gap-6 @[520px]:grid-cols-3 @[760px]:grid-cols-4 @[1000px]:grid-cols-5">
         {tab === 'playlists' && (
           <>
             <LikedCard count={q.data?.liked_count ?? 0} />
             {q.isLoading && Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}
             {q.data?.playlists.map((p) => (
-              <MediaCard key={p.id} title={p.title} subtitle={p.description || d.library.by(p.owner.name)} image={p.cover_url} href={`/app/playlist/${p.id}`} onPlay={() => play({ id: p.id, kind: 'playlist' })} />
+              <MediaCard key={p.id} title={p.title} subtitle={p.description || d.library.by(p.owner.name)} image={p.cover_url} href={`/app/playlist/${p.id}`} playKey={`playlist:${p.id}`} onPlay={() => play({ id: p.id, kind: 'playlist' })} />
             ))}
           </>
         )}
         {tab === 'artists' && <ArtistsTab ids={q.data?.followed_artists ?? []} />}
         {tab === 'albums' && <AlbumsTab ids={q.data?.saved_releases ?? []} />}
         {tab === 'podcasts' && podcasts && <PodcastsTab />}
+      </div>
       </div>
     </FanPage>
   );

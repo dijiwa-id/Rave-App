@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { ListMusic, Mic2, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { useShallow } from 'zustand/react/shallow';
+import { Disc3, ListMusic, Mic2, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-react';
 import { BRAND_GRADIENT } from '@/components/ads/AdCard';
 import { cx } from '@/components/ui';
 import { useDict } from '@/lib/i18n';
 import { usePlayer } from '@/stores/player';
+import { useLayout, useMediaQuery, useRightOpen } from '@/stores/layout';
 import { NowPlayingSheet } from './NowPlaying';
 import { AdProgress, DeckKey, IconBtn, LikeButton, PlayButton, PlayerError, PlayerLcd, Progress, Range, usePlayerView, VOLUME_CONTROLLABLE } from './playerParts';
 
@@ -28,6 +30,10 @@ export function PlayerBar() {
   const RepeatIcon = p.repeat === 'one' ? Repeat1 : Repeat;
   const title = ad ? ad.title : p.current?.title;
   const d = useDict('common');
+  const panels = useMediaQuery('(min-width: 1024px)');
+  const { rightView, toggleRight } = useLayout(useShallow((x) => ({ rightView: x.rightView, toggleRight: x.toggleRight })));
+  const rightOpen = useRightOpen();
+  const onLyrics = useLocation().pathname.startsWith('/app/lyrics');
 
   return (
     <>
@@ -90,9 +96,12 @@ export function PlayerBar() {
 
         {/* Tengah: kontrol */}
         <div className="flex max-w-[722px] flex-1 flex-col items-center gap-0.5">
-          <div className="mb-1 flex items-center gap-2">
-          <PlayerLcd className="hidden lg:flex" />
-          <div className="deck-tray">
+          <div className="mb-1 flex w-full items-center justify-center gap-2">
+          {/* LCD mengisi sisa lebar kolom tengah (spektrum melebar mengikuti ruang). */}
+          <div className="hidden min-w-0 flex-1 lg:block">
+            <PlayerLcd className="w-full" />
+          </div>
+          <div className="deck-tray shrink-0">
             <DeckKey size="sm" toggle active={p.shuffle} locked={locked} onClick={p.toggleShuffle} title={lockTitle(d.player.shuffle)} aria-label={d.player.shuffle}>
               <Shuffle className="size-3.5" />
             </DeckKey>
@@ -119,16 +128,27 @@ export function PlayerBar() {
               {quality}
             </span>
           )}
-          <Link to="/app/lyrics" aria-label={d.player.lyrics} title={d.player.lyrics} className="grid size-9 place-items-center rounded-full text-rave-muted hover:text-white">
-            <Mic2 className="size-4" />
+          {panels && (
+            <button type="button" onClick={() => toggleRight('now')} aria-pressed={rightOpen && rightView === 'now'} aria-label={d.shell.nowPlayingPanel} title={d.shell.nowPlayingPanel} className="shell-toggle relative grid size-9 place-items-center text-rave-muted transition hover:text-white">
+              <Disc3 className={cx('size-[18px]', rightOpen && rightView === 'now' && p.playing && 'animate-[rave-spin_3s_linear_infinite]')} />
+            </button>
+          )}
+          <Link to="/app/lyrics" aria-label={d.player.lyrics} title={d.player.lyrics} className="shell-toggle relative grid size-9 place-items-center text-rave-muted transition hover:text-white" aria-pressed={onLyrics}>
+            <Mic2 className="size-[18px]" />
           </Link>
-          <Link to="/app/queue" aria-label={d.player.queue} title={d.player.queue} className="grid size-9 place-items-center rounded-full text-rave-muted hover:text-white">
-            <ListMusic className="size-4" />
-          </Link>
+          {panels ? (
+            <button type="button" onClick={() => toggleRight('queue')} aria-pressed={rightOpen && rightView === 'queue'} aria-label={d.player.queue} title={d.player.queue} className="shell-toggle relative grid size-9 place-items-center text-rave-muted transition hover:text-white">
+              <ListMusic className="size-[18px]" />
+            </button>
+          ) : (
+            <Link to="/app/queue" aria-label={d.player.queue} title={d.player.queue} className="grid size-9 place-items-center rounded-full text-rave-muted hover:text-white">
+              <ListMusic className="size-[18px]" />
+            </Link>
+          )}
           {VOLUME_CONTROLLABLE && (
             <>
               <IconBtn onClick={p.toggleMute} aria-label={p.muted ? d.player.unmute : d.player.mute} title={p.muted ? d.player.unmuteShortcut : d.player.muteShortcut} aria-pressed={p.muted} className="text-rave-muted hover:text-white">
-                <VolIcon className="size-4" />
+                <VolIcon className="size-[18px]" />
               </IconBtn>
               <Range label={d.player.volume} value={p.muted ? 0 : p.volume} max={1} onChange={p.setVolume} valueText={(v) => `${Math.round(v * 100)}%`} className="w-24 shrink-0 lg:w-28" />
             </>

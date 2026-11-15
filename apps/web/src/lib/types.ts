@@ -19,6 +19,8 @@ export interface Me {
   city: string | null;
   /** Bahasa antarmuka pilihan; null = ikuti perangkat / default platform. */
   locale?: 'id' | 'en' | null;
+  /** Tema aplikasi dengar pilihan pengguna; null = default platform (appearance.player_theme). */
+  theme?: 'light' | 'dark' | 'system' | null;
   genres: string[];
   roles: string[];
   orgs: OrgClaim[];
@@ -204,6 +206,8 @@ export interface PlaybackSession {
   /** Kualitas diturunkan: premium (HQ/Lossless khusus Premium) | preview | disabled | unavailable. */
   quality_capped?: 'premium' | 'preview' | 'disabled' | 'unavailable' | null;
   loudness_gain_db: number;
+  /** Versi Lossless sedang dibuat on-demand (kebijakan transcoding.lossless_mode) — sesi ini memakai AAC 320. */
+  lossless_pending?: boolean;
   preview_only: boolean;
   preview_ms: number | null;
   duration_ms: number;

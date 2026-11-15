@@ -74,7 +74,7 @@ export function NowPlayingSheet({ open, onClose }: { open: boolean; onClose: () 
           {!ad && p.current?.kind === 'track' && <LikeButton trackId={p.current.id} className="[&>svg]:size-6" />}
         </div>
 
-        <PlayerLcd className="justify-between" />
+        <PlayerLcd className="w-full" />
 
         <div>
           {ad ? <AdProgress elapsedMs={adBreak!.elapsedMs} durationS={ad.duration_s} gradient={BRAND_GRADIENT} /> : <Progress locked={locked} big />}

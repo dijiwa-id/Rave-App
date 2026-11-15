@@ -6,6 +6,7 @@ import { safeGet, safeSet } from '@/lib/storage';
 import type { PlaybackSession } from '@/lib/types';
 import { runAdBreak, useAds } from '@/stores/ads';
 import { toast } from '@/components/ui';
+import { registerAudio, resumeFx, setLoudness, withFx } from '@/lib/audioFx';
 
 /** Item yang bisa diputar: lagu atau episode podcast/fiksi. */
 export interface Playable {
@@ -41,7 +42,9 @@ interface PlayerState {
   repeat: 'off' | 'all' | 'one';
   quality: Quality;
   error: string | null;
-  playQueue: (items: Playable[], startIndex?: number) => Promise<void>;
+  /** Asal antrean saat ini, mis. `playlist:<id>`, `release:<id>`, `artist:<id>` — kartu memakai ini untuk tombol putar/jeda. */
+  context: string | null;
+  playQueue: (items: Playable[], startIndex?: number, context?: string | null) => Promise<void>;
   playOne: (item: Playable) => Promise<void>;
   toggle: () => void;
   next: () => void;
@@ -59,7 +62,16 @@ interface PlayerState {
 }
 
 const audio = typeof window !== 'undefined' ? new Audio() : (null as unknown as HTMLAudioElement);
-if (audio) audio.preload = 'auto';
+if (audio) {
+  audio.preload = 'auto';
+  registerAudio(audio);
+}
+
+/**
+ * Posisi pemutaran presisi (ms) langsung dari elemen audio — untuk animasi per frame (spektrum LCD) tanpa
+ * berlangganan store (positionMs hanya diperbarui ~4×/dtk). Hanya membaca; tidak menyentuh jalur audio.
+ */
+export const playbackClockMs = () => (audio ? audio.currentTime * 1000 : 0);
 
 // ---- Pelaporan play events (TDD §11.3: start, progress tiap 15 dtk, complete, skip) ----
 let pending: any[] = [];
@@ -120,8 +132,11 @@ const MAX_RECOVERIES = 2;
 const errText = () => dict('common').player.errors;
 /** Penjelasan "HQ/Lossless khusus Premium" cukup sekali per sesi aplikasi, bukan tiap lagu. */
 let premiumQualityNotified = false;
+/** "Versi Lossless sedang disiapkan" cukup sekali per lagu per sesi aplikasi. */
+const losslessNotified = new Set<string>();
 /** audio.play() bisa ditolak: AbortError (src berganti) diabaikan; NotAllowedError = autoplay diblokir. */
 function playSafe() {
+  resumeFx();
   return audio.play().catch((e: unknown) => {
     const name = (e as { name?: string })?.name;
     if (name === 'AbortError') return;
@@ -153,7 +168,12 @@ export const usePlayer = create<PlayerState>((set, get) => {
         premiumQualityNotified = true;
         toast.info(errText().premiumQuality);
       }
-      audio.src = session.stream_url;
+      setLoudness(session.loudness_gain_db);
+      if (session.lossless_pending && !losslessNotified.has(item.id)) {
+        losslessNotified.add(item.id);
+        toast.info(errText().losslessPending);
+      }
+      audio.src = withFx(session.stream_url);
       if (resumeMs) audio.addEventListener('loadedmetadata', () => (audio.currentTime = resumeMs / 1000), { once: true });
       audio.volume = get().muted ? 0 : get().volume;
       await playSafe();
@@ -259,6 +279,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
 
   return {
     queue: [],
+    context: null,
     index: -1,
     current: null,
     session: null,
@@ -273,9 +294,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
     quality: (safeGet('rave-quality') as Quality | null) ?? 'auto',
     error: null,
 
-    async playQueue(items, startIndex = 0) {
+    async playQueue(items, startIndex = 0, context = null) {
       if (!items.length) return;
-      set({ queue: items, index: startIndex });
+      set({ queue: items, index: startIndex, context });
       if (useAds.getState().busy) return; // diputar setelah jeda iklan selesai
       await load(items[startIndex]);
     },
@@ -346,8 +367,18 @@ export const usePlayer = create<PlayerState>((set, get) => {
       useAds.getState().setVolume(audio.volume);
       set({ muted });
     },
-    toggleShuffle: () => set({ shuffle: !get().shuffle }),
-    cycleRepeat: () => set({ repeat: get().repeat === 'off' ? 'all' : get().repeat === 'all' ? 'one' : 'off' }),
+    toggleShuffle: () => {
+      const on = !get().shuffle;
+      set({ shuffle: on });
+      const t = dict('common').shell;
+      toast.info(on ? t.shuffleOn : t.shuffleOff, { duration: 2200 });
+    },
+    cycleRepeat: () => {
+      const r = get().repeat === 'off' ? 'all' : get().repeat === 'all' ? 'one' : 'off';
+      set({ repeat: r });
+      const t = dict('common').shell;
+      toast.info(r === 'all' ? t.repeatAllToast : r === 'one' ? t.repeatOneToast : t.repeatOffToast, { duration: 2200 });
+    },
     setQuality(q) {
       safeSet('rave-quality', q);
       set({ quality: q });
@@ -389,5 +420,5 @@ if (typeof window !== 'undefined')
     audio.pause();
     audio.removeAttribute('src');
     audio.load();
-    usePlayer.setState({ queue: [], index: 0, current: null, session: null, playing: false, buffering: false, positionMs: 0, error: null });
+    usePlayer.setState({ queue: [], index: 0, context: null, current: null, session: null, playing: false, buffering: false, positionMs: 0, error: null });
   });

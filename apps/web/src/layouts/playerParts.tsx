@@ -8,6 +8,7 @@ import { currentAd, useAds } from '@/stores/ads';
 import { useAuth } from '@/stores/auth';
 import { cx, Spinner, toast } from '@/components/ui';
 import { dict, useDict } from '@/lib/i18n';
+import { Spectrum } from './LcdSpectrum';
 
 /** Tooltip kontrol terkunci selama iklan (fungsi agar mengikuti bahasa aktif). */
 export const adLock = () => dict('common').player.adLock;
@@ -217,38 +218,35 @@ export function LikeButton({ trackId, className, batched }: { trackId: string; c
   });
   const liked = !!data?.ids.includes(trackId);
   const d = useDict('common');
-  async function toggle() {
-    if (!token) return toast.info(d.player.signInToSave);
-    qc.setQueryData(['likes-contains', trackId], { ids: liked ? [] : [trackId] });
+  async function setLiked(next: boolean, undoable = true) {
+    qc.setQueryData(['likes-contains', trackId], { ids: next ? [trackId] : [] });
     try {
-      await api(`/v1/library/likes/${trackId}`, { method: liked ? 'DELETE' : 'PUT' });
+      await api(`/v1/library/likes/${trackId}`, { method: next ? 'PUT' : 'DELETE' });
       qc.invalidateQueries({ queryKey: ['likes'] });
       qc.invalidateQueries({ queryKey: ['library-summary'] });
-      if (!liked) toast.success(d.player.addedToLiked);
+      const cur = usePlayer.getState().current;
+      const image = cur?.id === trackId ? cur.image_url : null;
+      const action = undoable ? { label: d.shell.undo, onClick: () => void setLiked(!next, false) } : undefined;
+      if (next) toast.success(d.shell.likedToast, { image, action });
+      else toast.info(d.shell.unlikedToast, { image, action });
     } catch (e) {
-      qc.setQueryData(['likes-contains', trackId], { ids: liked ? [trackId] : [] });
+      qc.setQueryData(['likes-contains', trackId], { ids: next ? [] : [trackId] });
       toast.error(e);
     }
+  }
+  function toggle() {
+    if (!token) return toast.info(d.player.signInToSave);
+    void setLiked(!liked);
   }
   return (
     // padding+margin negatif: area sentuh 44px (36px di desktop) tanpa menggeser tata letak.
     <button onClick={toggle} aria-label={liked ? d.player.removeLiked : d.player.saveLiked} aria-pressed={liked} className={cx('-m-3 grid place-items-center rounded-none p-3 transition md:-m-2 md:p-2 hover:scale-110 active:scale-90', liked ? 'text-rave-primary-text' : 'text-rave-muted hover:text-white', className)}>
-      <Heart className={cx('size-5', liked && 'fill-current')} />
+      <Heart key={liked ? 'on' : 'off'} className={cx('size-5', liked && 'fill-current animate-[rave-pop_0.3s_cubic-bezier(0.2,1.6,0.4,1)]')} />
     </button>
   );
 }
 
-/** Spektrum dekoratif LCD: bergerak hanya saat memutar (dimatikan bila prefers-reduced-motion). */
-const BARS = [0.62, 0.9, 0.48, 0.78, 0.35, 0.95, 0.55, 0.7, 0.42, 0.85, 0.5, 0.66];
-export function Spectrum({ on }: { on: boolean }) {
-  return (
-    <span className="deck-spectrum" data-on={on} aria-hidden>
-      {BARS.map((d, i) => (
-        <span key={i} style={{ animationDuration: `${0.45 + d * 0.6}s`, animationDelay: `${-i * 0.13}s` }} />
-      ))}
-    </span>
-  );
-}
+export { Spectrum } from './LcdSpectrum';
 
 /** Layar LCD pemutar: waktu berjalan (atau sisa iklan), kualitas audio, status, dan spektrum. */
 export function PlayerLcd({ className }: { className?: string }) {
@@ -258,14 +256,16 @@ export function PlayerLcd({ className }: { className?: string }) {
   const d = useDict('common');
   const ms = ad ? adBreak!.elapsedMs : positionMs;
   const status = ad ? d.player.lcdAd : loading ? 'BUFFER' : playing ? 'PLAY' : p.current ? 'PAUSE' : 'STOP';
+  // Spektrum mengikuti lagu (amplop server) hanya untuk lagu; episode & iklan memakai animasi cadangan.
+  const trackId = !ad && p.current?.kind === 'track' ? p.current.id : null;
   return (
     <div className={cx('deck-lcd', className)} role="timer" aria-label={d.player.playTime(fmt.duration(ms))}>
-      <span className="deck-lcd__meta w-11">
+      <span className="deck-lcd__meta w-11 shrink-0">
         <span>{status}</span>
         <span className={quality ? undefined : 'deck-lcd__dim'}>{quality ?? '----'}</span>
       </span>
-      <span className={cx('deck-lcd__time', !p.current && !ad && 'deck-lcd__dim')}>{fmt.duration(ms)}</span>
-      <Spectrum on={playing && !loading} />
+      <span className={cx('deck-lcd__time shrink-0', !p.current && !ad && 'deck-lcd__dim')}>{fmt.duration(ms)}</span>
+      <Spectrum trackId={trackId} playing={playing && !loading} idle={!p.current && !ad} />
     </div>
   );
 }

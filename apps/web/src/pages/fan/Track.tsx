@@ -55,7 +55,7 @@ export default function Track() {
         </div>
       </header>
       <ActionBar>
-        <PlayFab size="lg" playing={isCurrent && playing} onClick={() => (isCurrent ? toggle() : playQueue([trackToPlayable(t)]))} />
+        <PlayFab size="lg" playKey={`track:${t.id}`} onClick={() => playQueue([trackToPlayable(t)])} />
         <LikeButton trackId={t.id} className="[&>svg]:size-8" />
         <MoreHorizontal className="size-7 text-rave-muted" aria-hidden />
       </ActionBar>

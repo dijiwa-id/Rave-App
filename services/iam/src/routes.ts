@@ -266,14 +266,16 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
           avatar_url: z.string().url().nullable().optional(),
           city: z.string().max(80).nullable().optional(),
           locale: z.enum(['id', 'en']).nullable().optional(),
+          theme: z.enum(['light', 'dark', 'system']).nullable().optional(),
         })
         .parse(req.body);
       await db.query(
         `UPDATE users SET display_name = coalesce($2, display_name),
            avatar_url = CASE WHEN $3::boolean THEN $4 ELSE avatar_url END,
            city = CASE WHEN $5::boolean THEN $6 ELSE city END,
-           locale = CASE WHEN $7::boolean THEN $8 ELSE locale END, updated_at = now() WHERE id = $1`,
-        [req.user!.sub, b.display_name ?? null, 'avatar_url' in b, b.avatar_url ?? null, 'city' in b, b.city ?? null, 'locale' in b, b.locale ?? null],
+           locale = CASE WHEN $7::boolean THEN $8 ELSE locale END,
+           theme = CASE WHEN $9::boolean THEN $10 ELSE theme END, updated_at = now() WHERE id = $1`,
+        [req.user!.sub, b.display_name ?? null, 'avatar_url' in b, b.avatar_url ?? null, 'city' in b, b.city ?? null, 'locale' in b, b.locale ?? null, 'theme' in b, b.theme ?? null],
       );
       return buildMe(pool, req.user!.sub);
     });

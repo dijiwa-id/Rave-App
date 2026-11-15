@@ -9,6 +9,7 @@ import {
   isLosslessCodec,
   LOSSY_PROFILE,
   losslessLabel,
+  losslessTarget,
   plannedRenditions,
   RENDITION_SETTING,
   type AudioMeta,
@@ -16,8 +17,9 @@ import {
   type RenditionQuality,
   type Renditions,
 } from '@rave/domain/audio';
-import { settings, wakeJob, type Job } from '@rave/service-kit';
+import { qualityPolicy, settings, wakeJob, type Job } from '@rave/service-kit';
 import { UPLOAD_DIR } from './storage.js';
+import { enqueueSpectrumForUpload } from './spectrum.js';
 
 const require = createRequire(import.meta.url);
 
@@ -52,6 +54,84 @@ function runFfmpeg(args: string[], timeoutMs: number): Promise<{ code: number; s
       clearTimeout(t);
       if (signal === 'SIGKILL') return reject(new Error(`ffmpeg melewati batas waktu ${Math.round(timeoutMs / 1000)} dtk`));
       resolve({ code: code ?? 1, stderr: err });
+    });
+  });
+}
+
+/**
+ * Dekode sumber audio (berkas lokal atau URL http/https) ke PCM mono float32 pada `sampleRate`, dialirkan ke `onChunk`.
+ * Dibatasi waktu & durasi (`maxSeconds`). Tidak menulis berkas apa pun.
+ */
+export function decodePcm(
+  src: string,
+  sampleRate: number,
+  onChunk: (pcm: Float32Array) => void,
+  opts: { timeoutMs: number; maxSeconds: number },
+): Promise<void> {
+  const bin = ffmpegPath();
+  if (!bin) return Promise.reject(new Error('ffmpeg tidak tersedia di server (set FFMPEG_PATH)'));
+  // URL eksternal diunduh oleh Node lalu dialirkan ke stdin ffmpeg (build statis ffmpeg tidak andal untuk TLS/DNS).
+  const remote = /^https?:\/\//i.test(src);
+  const args = [
+    '-hide_banner', '-loglevel', 'error', ...(remote ? [] : ['-nostdin']),
+    '-i', remote ? 'pipe:0' : src, '-map', '0:a:0', '-vn', '-t', String(opts.maxSeconds),
+    '-ac', '1', '-ar', String(sampleRate), '-f', 'f32le', '-acodec', 'pcm_f32le', 'pipe:1',
+  ];
+  return new Promise((resolve, reject) => {
+    let err = '';
+    const p = spawn(bin, args, { stdio: [remote ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+    const abort = new AbortController();
+    if (remote) {
+      p.stdin!.on('error', () => {}); // ffmpeg selesai lebih dulu (batas -t) → EPIPE wajar
+      void (async () => {
+        try {
+          const res = await fetch(src, { signal: abort.signal, redirect: 'follow' });
+          if (!res.ok || !res.body) throw new Error(`unduh audio gagal (${res.status})`);
+          let total = 0;
+          for await (const c of res.body as unknown as AsyncIterable<Uint8Array>) {
+            total += c.length;
+            if (total > 400 * 1024 * 1024) throw new Error('berkas audio eksternal terlalu besar');
+            if (!p.stdin!.write(c)) await new Promise((r) => p.stdin!.once('drain', r));
+            if (p.exitCode !== null) break;
+          }
+        } catch (e) {
+          if (!abort.signal.aborted) err += ` ${(e as Error).message}`;
+        } finally {
+          p.stdin!.end();
+        }
+      })();
+    }
+    let rest: Buffer | null = null;
+    let failed: Error | null = null;
+    p.stderr!.on('data', (c: Buffer) => {
+      err = (err + c.toString()).slice(-4000);
+    });
+    p.stdout!.on('data', (c: Buffer) => {
+      if (failed) return;
+      let buf = rest ? Buffer.concat([rest, c]) : c;
+      const usable = buf.length - (buf.length % 4);
+      rest = usable < buf.length ? Buffer.from(buf.subarray(usable)) : null;
+      if (!usable) return;
+      // Salin ke buffer yang selaras 4 byte sebelum dibaca sebagai Float32Array.
+      const aligned = new Float32Array(usable / 4);
+      new Uint8Array(aligned.buffer).set(buf.subarray(0, usable));
+      buf = Buffer.alloc(0);
+      try {
+        onChunk(aligned);
+      } catch (e) {
+        failed = e as Error;
+        p.kill('SIGKILL');
+      }
+    });
+    const t = setTimeout(() => p.kill('SIGKILL'), opts.timeoutMs);
+    p.on('error', (e) => (clearTimeout(t), abort.abort(), reject(e)));
+    p.on('close', (code, signal) => {
+      clearTimeout(t);
+      abort.abort();
+      if (failed) return reject(failed);
+      if (signal === 'SIGKILL') return reject(new Error(`dekode melewati batas waktu ${Math.round(opts.timeoutMs / 1000)} dtk`));
+      if (code !== 0) return reject(new Error(`ffmpeg dekode gagal: ${err.trim().split('\n').slice(-2).join(' ').slice(0, 300)}`));
+      resolve();
     });
   });
 }
@@ -97,9 +177,8 @@ async function encode(src: string, stored: string, q: RenditionQuality, m: Audio
   let args: string[];
   let label: string;
   if (q === 'lossless') {
-    // FLAC dari master lossless; resolusi dipertahankan sampai 24-bit/96 kHz (hi-res), di atasnya diturunkan.
-    const rate = Math.min(m.sample_rate || 44100, 96000);
-    const depth = m.bit_depth > 16 ? 24 : 16;
+    // FLAC dari master lossless; resolusi dibatasi kebijakan `streaming.lossless_max_resolution` (default 24/96).
+    const { sample_rate: rate, bit_depth: depth } = losslessTarget(m, qualityPolicy().losslessCap);
     args = [...common, '-c:a', 'flac', '-compression_level', '5', '-ar', String(rate), '-sample_fmt', depth > 16 ? 's32' : 's16', ...(depth > 16 ? ['-bits_per_raw_sample', '24'] : []), '-f', 'flac', part];
     label = losslessLabel('FLAC', { bit_depth: depth, sample_rate: rate });
   } else {
@@ -138,7 +217,7 @@ export const transcodeJob: Job = {
     if (!settings.bool('transcoding.enabled') || !ffmpegPath()) return;
     const limit = Math.max(1, Math.min(16, settings.num('transcoding.max_concurrent_jobs') || 2));
     const jobs = await db.tx(async (tx) =>
-      (await tx.query<{ id: string; stored_name: string; audio_meta: AudioMeta; transcode_attempts: number }>(
+      (await tx.query<{ id: string; stored_name: string; audio_meta: AudioMeta; transcode_attempts: number; renditions: Renditions; lossless_requested_at: string | null }>(
         `UPDATE uploads SET transcode_status = 'processing', transcode_started_at = now(), transcode_attempts = transcode_attempts + 1
           WHERE id IN (
             SELECT id FROM uploads
@@ -148,14 +227,16 @@ export const transcodeJob: Job = {
              ORDER BY created_at
              LIMIT $1
              FOR UPDATE SKIP LOCKED)
-          RETURNING id, stored_name, audio_meta, transcode_attempts`,
+          RETURNING id, stored_name, audio_meta, transcode_attempts, renditions, lossless_requested_at`,
         [limit],
       )).rows,
     );
     await Promise.all(
       jobs.map(async (j) => {
         const src = join(UPLOAD_DIR, j.stored_name);
-        const plan = plannedRenditions(j.audio_meta, enabledRenditions());
+        // Kebijakan: FLAC hanya dibuat bila mode eager atau sudah diminta Premium; rendisi yang sudah ada tidak di-encode ulang.
+        const have = j.renditions ?? {};
+        const plan = plannedRenditions(j.audio_meta, enabledRenditions(), qualityPolicy(), !!j.lossless_requested_at).filter((q) => !have[q]?.url);
         // Batas waktu per rendisi: 4× durasi lagu, minimal 2 menit.
         const timeoutMs = Math.max(120_000, (j.audio_meta.duration_ms || 0) * 4);
         const out: Renditions = {};
@@ -163,10 +244,11 @@ export const transcodeJob: Job = {
           if (!existsSync(src)) throw new Error('berkas master tidak ditemukan');
           for (const q of plan) out[q] = await encode(src, j.stored_name, q, j.audio_meta, timeoutMs);
           await db.query(
-            `UPDATE uploads SET renditions = $2, transcode_status = 'done', transcode_error = NULL, transcoded_at = now() WHERE id = $1`,
+            `UPDATE uploads SET renditions = coalesce(renditions, '{}'::jsonb) || $2::jsonb, transcode_status = 'done', transcode_error = NULL, transcoded_at = now() WHERE id = $1`,
             [j.id, JSON.stringify(out)],
           );
           log.info({ uploadId: j.id, renditions: Object.keys(out) }, 'transcoding selesai');
+          await enqueueSpectrumForUpload(db, j.stored_name); // tidak pernah melempar
         } catch (e) {
           const msg = (e as Error).message.slice(0, 500);
           const final = j.transcode_attempts >= MAX_ATTEMPTS;
@@ -180,3 +262,22 @@ export const transcodeJob: Job = {
   },
 };
 
+
+/**
+ * Permintaan versi Lossless on-demand (dipanggil playback ketika Premium meminta Lossless yang belum ada).
+ * Idempoten: menandai upload, lalu mengantrekan ulang ke worker bila transcoding tersedia. Tidak ada aksi bila
+ * master bukan lossless, FLAC sudah ada, atau master sudah bisa dipakai ulang.
+ */
+export async function requestLossless(db: { query: (sql: string, params?: unknown[]) => Promise<unknown[]> }, uploadId: string): Promise<boolean> {
+  const canEncode = settings.bool('transcoding.enabled') && !!ffmpegPath();
+  const r = await db.query(
+    `UPDATE uploads SET lossless_requested_at = coalesce(lossless_requested_at, now()),
+            transcode_status = CASE WHEN $2 AND transcode_status IN ('done','failed','skipped') THEN 'pending' ELSE transcode_status END,
+            transcode_attempts = CASE WHEN $2 AND transcode_status IN ('done','failed','skipped') THEN 0 ELSE transcode_attempts END
+      WHERE id = $1 AND (audio_meta->>'lossless')::boolean IS TRUE AND NOT (coalesce(renditions, '{}'::jsonb) ? 'lossless')
+        AND (lossless_requested_at IS NULL OR transcode_status IN ('done','failed','skipped'))
+      RETURNING id`,
+    [uploadId, canEncode],
+  );
+  return r.length > 0 && canEncode;
+}

@@ -9,6 +9,8 @@ import { usePlayer } from '@/stores/player';
 import { colorFor } from '@/components/fan';
 import { cx, EmptyState, toast } from '@/components/ui';
 import { Vinyl } from '@/pages/public/Vinyl';
+import { LyricScroller } from '@/components/fan/LyricScroller';
+import { Spectrum, usePlayerView } from '@/layouts/playerParts';
 import type { Lyrics as LyricsT } from './Track';
 import { useDict } from '@/lib/i18n';
 import { useBranding } from '@/lib/platform';
@@ -110,76 +112,6 @@ function Equalizer({ on, bars = 32, className }: { on: boolean; bars?: number; c
 
 // ---------------------------------------------------------------- Karaoke
 
-/**
- * Medan orbit karaoke: lintasan elips bertumpuk seperti garis edar planet — garis putus-putus dipadu garis utuh,
- * tiap orbit sedikit miring & pusatnya tidak tepat satu poros (sengaja "tidak presisi"), dengan planet (bulatan)
- * yang beredar di lintasannya. Seluruh sistem berpresesi pelan. Berhenti saat lagu dijeda / reduced motion.
- */
-type Orbit = { cx: number; cy: number; rx: number; ry: number; tilt: number; dash?: string; width: number; color: string; opacity: number; planet: number; planetColor: string; dur: number; reverse?: boolean; start: number; halo?: boolean };
-const ORBITS: Orbit[] = [
-  { cx: 506, cy: 494, rx: 478, ry: 168, tilt: -17, dash: '2 11', width: 1.2, color: '#ffffff', opacity: 0.26, planet: 7, planetColor: '#f4c21f', dur: 96, start: 0.12, halo: true },
-  { cx: 493, cy: 507, rx: 418, ry: 196, tilt: 9, width: 1, color: '#ffffff', opacity: 0.13, planet: 4.5, planetColor: '#ffffff', dur: 74, reverse: true, start: 0.58 },
-  { cx: 512, cy: 499, rx: 344, ry: 118, tilt: -31, dash: '0.1 9', width: 2.4, color: '#f4c21f', opacity: 0.5, planet: 9, planetColor: '#c9a0dc', dur: 58, start: 0.33, halo: true },
-  { cx: 497, cy: 489, rx: 268, ry: 236, tilt: 4, width: 1, color: '#c9a0dc', opacity: 0.2, planet: 3.5, planetColor: '#f4c21f', dur: 44, reverse: true, start: 0.8 },
-  { cx: 489, cy: 503, rx: 210, ry: 84, tilt: 23, dash: '7 7', width: 1, color: '#ffffff', opacity: 0.22, planet: 5, planetColor: '#ffffff', dur: 33, start: 0.05 },
-  { cx: 504, cy: 509, rx: 128, ry: 112, tilt: -8, dash: '1 5', width: 1, color: '#ffffff', opacity: 0.18, planet: 2.8, planetColor: '#f4c21f', dur: 24, reverse: true, start: 0.45 },
-];
-/** Elips sebagai path (dimulai di sisi kanan) — untuk lintasan animateMotion planet. */
-const ellipsePath = (o: Orbit) => `M${o.cx + o.rx} ${o.cy} A${o.rx} ${o.ry} 0 1 1 ${o.cx - o.rx} ${o.cy} A${o.rx} ${o.ry} 0 1 1 ${o.cx + o.rx} ${o.cy}`;
-
-function OrbitField({ playing, still, className }: { playing: boolean; still: boolean; className?: string }) {
-  const ref = useRef<SVGSVGElement>(null);
-  useEffect(() => {
-    const svg = ref.current;
-    if (!svg) return;
-    if (playing && !still) svg.unpauseAnimations();
-    else svg.pauseAnimations();
-  }, [playing, still]);
-  return (
-    <svg ref={ref} viewBox="0 0 1000 1000" aria-hidden className={cx('pointer-events-none overflow-visible', className)} fill="none">
-      {/* Presesi pelan seluruh sistem di poros yang sedikit bergeser dari tengah. */}
-      <g
-        className="animate-[rave-spin_240s_linear_infinite] motion-reduce:animate-none"
-        style={{ transformOrigin: '508px 496px', transformBox: 'view-box', animationPlayState: playing && !still ? 'running' : 'paused' }}
-      >
-        {ORBITS.map((o, i) => {
-          const path = ellipsePath(o);
-          // Posisi awal planet (statis bila animasi tidak jalan): titik pada elips di fraksi `start`.
-          const a = o.start * Math.PI * 2;
-          const px = o.cx + o.rx * Math.cos(a);
-          const py = o.cy - o.ry * Math.sin(a);
-          return (
-            <g key={i} transform={`rotate(${o.tilt} ${o.cx} ${o.cy})`}>
-              <path d={path} stroke={o.color} strokeOpacity={o.opacity} strokeWidth={o.width} strokeDasharray={o.dash} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-              {/* Planet: bulatan (+ halo tipis) yang beredar di lintasan. */}
-              <g transform={still ? `translate(${px} ${py})` : undefined}>
-                {o.halo && <circle r={o.planet * 2.4} stroke={o.planetColor} strokeOpacity="0.35" strokeWidth="1" strokeDasharray="1 3" />}
-                <circle r={o.planet} fill={o.planetColor} fillOpacity="0.9" />
-                {!still && (
-                  <animateMotion
-                    dur={`${o.dur}s`}
-                    repeatCount="indefinite"
-                    path={path}
-                    keyPoints={o.reverse ? `${o.start};0;1;${o.start}` : `${o.start};1;0;${o.start}`}
-                    keyTimes={`0;${o.reverse ? o.start : 1 - o.start};${o.reverse ? o.start : 1 - o.start};1`}
-                    calcMode="linear"
-                  />
-                )}
-              </g>
-            </g>
-          );
-        })}
-        {/* Bintang kecil di antara orbit. */}
-        {[
-          [182, 268, 1.6], [820, 214, 2.2], [742, 802, 1.4], [236, 760, 2], [905, 560, 1.2], [96, 470, 1.4], [612, 120, 1.2], [420, 905, 1.6],
-        ].map(([x, y, rr], i) => (
-          <circle key={`s${i}`} cx={x} cy={y} r={rr} fill="#ffffff" fillOpacity={0.35} />
-        ))}
-      </g>
-    </svg>
-  );
-}
-
 /** Lockup karaoke: logo RAVE (unggahan Super Admin atau bawaan) + "KARAOKE" berjarak lebar di bawahnya. */
 function KaraokeBrand({ label }: { label: string }) {
   const b = useBranding();
@@ -188,28 +120,11 @@ function KaraokeBrand({ label }: { label: string }) {
       <img src={b.logoDark} alt={b.name} className="h-8 w-auto object-contain sm:h-11" draggable={false} />
       <div className="mt-1.5 flex items-center gap-2.5" aria-hidden>
         <span className="h-px w-5 bg-gradient-to-r from-transparent to-rave-mustard sm:w-8" />
-        <span className="font-label text-[10px] font-bold tracking-[0.55em] text-rave-mustard uppercase sm:text-xs">{label}</span>
+        {/* pl = tracking: letter-spacing menambah jarak setelah huruf terakhir → imbangi agar tepat di tengah. */}
+        <span className="pl-[0.55em] font-label text-[10px] font-bold tracking-[0.55em] text-rave-mustard uppercase sm:text-xs">{label}</span>
         <span className="h-px w-5 bg-gradient-to-l from-transparent to-rave-mustard sm:w-8" />
       </div>
     </div>
-  );
-}
-
-/** Baris aktif karaoke: sapuan mustard dari kiri ke kanan mengikuti posisi lagu (diperhalus transisi CSS). */
-function SweepLine({ text, start, end }: { text: string; start: number; end: number }) {
-  const pct = usePlayer((s) => Math.round(clamp01((s.positionMs - start) / Math.max(1, end - start)) * 1000) / 10);
-  return (
-    <span
-      className="bg-clip-text text-transparent [-webkit-box-decoration-break:clone] [box-decoration-break:clone]"
-      style={{
-        backgroundImage: 'linear-gradient(90deg, #f4c21f 0 50%, rgb(255 255 255 / 0.92) 50% 100%)',
-        backgroundSize: '200% 100%',
-        backgroundPosition: `${100 - pct}% 0`,
-        transition: 'background-position 260ms linear',
-      }}
-    >
-      {text}
-    </span>
   );
 }
 
@@ -231,21 +146,23 @@ function GapCountdown({ from, to }: { from: number; to: number }) {
   );
 }
 
+/** Spektrum panggung karaoke: kanvas spektrum yang mengikuti lagu (sama dengan LCD pemutar & desktop), selebar kontrol. */
+function StageSpectrum() {
+  const { ad, playing, loading, p } = usePlayerView();
+  const trackId = !ad && p.current?.kind === 'track' ? p.current.id : null;
+  return (
+    <div aria-hidden className="mx-auto flex h-12 w-full max-w-3xl sm:h-16">
+      <Spectrum trackId={trackId} playing={playing && !loading} idle={!p.current && !ad} />
+    </div>
+  );
+}
+
 function KaraokeStage({ lines, active, onExit, title, subtitle, image }: { lines: Line[]; active: number; onExit: () => void; title: string; subtitle: string; image: string | null }) {
   const d = useDict('fan');
   const playing = usePlayer((s) => s.playing);
-  const duration = usePlayer((s) => s.durationMs);
   const seek = usePlayer((s) => s.seek);
   const reduce = useReducedMotion();
 
-  const cur = active >= 0 ? lines[active] : undefined;
-  const nextIdx = active + 1;
-  const next = lines[nextIdx];
-  const start = cur?.time_ms ?? 0;
-  const end = next?.time_ms ?? (duration > start ? duration : start + 4000);
-  // Jeda: sebelum baris pertama, atau baris aktif kosong (♪) dengan baris berikut > 3 dtk lagi.
-  const gap = !cur || !cur.text.trim();
-  const gapLong = gap && next && next.time_ms - start > 3000;
 
   // Layar penuh: overlay menutupi seluruh aplikasi + Fullscreen API browser (bila didukung; iOS cukup overlay).
   // Keluar dari fullscreen native (Esc/gestur) juga menutup karaoke; keluar karaoke juga keluar dari fullscreen native.
@@ -268,36 +185,15 @@ function KaraokeStage({ lines, active, onExit, title, subtitle, image }: { lines
 
   return createPortal(
     <div role="dialog" aria-modal="true" aria-label={d.lyrics.karaoke} className="fixed inset-0 z-[200] isolate flex h-dvh flex-col overflow-hidden bg-[#120b16] text-white">
-      {/* Latar panggung */}
-      <div aria-hidden className="absolute inset-0 -z-10 bg-[radial-gradient(60rem_40rem_at_50%_40%,rgb(91_42_110/0.55),transparent_70%),linear-gradient(180deg,#1d0f24,#0e0c0f)]" />
-      <DotField size={12} opacity={0.14} mask="radial-gradient(ellipse 80% 70% at 50% 45%, #000 0%, transparent 80%)" className="-z-10" />
+      {/* Latar panggung bersih: gradien ungu gelap + piringan hitam jelas yang menyembul dari tepi kanan (berputar saat main). */}
+      <div aria-hidden className="absolute inset-0 -z-10 bg-[radial-gradient(70rem_45rem_at_35%_45%,rgb(91_42_110/0.45),transparent_70%),linear-gradient(180deg,#1a0e20,#0e0c0f)]" />
+      <DotField size={12} opacity={0.12} mask="radial-gradient(ellipse 80% 70% at 50% 45%, #000 0%, transparent 80%)" className="-z-10" />
       <Vinyl
-        shadow={false}
-        className="absolute top-1/2 left-1/2 -z-10 w-[min(62vw,460px)] -translate-x-1/2 -translate-y-1/2 opacity-[0.18]"
-        discClassName={cx('animate-[rave-spin_6s_linear_infinite] motion-reduce:animate-none', !playing && '[animation-play-state:paused]')}
+        className="absolute top-1/2 right-0 -z-10 size-[min(150vw,560px)] translate-x-[58%] -translate-y-1/2 lg:size-[min(96vh,900px)] lg:translate-x-[55%]"
+        discClassName={cx('animate-[rave-spin_14s_linear_infinite] motion-reduce:animate-none', !playing && '[animation-play-state:paused]')}
       />
-      <OrbitField playing={playing} still={!!reduce} className="absolute top-1/2 left-1/2 -z-10 w-[max(150vw,1100px)] -translate-x-1/2 -translate-y-1/2 sm:w-[min(140vw,1400px)]" />
-      {/* Vinyet: tepi panggung menggelap agar lirik tetap paling menonjol. */}
-      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_75%_65%_at_50%_50%,transparent_40%,rgb(14_12_15/0.85)_100%)]" />
-      {/* Denyut cincin titik setiap ganti baris */}
-      {!reduce && (
-        <div aria-hidden className="pointer-events-none absolute top-1/2 left-1/2 -z-10 w-[min(90vw,620px)] -translate-x-1/2 -translate-y-1/2">
-          <AnimatePresence>
-            <motion.svg
-              key={active}
-              viewBox="0 0 200 200"
-              className="absolute inset-0 w-full"
-              initial={{ scale: 0.55, opacity: 0.9 }}
-              animate={{ scale: 1.35, opacity: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 1.6, ease: [0.22, 1, 0.36, 1] }}
-            >
-              <circle cx="100" cy="100" r="96" fill="none" stroke="#f4c21f" strokeWidth="1.6" strokeDasharray="0.1 6" strokeLinecap="round" />
-            </motion.svg>
-          </AnimatePresence>
-          <div className="aspect-square w-full" />
-        </div>
-      )}
+      {/* Bayang lembut di sisi kiri piringan agar lirik tetap paling menonjol. */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(90deg,rgb(14_12_15/0.35),transparent_45%,transparent_70%,rgb(14_12_15/0.25))]" />
 
       {/* Kepala panggung */}
       <header className="relative grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 pt-[max(1.25rem,env(safe-area-inset-top))] md:px-10 md:pt-8">
@@ -318,70 +214,42 @@ function KaraokeStage({ lines, active, onExit, title, subtitle, image }: { lines
         <KaraokeBrand label={d.lyrics.karaokeTitle} />
         <div className="flex justify-end">
           <button
+            type="button"
             onClick={onExit}
-            title={d.lyrics.exitKaraoke}
-            className="inline-flex h-10 shrink-0 items-center gap-2 border border-white/20 bg-black/30 px-3 text-sm font-bold backdrop-blur transition hover:bg-white hover:text-black focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rave-mustard"
+            title={`${d.lyrics.exitKaraoke} (Esc)`}
+            aria-label={d.lyrics.exitKaraoke}
+            className="grid size-10 shrink-0 place-items-center text-white/70 transition hover:bg-white/10 hover:text-white active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rave-mustard"
           >
-            <X className="size-4" /> <span className="hidden sm:inline">{d.lyrics.exitKaraoke}</span>
+            <X className="size-6" strokeWidth={2.25} />
           </button>
         </div>
       </header>
 
-      {/* Baris */}
-      <div className="relative flex flex-1 flex-col items-center justify-center px-5 py-10 text-center md:px-16" aria-live="polite">
-        <AnimatePresence mode="popLayout" initial={false}>
-          {active > 0 && lines[active - 1]?.text && (
-            <motion.p
-              key={`p${active - 1}`}
-              initial={reduce ? false : { opacity: 0, y: 20 }}
-              animate={{ opacity: 0.35, y: 0 }}
-              exit={reduce ? undefined : { opacity: 0, y: -24 }}
-              transition={{ duration: 0.35 }}
-              className="mb-6 max-w-4xl text-lg font-bold text-white/70 sm:text-2xl"
-            >
-              {lines[active - 1]!.text}
-            </motion.p>
-          )}
-          <motion.div
-            key={`c${active}`}
-            initial={reduce ? false : { opacity: 0, y: 36, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={reduce ? undefined : { opacity: 0, y: -30, scale: 0.98 }}
-            transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
-            className="max-w-5xl"
-          >
-            {gap ? (
-              <div className="flex flex-col items-center gap-5 py-4">
-                {gapLong ? <GapCountdown from={start} to={next!.time_ms} /> : <span className="font-display text-6xl text-rave-mustard">♪</span>}
-                <span className="font-label text-[11px] font-bold tracking-[0.2em] text-white/50 uppercase">{active < 0 ? d.lyrics.getReady : d.lyrics.instrumental}</span>
-              </div>
-            ) : (
-              <p className="text-[clamp(2rem,6.5vw,4.75rem)] leading-[1.08] font-black tracking-tight text-balance drop-shadow-[0_4px_30px_rgb(0_0_0/0.5)]">
-                <SweepLine text={cur!.text} start={start} end={end} />
-              </p>
-            )}
-          </motion.div>
-          {next?.text && (
-            <motion.button
-              key={`n${nextIdx}`}
-              type="button"
-              onClick={() => seek(next.time_ms)}
-              initial={reduce ? false : { opacity: 0, y: 24 }}
-              animate={{ opacity: 0.5, y: 0 }}
-              exit={reduce ? undefined : { opacity: 0, y: -20 }}
-              transition={{ duration: 0.35, delay: 0.05 }}
-              className="mt-8 max-w-4xl text-xl font-extrabold text-white/80 transition hover:!opacity-90 sm:text-3xl"
-            >
-              {next.text}
-            </motion.button>
-          )}
-        </AnimatePresence>
-      </div>
+      {/* Baris: kolom lirik bergulir mulus — baris aktif di tengah, klik baris untuk lompat, roda/seret untuk jelajah. */}
+      <LyricScroller
+        lines={lines}
+        active={active}
+        reduce={!!reduce}
+        onSeek={seek}
+        followLabel={d.lyrics.followLyrics}
+        className="flex-1"
+        renderActive={(i) => lines[i]!.text}
+        renderGap={(i) => {
+          const from = i >= 0 ? lines[i]!.time_ms : 0;
+          const nx = lines[i + 1];
+          const long = nx && nx.time_ms - from > 3000;
+          return (
+            <div className="flex flex-col items-center gap-5 py-2 text-base">
+              {long ? <GapCountdown from={from} to={nx!.time_ms} /> : <span className="font-display text-6xl text-rave-mustard">♪</span>}
+              <span className="font-label text-[11px] font-bold tracking-[0.2em] text-white/50 uppercase">{i < 0 ? d.lyrics.getReady : d.lyrics.instrumental}</span>
+            </div>
+          );
+        }}
+      />
 
       {/* Equalizer + garis gelombang titik + kontrol (player bar tertutup overlay) */}
       <div className="relative px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:px-10">
-        <DotWave className="absolute inset-x-0 top-0 h-16 w-full opacity-60" />
-        <Equalizer on={playing && !reduce} className="mx-auto h-12 max-w-3xl sm:h-16" />
+        <StageSpectrum />
         <KaraokeControls />
       </div>
     </div>,

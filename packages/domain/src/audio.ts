@@ -73,10 +73,80 @@ export function masterLabel(m: AudioMeta): string {
   return `${m.codec.toUpperCase()}${m.bitrate_kbps ? ' ' + m.bitrate_kbps : ''}`;
 }
 
-/** Rendisi yang layak dibuat dari master: lossless hanya dari master lossless; 320 hanya bila sumbernya sepadan. */
-export function plannedRenditions(m: AudioMeta, enabled: RenditionQuality[]): RenditionQuality[] {
+// ───────────────────────── Kebijakan kualitas (Free vs Premium) ─────────────────────────
+/**
+ * Kebijakan kualitas streaming yang diatur Super Admin — demi efisiensi storage & bandwidth:
+ * - `freeMax` / `premiumMax`: plafon kualitas per tier (Free tidak pernah Lossless).
+ * - `losslessCap`: resolusi FLAC maksimum (hi-res 24/96 ≈ 3× ukuran 16/44.1).
+ * - `losslessMode`: `eager` = FLAC dibuat saat upload; `on_demand` = dibuat saat pertama kali diminta Premium.
+ * Di kedua mode, master FLAC yang sudah di dalam batas resolusi dipakai ulang sebagai versi Lossless (tanpa salinan kedua).
+ */
+export type LosslessMode = 'eager' | 'on_demand';
+export type LosslessCap = '16_44' | '24_48' | '24_96';
+export const LOSSLESS_CAPS: Record<LosslessCap, { bit_depth: number; sample_rate: number }> = {
+  '16_44': { bit_depth: 16, sample_rate: 44_100 },
+  '24_48': { bit_depth: 24, sample_rate: 48_000 },
+  '24_96': { bit_depth: 24, sample_rate: 96_000 },
+};
+export interface QualityPolicy {
+  freeMax: RenditionQuality;
+  premiumMax: RenditionQuality;
+  losslessEnabled: boolean;
+  losslessCap: LosslessCap;
+  losslessMode: LosslessMode;
+}
+export const DEFAULT_QUALITY_POLICY: QualityPolicy = { freeMax: 'normal', premiumMax: 'lossless', losslessEnabled: true, losslessCap: '24_96', losslessMode: 'on_demand' };
+
+const rank = (q: RenditionQuality) => RENDITION_ORDER.indexOf(q);
+const minQ = (a: RenditionQuality, b: RenditionQuality) => (rank(a) <= rank(b) ? a : b);
+
+/** Normalisasi nilai pengaturan mentah (bisa salah ketik/kosong) menjadi kebijakan yang sah. */
+export function normalizePolicy(p: Partial<Record<keyof QualityPolicy, unknown>> = {}): QualityPolicy {
+  const q = (v: unknown, d: RenditionQuality) => (RENDITION_ORDER.includes(v as RenditionQuality) ? (v as RenditionQuality) : d);
+  return {
+    // Free tidak pernah Lossless, apa pun nilai pengaturannya.
+    freeMax: minQ(q(p.freeMax, DEFAULT_QUALITY_POLICY.freeMax), 'high'),
+    premiumMax: q(p.premiumMax, DEFAULT_QUALITY_POLICY.premiumMax),
+    losslessEnabled: p.losslessEnabled === undefined ? true : !!p.losslessEnabled,
+    losslessCap: typeof p.losslessCap === 'string' && p.losslessCap in LOSSLESS_CAPS ? (p.losslessCap as LosslessCap) : DEFAULT_QUALITY_POLICY.losslessCap,
+    losslessMode: p.losslessMode === 'eager' ? 'eager' : 'on_demand',
+  };
+}
+
+/** Kualitas tertinggi yang boleh diputar: pratinjau anonim ≤ AAC 160, Free ≤ `freeMax`, Premium ≤ `premiumMax`. */
+export function tierMax(policy: QualityPolicy, o: { premium: boolean; preview: boolean }): RenditionQuality {
+  if (o.preview) return minQ(policy.freeMax, 'normal');
+  if (!o.premium) return policy.freeMax;
+  return policy.losslessEnabled ? policy.premiumMax : minQ(policy.premiumMax, 'high');
+}
+
+/** Master FLAC yang sudah di dalam batas resolusi bisa langsung disajikan sebagai versi Lossless (hemat storage). */
+export function masterReusableAsLossless(m: AudioMeta | null | undefined, cap: LosslessCap): boolean {
+  if (!m?.lossless || m.codec !== 'flac') return false;
+  const c = LOSSLESS_CAPS[cap];
+  return (m.bit_depth || 16) <= c.bit_depth && (m.sample_rate || 44_100) <= c.sample_rate;
+}
+
+/** Resolusi FLAC yang dihasilkan dari master lossless dengan batas kebijakan. */
+export function losslessTarget(m: Pick<AudioMeta, 'bit_depth' | 'sample_rate'>, cap: LosslessCap) {
+  const c = LOSSLESS_CAPS[cap];
+  return { bit_depth: Math.min(m.bit_depth > 16 ? 24 : 16, c.bit_depth), sample_rate: Math.min(m.sample_rate || 44_100, c.sample_rate) };
+}
+
+/**
+ * Rendisi yang layak dibuat dari master: lossless hanya dari master lossless; 320 hanya bila sumbernya sepadan.
+ * Dengan kebijakan: FLAC dilewati bila master bisa dipakai ulang, atau mode `on_demand` (dibuat saat diminta —
+ * `wantLossless` = sudah ada permintaan Premium).
+ */
+export function plannedRenditions(m: AudioMeta, enabled: RenditionQuality[], policy?: Partial<QualityPolicy>, wantLossless = false): RenditionQuality[] {
+  const p = policy ? normalizePolicy(policy) : null;
   return enabled.filter((q) => {
-    if (q === 'lossless') return m.lossless;
+    if (q === 'lossless') {
+      if (!m.lossless) return false;
+      if (!p) return true;
+      if (masterReusableAsLossless(m, p.losslessCap)) return false;
+      return p.losslessMode === 'eager' || wantLossless;
+    }
     if (q === 'high') return m.lossless || m.bitrate_kbps >= 256;
     return true;
   });
@@ -90,13 +160,18 @@ export interface PlaybackChoice {
   codec_label: string;
   /** Diisi bila kualitas yang diminta diturunkan — klien bisa menjelaskan alasannya (mis. ajakan Premium). */
   capped: CapReason | null;
+  /** `lossless`: versi FLAC belum ada (mode on_demand) → playback meminta catalog membuatnya; sementara diputar tingkat di bawahnya. */
+  needs?: 'lossless' | null;
 }
 
 /**
  * Pilih berkas yang diputar. Aturan:
  * 1. `auto` = normal (AAC 160, hemat data/CDN).
- * 2. Non-Premium & pratinjau anonim tidak pernah mendapat `high`/`lossless` — termasuk master lossless mentah.
- * 3. Lossless bisa dimatikan Super Admin (`streaming.lossless_enabled`) → turun ke `high`.
+ * 2. Plafon per tier dari kebijakan (`tierMax`): Free ≤ `freeMax` (default AAC 160, tidak pernah Lossless),
+ *    pratinjau anonim ≤ AAC 160, Premium ≤ `premiumMax`; Lossless bisa dimatikan Super Admin → turun ke `high`.
+ * 3. Lossless: rendisi FLAC → master FLAC dalam batas resolusi (dipakai ulang) → belum ada: turun ke tingkat di bawahnya
+ *    dan `needs: 'lossless'` (dibuat on-demand). Master mentah di atas batas (WAV/hi-res besar) tidak dikirim bila ada
+ *    rendisi lain — hemat bandwidth.
  * 4. Rendisi tidak ada → turun ke tingkat di bawahnya, lalu naik hanya di dalam tingkat yang diizinkan.
  * 5. Tanpa rendisi sama sekali: master lossy/tak dikenal diputar apa adanya; master lossless hanya untuk yang berhak
  *    Lossless — selain itu `null` (versi standar belum siap / transcoding belum selesai).
@@ -108,26 +183,38 @@ export function resolvePlayback(o: {
   losslessEnabled: boolean;
   renditions: Renditions | null | undefined;
   master: { url: string; meta: AudioMeta | null };
+  policy?: Partial<QualityPolicy>;
 }): PlaybackChoice | null {
-  let target: RenditionQuality = o.requested === 'auto' ? 'normal' : o.requested;
+  const policy = normalizePolicy({ ...o.policy, losslessEnabled: o.losslessEnabled && (o.policy?.losslessEnabled ?? true) });
+  const requested: RenditionQuality = o.requested === 'auto' ? 'normal' : o.requested;
+  const max = tierMax(policy, o);
+  let target = requested;
   let capped: CapReason | null = null;
-  if (isPremiumQuality(target) && (o.preview || !o.premium)) {
-    target = 'normal';
-    capped = o.preview ? 'preview' : 'premium';
+  if (rank(target) > rank(max)) {
+    target = max;
+    // Alasan: pratinjau → preview; Free → premium (ajakan upgrade); Premium yang dibatasi Super Admin → disabled.
+    capped = o.preview ? 'preview' : !o.premium ? 'premium' : 'disabled';
   }
-  if (target === 'lossless' && !o.losslessEnabled) {
-    target = 'high';
-    capped = 'disabled';
-  }
-  const allowedMax = RENDITION_ORDER.indexOf(target);
+  const m = o.master.meta;
   const r = o.renditions ?? {};
   const has = Object.keys(r).length > 0;
+  let needs: PlaybackChoice['needs'] = null;
+  if (target === 'lossless') {
+    if (r.lossless?.url) return { quality: 'lossless', url: r.lossless.url, codec_label: r.lossless.codec_label, capped };
+    if (masterReusableAsLossless(m, policy.losslessCap)) return { quality: 'lossless', url: o.master.url, codec_label: masterLabel(m!), capped };
+    if (m?.lossless && has) {
+      // Belum ada FLAC dalam batas resolusi → minta dibuat; sementara turun ke rendisi terbaik di bawahnya.
+      needs = 'lossless';
+      target = 'high';
+      capped = capped ?? 'unavailable';
+    }
+  }
+  const allowedMax = rank(target);
   if (has) {
     const down = RENDITION_ORDER.slice(0, allowedMax + 1).reverse();
     const pick = down.find((q) => r[q]?.url);
-    if (pick) return { quality: pick, url: r[pick]!.url, codec_label: r[pick]!.codec_label, capped: pick === target ? capped : capped ?? 'unavailable' };
+    if (pick) return { quality: pick, url: r[pick]!.url, codec_label: r[pick]!.codec_label, capped: pick === target ? capped : capped ?? 'unavailable', needs };
   }
-  const m = o.master.meta;
   if (m?.lossless) {
     if (target !== 'lossless') return null;
     return { quality: 'lossless', url: o.master.url, codec_label: masterLabel(m), capped };

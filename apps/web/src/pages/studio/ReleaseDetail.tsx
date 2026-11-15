@@ -7,7 +7,8 @@ import type { Release, Split, Track, TrackAudio } from '@/lib/types';
 import { Badge, Button, Card, Field, Input, PageHeader, Select, toast } from '@/components/ui';
 import { GENRES, QueryState, useCurrentArtist } from '@/components/b2b/common';
 import { ReleaseStatusBadge } from './Releases';
-import { AUDIO_ACCEPT, audioDuration, SharesEditor, uploadFile } from './NewRelease';
+import { AUDIO_ACCEPT, audioDuration, SharesEditor } from './NewRelease';
+import { uploadWithProgress } from '@/lib/upload';
 import { useDict } from '@/lib/i18n';
 import { ChangeRequestEditor, LyricsEditor, PendingChanges } from '@/components/studio/release-edit';
 
@@ -133,10 +134,15 @@ function ReleaseCover({ r }: { r: Release }) {
 
 function UploadButton({ kind, label, onUploaded }: { kind: 'audio' | 'artwork'; label: string; onUploaded: (url: string, file: File) => Promise<void> | void }) {
   const [busy, setBusy] = useState(false);
+  const [pct, setPct] = useState<number | null>(null);
   const t = useDict('b2b').studio.release;
   return (
-    <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-none border border-b2b-line bg-b2b-card px-4 py-1.5 text-sm font-bold text-b2b-ink hover:border-b2b-ink">
-      <Upload className="size-4" /> {busy ? t.uploading : label}
+    <label
+      className="relative inline-flex cursor-pointer items-center gap-1.5 overflow-hidden rounded-none border border-b2b-line bg-b2b-card px-4 py-1.5 text-sm font-bold text-b2b-ink hover:border-b2b-ink"
+      aria-busy={busy || undefined}
+    >
+      {busy && <span aria-hidden className="absolute inset-y-0 left-0 bg-rave-mustard/35 transition-[width]" style={{ width: `${pct ?? 100}%` }} />}
+      <Upload className="relative size-4" /> <span className="relative tabular-nums">{busy ? `${t.uploading}${pct != null && pct < 100 ? ` ${pct}%` : ''}` : label}</span>
       <input
         type="file"
         className="sr-only"
@@ -147,12 +153,16 @@ function UploadButton({ kind, label, onUploaded }: { kind: 'audio' | 'artwork'; 
           e.target.value = '';
           if (!f) return;
           setBusy(true);
+          setPct(0);
           try {
-            await onUploaded(await uploadFile(f, kind), f);
+            const r = await uploadWithProgress(f, kind, { onProgress: (p) => setPct(Math.floor((p.loaded / (p.total || 1)) * 100)) });
+            for (const w of r.warnings) toast.info(w);
+            await onUploaded(r.url, f);
           } catch (err) {
             toast.error(err);
           } finally {
             setBusy(false);
+            setPct(null);
           }
         }}
       />

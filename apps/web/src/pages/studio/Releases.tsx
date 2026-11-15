@@ -5,6 +5,7 @@ import type { Release } from '@/lib/types';
 import { Badge, Button, PageHeader } from '@/components/ui';
 import { Empty, QueryState, Table, useCurrentArtist } from '@/components/b2b/common';
 import { useDict } from '@/lib/i18n';
+import { readReleaseDraft } from './NewRelease';
 
 const RS: Record<Release['status'], 'neutral' | 'green' | 'blue' | 'amber' | 'red' | 'purple'> = {
   DRAFT: 'neutral',
@@ -23,6 +24,7 @@ export default function Releases() {
   const artist = useCurrentArtist()!;
   const t = useDict('b2b').studio.releases;
   const q = useQuery({ queryKey: ['studio-releases', artist.artist_id], queryFn: () => api<{ data: Release[] }>(`/v1/studio/artists/${artist.artist_id}/releases`) });
+  const draft = readReleaseDraft(artist.artist_id ?? artist.id);
   return (
     <div>
       <PageHeader
@@ -34,6 +36,16 @@ export default function Releases() {
           </Link>
         }
       />
+      {draft && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 border-2 border-b2b-ink bg-rave-mustard px-4 py-3 text-sm text-rave-ink shadow-[3px_3px_0_#181818]">
+          <span className="min-w-0 flex-1 font-bold">{t.draftBanner(draft.meta.title.trim() || '—')}</span>
+          <Link to="/studio/releases/new">
+            <Button variant="white" size="sm">
+              {t.continueDraft}
+            </Button>
+          </Link>
+        </div>
+      )}
       <QueryState q={q} empty={q.data && !q.data.data.length ? <Empty title={t.emptyTitle} body={t.emptyBody} action={<Link to="/studio/releases/new"><Button variant="ink">{t.start}</Button></Link>} /> : undefined}>
         <Table head={[t.head.release, t.head.type, t.head.date, t.head.tracks, t.head.status, '']}>
           {q.data?.data.map((r) => (

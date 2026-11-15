@@ -1,4 +1,5 @@
 import { SETTINGS_BY_KEY, settingDefaults } from '@rave/domain/settings';
+import { normalizePolicy, type QualityPolicy } from '@rave/domain/audio';
 import pg from 'pg';
 import { serviceHeaders } from './auth.js';
 import { config, serviceUrl } from './config.js';
@@ -48,6 +49,17 @@ export const settings = {
   loadedAt: () => loadedAt,
   version: () => version,
 };
+
+/** Kebijakan kualitas streaming saat ini (Free vs Premium, batas Lossless, mode pembuatan FLAC) dari pengaturan platform. */
+export function qualityPolicy(): QualityPolicy {
+  return normalizePolicy({
+    freeMax: settings.get('streaming.free_max_quality'),
+    premiumMax: settings.get('streaming.premium_max_quality'),
+    losslessEnabled: settings.bool('streaming.lossless_enabled'),
+    losslessCap: settings.get('streaming.lossless_max_resolution'),
+    losslessMode: settings.get('transcoding.lossless_mode'),
+  });
+}
 
 export function setSettingsLoader(fn: typeof loader) {
   loader = fn;

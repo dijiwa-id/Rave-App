@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { resolvePlayback, type AudioMeta, type Renditions } from '@rave/domain/audio';
-import { callService, HttpError, notFound, settings, signProtectedMediaUrl, uuidv7, z, type ServiceContext } from '@rave/service-kit';
+import { Readable } from 'node:stream';
+import { callService, HttpError, notFound, qualityPolicy, settings, signProtectedMediaUrl, uuidv7, z, type ServiceContext } from '@rave/service-kit';
 import { signStream, verifyStream } from './util.js';
 
 const body = z
@@ -49,20 +50,28 @@ export async function sessionRoutes(app: FastifyInstance, { db, name }: ServiceC
     const previewOnly = !user; // REQ-WEB-04: anonim mendapat pratinjau (durasi: streaming.preview_seconds)
     const ttlSec = Math.max(15 * 60, Math.ceil(media.duration_ms / 1000) + 10 * 60);
     const exp = Math.floor(Date.now() / 1000) + ttlSec;
-    // Hak kualitas: AAC 320 & Lossless (FLAC) khusus Premium; pratinjau anonim selalu standar (packages/domain/src/audio.ts).
+    // Hak kualitas per tier dari kebijakan Super Admin (Free ≤ freeMax, Premium ≤ premiumMax, batas resolusi Lossless,
+    // FLAC on-demand) — packages/domain/src/audio.ts.
+    const policy = qualityPolicy();
     const choice = resolvePlayback({
       requested: b.quality,
       premium: !!user?.premium,
       preview: previewOnly,
-      losslessEnabled: settings.bool('streaming.lossless_enabled'),
+      losslessEnabled: policy.losslessEnabled,
       renditions: media.renditions,
       master: { url: media.audio_url!, meta: media.audio_meta ?? null },
+      policy,
     });
     if (!choice) {
       // Master lossless tanpa rendisi standar (transcoding belum selesai/dimatikan): jangan bocorkan FLAC ke non-Premium.
       throw new HttpError(503, 'Service Unavailable', 'Versi streaming standar lagu ini sedang diproses. Coba lagi sebentar lagi.', { retry_after_s: 30 });
     }
     const quality = choice.quality;
+    // FLAC belum ada → minta catalog membuatnya (tidak ditunggu; sesi ini memakai AAC 320 dulu).
+    const losslessPending = choice.needs === 'lossless' && !!b.track_id;
+    if (losslessPending) {
+      void callService(name, 'catalog', `/internal/tracks/${b.track_id}/lossless`, { method: 'POST', body: {} }).catch((e) => req.log.warn({ err: (e as Error).message }, 'permintaan lossless gagal'));
+    }
     // Master asli & rendisi khusus Premium hanya bisa diambil lewat URL bertanda tangan (catalog memverifikasi; kedaluwarsa
     // bersama sesi). Rendisi gratis (AAC 64/160) & URL eksternal data demo dikembalikan apa adanya.
     const audioUrl = signProtectedMediaUrl(choice.url, ttlSec);
@@ -100,6 +109,8 @@ export async function sessionRoutes(app: FastifyInstance, { db, name }: ServiceC
       requested_quality: b.quality,
       /** premium | preview | disabled | unavailable — klien menampilkan alasan (mis. ajakan Premium). */
       quality_capped: choice.capped,
+      /** Versi Lossless sedang disiapkan (on-demand) — klien bisa memberi tahu pengguna Premium. */
+      lossless_pending: losslessPending,
       loudness_gain_db: Number(media.loudness_gain_db ?? 0),
       preview_only: previewOnly,
       preview_ms: previewOnly ? settings.num('streaming.preview_seconds') * 1000 : null,
@@ -113,13 +124,26 @@ export async function sessionRoutes(app: FastifyInstance, { db, name }: ServiceC
    */
   app.get('/v1/playback/stream/:sessionId', async (req, reply) => {
     const { sessionId } = req.params as { sessionId: string };
-    const q = req.query as { exp?: string; sig?: string };
+    const q = req.query as { exp?: string; sig?: string; fx?: string };
     if (!q.sig || !verifyStream(sessionId, Number(q.exp), q.sig)) {
       throw new HttpError(403, 'Forbidden', 'Tautan streaming tidak valid atau kedaluwarsa');
     }
     const s = await db.one(`SELECT audio_url FROM sessions WHERE id = $1`, [sessionId]);
     if (!s) throw notFound('Sesi');
     reply.header('cache-control', 'private, no-store');
+    // `fx=1`: klien merutekan audio lewat Web Audio (equalizer/normalisasi). Media di origin LAIN (URL eksternal data
+    // lama/demo) akan "tainted" & senyap tanpa CORS → khusus kasus ini diteruskan lewat server (dukung Range).
+    // Media milik RAVE (`/v1/catalog/media/...`) tetap di-redirect: sudah satu origin, tanpa beban bandwidth tambahan.
+    if (q.fx === '1' && /^https?:\/\//i.test(s.audio_url)) {
+      const upstream = await fetch(s.audio_url, { headers: req.headers.range ? { range: String(req.headers.range) } : {}, redirect: 'follow' }).catch(() => null);
+      if (!upstream || !upstream.body || (upstream.status !== 200 && upstream.status !== 206)) throw new HttpError(502, 'Bad Gateway', 'Media tidak dapat diambil');
+      reply.status(upstream.status);
+      for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag']) {
+        const v = upstream.headers.get(h);
+        if (v) reply.header(h, v);
+      }
+      return reply.send(Readable.fromWeb(upstream.body as any));
+    }
     return reply.redirect(s.audio_url, 302);
   });
 }
