@@ -7,6 +7,9 @@ import { LOCKUP_RATIO, RaveLockup } from '@/components/ui/RaveLogo';
 import { useBranding } from '@/lib/platform';
 import { useDict } from '@/lib/i18n';
 import { Vinyl } from './Vinyl';
+import { Cassette, type CassetteTone } from '@/components/fan/Cassette';
+import { Walkman } from './Walkman';
+import { Turntable } from './Turntable';
 import { cx } from '@/components/ui';
 import { BTN_GHOST, BTN_PRIMARY, BTN_PRIMARY_SM, CARD_TITLE, RansomText } from './marketing';
 import paper from '@/assets/brand/paper-crumpled.webp';
@@ -70,34 +73,92 @@ function MiniEqualizer() {
   );
 }
 
-/** Peta kota: stiker nama kota mengitari paku pines di tengah. */
+/**
+ * Peta kota: paku di tengah, empat stiker nama kota di posisi tetap (tidak berputar). Stiker muncul bergantian sebagai
+ * popup — satu kota "menyala" (membesar, garis ke paku, jumlah pendengar) lalu berpindah ke kota berikutnya.
+ * Kurangi gerakan → semua stiker tampil diam.
+ */
 function MiniOrbit() {
   const reduce = useReducedMotion();
   const cities = [
-    { c: 'Bandung', t: 'bg-rave-mustard text-rave-ink' },
-    { c: 'Jakarta', t: 'bg-rave-paper text-rave-ink' },
-    { c: 'Yogya', t: 'bg-rave-berry text-rave-paper' },
-    { c: 'Malang', t: 'bg-rave-purple text-rave-paper' },
+    { c: 'Bandung', t: 'bg-rave-mustard text-rave-ink', x: 50, y: 6, n: '12,4K' },
+    { c: 'Jakarta', t: 'bg-rave-paper text-rave-ink', x: 94, y: 50, n: '9,8K' },
+    { c: 'Yogya', t: 'bg-rave-berry text-rave-paper', x: 50, y: 94, n: '7,1K' },
+    { c: 'Malang', t: 'bg-rave-purple text-rave-paper', x: 6, y: 50, n: '4,6K' },
   ];
+  const [on, setOn] = useState(0);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (reduce) return;
+    // Hanya berganti saat kartu terlihat (hemat CPU di luar layar).
+    let visible = false;
+    const io = new IntersectionObserver(([e]) => (visible = e.isIntersecting));
+    if (ref.current) io.observe(ref.current);
+    const t = setInterval(() => visible && setOn((i) => (i + 1) % cities.length), 1600);
+    return () => {
+      clearInterval(t);
+      io.disconnect();
+    };
+  }, [reduce, cities.length]);
   return (
-    <div className="relative mx-auto size-32" aria-hidden>
+    <div ref={ref} className="relative mx-auto size-32" aria-hidden>
       <span className="absolute inset-4 border-2 border-dashed border-white/15" />
       <span className="absolute inset-10 rotate-45 border-2 border-dashed border-white/10" />
-      <span className={cx('absolute inset-[43%] rotate-45 bg-rave-mustard', INK_BOX)} />
-      <motion.div className="absolute inset-0" animate={reduce ? undefined : { rotate: 360 }} transition={{ duration: 28, repeat: Infinity, ease: 'linear' }}>
-        {cities.map(({ c, t }, i) => {
-          const a = (i / cities.length) * Math.PI * 2;
-          return (
-            <span
+      {/* Garis dari paku ke kota yang sedang menyala. */}
+      {!reduce && (
+        <svg className="absolute inset-0 size-full overflow-visible" viewBox="0 0 100 100">
+          {cities.map(({ c, x, y }, i) => (
+            <motion.line
               key={c}
-              className={cx('absolute -translate-x-1/2 -translate-y-1/2 px-1.5 py-0.5 font-label text-[9px] font-bold whitespace-nowrap uppercase', INK_BOX, t)}
-              style={{ left: `${50 + Math.cos(a) * 44}%`, top: `${50 + Math.sin(a) * 44}%`, rotate: `${(i % 2 ? 6 : -6)}deg` }}
-            >
+              x1={50}
+              y1={50}
+              x2={x}
+              y2={y}
+              stroke="#F4C21F"
+              strokeWidth={1.5}
+              strokeDasharray="3 3"
+              initial={false}
+              animate={{ pathLength: on === i ? 1 : 0, opacity: on === i ? 0.9 : 0 }}
+              transition={{ duration: 0.35, ease: EASE }}
+            />
+          ))}
+        </svg>
+      )}
+      <motion.span
+        className={cx('absolute inset-[43%] rotate-45 bg-rave-mustard', INK_BOX)}
+        animate={reduce ? undefined : { scale: [1, 1.25, 1] }}
+        transition={{ duration: 0.5, ease: EASE }}
+        key={reduce ? 'pin' : `pin-${on}`}
+      />
+      {cities.map(({ c, t, x, y, n }, i) => {
+        const active = reduce || on === i;
+        return (
+          <motion.span
+            key={c}
+            className="absolute"
+            style={{ left: `${x}%`, top: `${y}%`, zIndex: on === i ? 2 : 1 }}
+            initial={false}
+            animate={reduce ? undefined : { scale: active ? 1.12 : 0.82, opacity: active ? 1 : 0.5, y: active ? -3 : 0 }}
+            transition={{ type: 'spring', stiffness: 520, damping: 22 }}
+          >
+            <span className={cx('relative block -translate-x-1/2 -translate-y-1/2 px-1.5 py-0.5 font-label text-[9px] font-bold whitespace-nowrap uppercase', INK_BOX, t)} style={{ rotate: `${i % 2 ? 6 : -6}deg` }}>
               {c}
+              {/* Popup jumlah pendengar di atas stiker yang menyala. */}
+              {!reduce && on === i && (
+                <motion.span
+                  // Kota teratas: popup di bawah label (agar tidak menabrak judul kartu); lainnya di atas.
+                  className={cx('absolute left-1/2 -translate-x-1/2 border-2 border-rave-ink bg-rave-ink px-1 font-label text-[8px] leading-[14px] text-rave-mustard', y < 20 ? 'top-full mt-1' : '-top-5')}
+                  initial={{ opacity: 0, y: y < 20 ? -4 : 4, scale: 0.6 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 600, damping: 24 }}
+                >
+                  {n}
+                </motion.span>
+              )}
             </span>
-          );
-        })}
-      </motion.div>
+          </motion.span>
+        );
+      })}
     </div>
   );
 }
@@ -475,19 +536,21 @@ export function RoleStack({ roles, heading }: { roles: RoleCard[]; heading: Reac
 // 4. Kolase — kartu, piringan, & stiker berhamburan keluar dari judul
 // =============================================================================================
 
-type Piece = { kind: 'img' | 'disc' | 'tag'; src?: string; tag?: 'newRelease' | 'presale' | 'live'; x: number; y: number; r: number; w: number; tone?: string };
+type Piece = { kind: 'img' | 'disc' | 'tag' | 'cassette' | 'walkman' | 'turntable'; label?: string; cTone?: CassetteTone; src?: string; tag?: 'newRelease' | 'presale' | 'live'; x: number; y: number; r: number; w: number; tone?: string };
 // x/y = posisi akhir relatif pusat (% lebar/tinggi panggung); w = lebar (rem).
 const PIECES: Piece[] = [
   { kind: 'img', src: stage, x: -34, y: -30, r: -12, w: 9 },
-  { kind: 'disc', x: -16, y: -36, r: 0, w: 7 },
+  { kind: 'walkman', x: -38, y: 4, r: -7, w: 11 },
   { kind: 'img', src: roleFan, x: 6, y: -38, r: 8, w: 8 },
   { kind: 'tag', tag: 'newRelease', x: 30, y: -30, r: 14, w: 9, tone: 'bg-[#8A2F3F]' },
-  { kind: 'disc', x: 40, y: -8, r: 0, w: 8 },
-  { kind: 'img', src: rolePromotor, x: 34, y: 26, r: -9, w: 10 },
+  { kind: 'turntable', x: 36, y: 2, r: 7, w: 13 },
+  { kind: 'img', src: rolePromotor, x: 34, y: 28, r: -9, w: 10 },
+  { kind: 'cassette', label: 'RAVE', cTone: 'berry', x: -19, y: -32, r: -6, w: 7.5 },
   { kind: 'tag', tag: 'presale', x: 12, y: 36, r: -6, w: 8, tone: 'bg-[#F4C21F] !text-[#181818]' },
   { kind: 'img', src: roleArtist, x: -10, y: 34, r: 10, w: 8 },
-  { kind: 'disc', x: -30, y: 24, r: 0, w: 6.5 },
-  { kind: 'tag', tag: 'live', x: -42, y: 2, r: -16, w: 6, tone: 'bg-[#5B2A6E]' },
+  { kind: 'cassette', label: 'B-SIDES', cTone: 'teal', x: -28, y: 30, r: 12, w: 7.5 },
+  { kind: 'disc', x: 42, y: -16, r: 0, w: 6 },
+  { kind: 'tag', tag: 'live', x: -24, y: -14, r: -16, w: 6, tone: 'bg-[#5B2A6E]' },
 ];
 
 function Disc() {
@@ -513,6 +576,13 @@ function PieceView({ piece, p, i, fx }: { piece: Piece; p: MotionValue<number>; 
       <img src={piece.src} alt="" loading="lazy" className="aspect-[4/5] w-full rounded-none object-cover shadow-2xl shadow-black/60 ring-4 ring-rave-paper" />
     ) : piece.kind === 'disc' ? (
       <Disc />
+    ) : piece.kind === 'cassette' ? (
+      // Ilustrasi kaset yang sama dengan pemutar (Cassette) — bayangan sablon agar senada dengan kolase.
+      <Cassette label={piece.label} tone={piece.cTone} className="drop-shadow-[5px_5px_0_#0b0a0c]" />
+    ) : piece.kind === 'walkman' ? (
+      <Walkman className="drop-shadow-[6px_6px_0_#0b0a0c]" />
+    ) : piece.kind === 'turntable' ? (
+      <Turntable className="drop-shadow-[6px_6px_0_#0b0a0c]" />
     ) : (
       <span className={cx('rave-label block rounded-none px-3 py-2 text-center !text-[12px] text-white shadow-[3px_3px_0_#0e0c0f]', piece.tone)}>{piece.tag && tags[piece.tag]}</span>
     );

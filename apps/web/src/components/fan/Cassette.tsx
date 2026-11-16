@@ -7,7 +7,18 @@ import { useId } from 'react';
  * area head bawah dengan lubang capstan, bantalan felt & pita yang tampak. Gulungan berputar pelan saat di-hover
  * (dimatikan oleh prefers-reduced-motion). Dipakai web & desktop (salinan identik).
  */
-export function Cassette({ className, label = 'RAVE' }: { className?: string; label?: string }) {
+/** Warna cangkang (3 stop atas→bawah) & pita label (3 stop kiri→kanan). `smoke` = tampilan asli. */
+const TONES = {
+  smoke: { shell: ['#35303d', '#221f28', '#141217'], band: ['#4a2259', '#5B2A6E', '#6d3584'] },
+  mustard: { shell: ['#f7d35a', '#e0ab12', '#a87c05'], band: ['#2a1233', '#3d1a4a', '#5B2A6E'] },
+  berry: { shell: ['#b04456', '#8A2F3F', '#5a1a26'], band: ['#141217', '#1e1b22', '#2a2630'] },
+  teal: { shell: ['#3f8a7d', '#1F5C52', '#103a33'], band: ['#a87c05', '#e0ab12', '#F4C21F'] },
+  paper: { shell: ['#f3eee2', '#ddd5c2', '#b8ae98'], band: ['#8A2F3F', '#a23a4c', '#b04456'] },
+} as const;
+export type CassetteTone = keyof typeof TONES;
+
+export function Cassette({ className, label = 'RAVE', tone = 'smoke' }: { className?: string; label?: string; tone?: CassetteTone }) {
+  const pal = TONES[tone];
   const u = useId().replace(/:/g, '');
   const id = (n: string) => `${u}-${n}`;
   const screws: [number, number][] = [
@@ -21,9 +32,9 @@ export function Cassette({ className, label = 'RAVE' }: { className?: string; la
     <svg viewBox="0 0 400 256" className={`rave-cassette ${className ?? ''}`} role="img" aria-hidden>
       <defs>
         <linearGradient id={id('shell')} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#35303d" />
-          <stop offset="0.5" stopColor="#221f28" />
-          <stop offset="1" stopColor="#141217" />
+          <stop offset="0" stopColor={pal.shell[0]} />
+          <stop offset="0.5" stopColor={pal.shell[1]} />
+          <stop offset="1" stopColor={pal.shell[2]} />
         </linearGradient>
         <linearGradient id={id('sheen')} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#fff" stopOpacity="0.16" />
@@ -36,9 +47,9 @@ export function Cassette({ className, label = 'RAVE' }: { className?: string; la
           <stop offset="1" stopColor="#e2dac8" />
         </linearGradient>
         <linearGradient id={id('band')} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stopColor="#4a2259" />
-          <stop offset="0.55" stopColor="#5B2A6E" />
-          <stop offset="1" stopColor="#6d3584" />
+          <stop offset="0" stopColor={pal.band[0]} />
+          <stop offset="0.55" stopColor={pal.band[1]} />
+          <stop offset="1" stopColor={pal.band[2]} />
         </linearGradient>
         <radialGradient id={id('tape')} cx="0.5" cy="0.5" r="0.5">
           <stop offset="0.3" stopColor="#4a2c1c" />
