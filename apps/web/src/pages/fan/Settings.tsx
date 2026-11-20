@@ -1,10 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AudioLines, Bell, ChevronDown, Copy, KeyRound, Monitor, Moon, Sun, Globe, Library, MonitorPlay, RotateCcw, Search, ShieldCheck, SlidersHorizontal, TriangleAlert, User, X } from 'lucide-react';
+import { AudioLines, Bell, ChevronDown, Copy, Download, KeyRound, Monitor, Moon, Sun, Globe, Library, MonitorPlay, RotateCcw, Search, ShieldCheck, SlidersHorizontal, TriangleAlert, User, X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { api, fmt } from '@/lib/api';
-import type { Me } from '@/lib/types';
+import type { Me, TokenResponse } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
 import { usePlayer, type Quality } from '@/stores/player';
 import { EQ_PRESETS, presetOf, usePrefs, type EqPreset } from '@/stores/prefs';
@@ -106,19 +106,68 @@ function CodeInput({ value, onChange, label, onEnter }: { value: string; onChang
   );
 }
 
-/** Aplikasi authenticator (TOTP): daftar lewat QR → konfirmasi kode → aktif; nonaktifkan dengan kode. */
+/** Daftar kode pemulihan (tampil sekali) + salin / unduh .txt. */
+function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
+  const d = useDict('fan').settings.totp;
+  const email = useAuth((x) => x.user?.email) ?? '';
+  const text = `${d.fileHeader}\n${email}\n${new Date().toISOString().slice(0, 10)}\n\n${codes.join('\n')}\n`;
+  function download() {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: 'rave-kode-pemulihan.txt' });
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+  return (
+    <div className="mt-2 space-y-4 border-2 border-rave-primary bg-white/[0.03] p-4" role="region" aria-label={d.recoveryTitle}>
+      <div>
+        <p className="font-bold text-white">{d.recoveryTitle}</p>
+        <p className="mt-1 text-sm text-rave-muted">{d.recoveryBody}</p>
+      </div>
+      <ol className="grid grid-cols-2 gap-x-6 gap-y-1.5 font-label text-sm text-white @[560px]:grid-cols-5">
+        {codes.map((c) => (
+          <li key={c}>{c}</li>
+        ))}
+      </ol>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" icon={<Copy className="size-4" />} onClick={() => navigator.clipboard?.writeText(codes.join('\n')).then(() => toast.success(d.copied), () => {})}>
+          {d.copy}
+        </Button>
+        <Button variant="outline" size="sm" icon={<Download className="size-4" />} onClick={download}>
+          {d.download}
+        </Button>
+        <Button variant="primary" size="sm" onClick={onDone}>
+          {d.saved}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Verifikasi 2 langkah (aplikasi authenticator): QR → konfirmasi kode → kode pemulihan; buat ulang kode / nonaktifkan. */
 function TotpRow() {
   const s = useDict('fan').settings;
   const d = s.totp;
+  const setSession = useAuth((x) => x.setSession);
   const setUser = useAuth((x) => x.setUser);
   const qc = useQueryClient();
-  const status = useQuery({ queryKey: ['me-totp'], queryFn: () => api<{ enabled: boolean; enabled_at: string | null }>('/v1/me/totp') });
+  const status = useQuery({ queryKey: ['me-totp'], queryFn: () => api<{ enabled: boolean; enabled_at: string | null; recovery_remaining: number }>('/v1/me/totp') });
   const [setup, setSetup] = useState<{ secret: string; otpauth_uri: string } | null>(null);
-  const [disabling, setDisabling] = useState(false);
+  const [action, setAction] = useState<'disable' | 'regenerate' | null>(null);
+  const [codes, setCodes] = useState<string[] | null>(null);
   const [code, setCode] = useState('');
+  const [recovery, setRecovery] = useState('');
+  const [byRecovery, setByRecovery] = useState(false);
   const [busy, setBusy] = useState(false);
   const on = !!status.data?.enabled;
+  const left = status.data?.recovery_remaining ?? 0;
 
+  function reset() {
+    setSetup(null);
+    setAction(null);
+    setCode('');
+    setRecovery('');
+    setByRecovery(false);
+  }
   async function refresh() {
     await qc.invalidateQueries({ queryKey: ['me-totp'] });
     api<Me>('/v1/me').then(setUser).catch(() => {});
@@ -133,6 +182,8 @@ function TotpRow() {
       setBusy(false);
     }
   }
+  const factor = () => (byRecovery ? { recovery_code: recovery.trim() } : { code });
+  const factorReady = byRecovery ? recovery.trim().length >= 8 : code.length === 6;
   const start = () =>
     run(async () => {
       setSetup(await api<{ secret: string; otpauth_uri: string }>('/v1/me/totp/setup', { method: 'POST', body: {} }));
@@ -140,30 +191,42 @@ function TotpRow() {
     });
   const confirm = () =>
     run(async () => {
-      await api('/v1/me/totp/enable', { method: 'POST', body: { code } });
-      setSetup(null);
-      setCode('');
+      const r = await api<{ recovery_codes: string[]; session: TokenResponse }>('/v1/me/totp/enable', { method: 'POST', body: { code } });
+      setSession(r.session); // sesi lain dicabut server; perangkat ini memakai sesi baru
+      reset();
+      setCodes(r.recovery_codes);
       toast.success(d.enabled);
       await refresh();
     });
-  const disable = () =>
+  const submitAction = () =>
     run(async () => {
-      await api('/v1/me/totp/disable', { method: 'POST', body: { code } });
-      setDisabling(false);
-      setCode('');
-      toast.success(d.disabled);
+      if (action === 'regenerate') {
+        const r = await api<{ recovery_codes: string[] }>('/v1/me/totp/recovery-codes', { method: 'POST', body: factor() });
+        setCodes(r.recovery_codes);
+        toast.success(d.regenerated);
+      } else {
+        await api('/v1/me/totp/disable', { method: 'POST', body: factor() });
+        toast.success(d.disabled);
+      }
+      reset();
       await refresh();
     });
-  const cancel = () => {
-    setSetup(null);
-    setDisabling(false);
-    setCode('');
-  };
+
+  const desc = on ? (
+    <>
+      {d.descOn(fmt.date(status.data?.enabled_at), left)}
+      {left <= 3 && <span className="mt-1 block font-semibold text-rave-primary">{d.lowRecovery}</span>}
+    </>
+  ) : (
+    d.descOff
+  );
 
   return (
-    <Row label={d.title} desc={on ? d.descOn(fmt.date(status.data?.enabled_at)) : d.descOff} keywords="authenticator totp 2fa mfa keamanan security google authy" stack={!!setup || disabling}>
+    <Row label={d.title} desc={desc} keywords="2fa mfa two factor verifikasi dua langkah authenticator totp keamanan security google authy pemulihan recovery" stack={!!setup || !!action || !!codes}>
       {status.isError ? (
         <p className="text-sm text-red-400">{d.loadFailed}</p>
+      ) : codes ? (
+        <RecoveryCodes codes={codes} onDone={() => setCodes(null)} />
       ) : setup ? (
         <div className="mt-2 grid gap-5 @[560px]:grid-cols-[auto_minmax(0,1fr)]">
           <div className="w-fit border-2 border-rave-ink bg-white p-3">
@@ -186,34 +249,60 @@ function TotpRow() {
                 </button>
               </div>
             </div>
+            <p className="text-sm text-rave-paper">{d.confirmStep}</p>
             <CodeInput value={code} onChange={setCode} label={d.codeLabel} onEnter={confirm} />
             <div className="flex flex-wrap gap-2">
               <Button variant="primary" loading={busy} disabled={code.length !== 6} onClick={confirm}>
                 {d.confirm}
               </Button>
-              <Button variant="ghost" onClick={cancel} disabled={busy}>
+              <Button variant="ghost" onClick={reset} disabled={busy}>
                 {d.cancel}
               </Button>
             </div>
           </div>
         </div>
-      ) : disabling ? (
+      ) : action ? (
         <div className="mt-2 space-y-3">
-          <p className="text-sm text-rave-muted">{d.disableHint}</p>
-          <CodeInput value={code} onChange={setCode} label={d.codeLabel} onEnter={disable} />
+          <p className="text-sm text-rave-muted">{action === 'regenerate' ? d.regenerateHint : d.disableHint}</p>
+          {byRecovery ? (
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-bold tracking-wide text-rave-muted uppercase">{d.recoveryLabel}</span>
+              <input
+                className="settings-input w-56 font-label tracking-widest"
+                autoComplete="one-time-code"
+                spellCheck={false}
+                placeholder="xxxxx-xxxxx"
+                value={recovery}
+                onChange={(e) => setRecovery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && factorReady && submitAction()}
+              />
+            </label>
+          ) : (
+            <CodeInput value={code} onChange={setCode} label={d.codeLabel} onEnter={submitAction} />
+          )}
+          {action === 'disable' && (
+            <button type="button" className="text-xs font-bold text-rave-muted underline-offset-4 hover:text-white hover:underline" onClick={() => setByRecovery((v) => !v)}>
+              {byRecovery ? d.useApp : d.useRecovery}
+            </button>
+          )}
           <div className="flex flex-wrap gap-2">
-            <Button variant="danger" loading={busy} disabled={code.length !== 6} onClick={disable}>
-              {d.disable}
+            <Button variant={action === 'disable' ? 'danger' : 'primary'} loading={busy} disabled={!factorReady} onClick={submitAction}>
+              {action === 'disable' ? d.disable : d.regenerate}
             </Button>
-            <Button variant="ghost" onClick={cancel} disabled={busy}>
+            <Button variant="ghost" onClick={reset} disabled={busy}>
               {d.cancel}
             </Button>
           </div>
         </div>
       ) : on ? (
-        <Button variant="outline" onClick={() => setDisabling(true)} disabled={status.isLoading}>
-          {d.disable}
-        </Button>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="outline" onClick={() => setAction('regenerate')}>
+            {d.regenerate}
+          </Button>
+          <Button variant="danger" onClick={() => setAction('disable')}>
+            {d.disable}
+          </Button>
+        </div>
       ) : (
         <Button variant="primary" loading={busy} onClick={start} disabled={status.isLoading}>
           {d.setup}

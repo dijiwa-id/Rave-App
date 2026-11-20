@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Ban, CircleAlert, Database, HardDrive, Info, RefreshCw, Server, Trash2, UserPlus, Workflow } from 'lucide-react';
+import { AlertTriangle, Ban, CircleAlert, Database, HardDrive, Info, KeyRound, RefreshCw, Server, ShieldCheck, Trash2, UserPlus, Workflow } from 'lucide-react';
 import { ADMIN_ROLES, ADMIN_ROLE_LABEL, type AdminRole } from '@rave/domain/settings';
 import { api, ApiError, fmt } from '@/lib/api';
 import { dict, localeTag, useDict } from '@/lib/i18n';
@@ -396,7 +396,7 @@ export function PlatformBus() {
 }
 
 // ---------- /admin/platform/admins ----------
-type PendingPatch = { user: Pick<Me, 'id' | 'display_name' | 'email'>; patch: { admin_role?: AdminRole | null; suspended?: boolean }; label: string };
+type PendingPatch = { user: Pick<Me, 'id' | 'display_name' | 'email'>; patch: { admin_role?: AdminRole | null; suspended?: boolean; reset_mfa?: true }; label: string };
 
 const roleLabel = (r: string | null | undefined) => (r ? (ADMIN_ROLE_LABEL[r as AdminRole] ?? r) : '—');
 
@@ -472,7 +472,19 @@ export function PlatformAdmins() {
                   <Badge tone={u.admin_role === 'SUPER_ADMIN' ? 'purple' : 'neutral'}>{roleLabel(u.admin_role)}</Badge>
                 </td>
                 <td className="px-4 py-3">
-                  {u.suspended_at ? <Badge tone="red">{t.suspendedOn(fmt.date(u.suspended_at))}</Badge> : <Badge tone="green">{t.active}</Badge>}
+                  <span className="flex flex-wrap gap-1">
+                    {u.suspended_at ? <Badge tone="red">{t.suspendedOn(fmt.date(u.suspended_at))}</Badge> : <Badge tone="green">{t.active}</Badge>}
+                    {u.totp_enabled ? (
+                      <Badge tone="green">
+                        <ShieldCheck className="mr-1 inline size-3" />
+                        {t.mfaOn}
+                      </Badge>
+                    ) : (
+                      <span title={t.mfaOffHint}>
+                        <Badge tone="amber">{t.mfaOff}</Badge>
+                      </span>
+                    )}
+                  </span>
                 </td>
                 <td className="w-56 px-4 py-3">
                   {sup && (
@@ -486,6 +498,12 @@ export function PlatformAdmins() {
                   {self ? (
                     <span className="text-xs text-b2b-muted">—</span>
                   ) : (
+                    <span className="inline-flex gap-2">
+                    {sup && u.totp_enabled && (
+                      <WriteButton size="sm" variant="outline-ink" icon={<KeyRound className="size-4" />} onClick={() => setPending({ user: u, patch: { reset_mfa: true }, label: t.labelMfaReset })}>
+                        {t.resetMfa}
+                      </WriteButton>
+                    )}
                     <WriteButton
                       size="sm"
                       variant={u.suspended_at ? 'outline-ink' : 'danger'}
@@ -494,6 +512,7 @@ export function PlatformAdmins() {
                     >
                       {u.suspended_at ? t.activate : t.suspend}
                     </WriteButton>
+                    </span>
                   )}
                 </td>
               </tr>
@@ -515,6 +534,7 @@ export function PlatformAdmins() {
               <strong>{pending.user.display_name}</strong> <span className="text-b2b-muted">({pending.user.email})</span> — {pending.label}.
             </p>
             {pending.patch.suspended && <p className="mt-2 text-sm text-red-600">{t.suspendNote}</p>}
+            {pending.patch.reset_mfa && <p className="mt-2 text-sm text-red-600">{t.resetMfaNote}</p>}
             <div className="mt-4">
               <Field label={t.reason} hint={t.reasonHint}>
                 <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t.reasonPlaceholder} />
@@ -524,7 +544,7 @@ export function PlatformAdmins() {
               <Button variant="outline-ink" onClick={() => setPending(null)}>
                 {d.common.cancel}
               </Button>
-              <Button variant={pending.patch.suspended || pending.patch.admin_role === null ? 'danger' : 'ink'} loading={saving} disabled={reason.trim().length < 5} onClick={submit}>
+              <Button variant={pending.patch.suspended || pending.patch.reset_mfa || pending.patch.admin_role === null ? 'danger' : 'ink'} loading={saving} disabled={reason.trim().length < 5} onClick={submit}>
                 {t.save}
               </Button>
             </div>

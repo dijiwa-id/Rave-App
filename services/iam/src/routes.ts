@@ -38,18 +38,28 @@ import {
   type Q,
 } from './core.js';
 import { consumeLoginCode } from './oauth.js';
-import { newTotpSecret, otpauthUri, TOTP_LOCK_MIN, TOTP_MAX_FAILURES, verifyTotp } from './totp.js';
+import { checkSecondFactor, clearMfa, completeLogin, MFA_MAX_ATTEMPTS, recoveryRemaining, replaceRecoveryCodes, USER_MFA_COLS } from './mfa.js';
+import { newTotpSecret, otpauthUri, TOTP_LOCK_MIN, verifyTotp } from './totp.js';
 
 const otpBody = z.object({ channel: z.enum(['email', 'whatsapp']), destination: z.string().min(5).max(200) });
 const tokenBody = z.discriminatedUnion('grant_type', [
   z.object({ grant_type: z.literal('otp'), destination: z.string().min(5), code: z.string().regex(/^\d{6}$/) }),
   z.object({ grant_type: z.literal('refresh_token'), refresh_token: z.string().min(20) }),
   z.object({ grant_type: z.literal('oauth_code'), code: z.string().min(20).max(200) }),
-  // Aplikasi authenticator (TOTP) — alternatif OTP email bagi akun yang sudah mengaktifkannya di Pengaturan.
-  z.object({ grant_type: z.literal('totp'), destination: z.string().min(5), code: z.string().regex(/^\d{6}$/) }),
+  // Langkah kedua (2FA): selesaikan challenge dari faktor pertama dengan kode authenticator ATAU kode pemulihan.
+  z.object({
+    grant_type: z.literal('mfa'),
+    mfa_token: z.string().min(20).max(200),
+    code: z.string().regex(/^\d{6}$/).optional(),
+    recovery_code: z.string().min(8).max(40).optional(),
+  }),
 ]);
+/** Kode authenticator 6 digit atau kode pemulihan — salah satu wajib (konfirmasi aksi sensitif 2FA). */
+const factorBody = z
+  .object({ code: z.string().regex(/^\d{6}$/, 'Kode harus 6 digit').optional(), recovery_code: z.string().min(8).max(40).optional() })
+  .refine((b) => !!b.code !== !!b.recovery_code, 'Isi kode authenticator atau kode pemulihan');
 const totpCodeBody = z.object({ code: z.string().regex(/^\d{6}$/, 'Kode harus 6 digit') });
-const TOTP_BAD = 'Kode authenticator salah, atau aplikasi authenticator belum diaktifkan untuk akun ini';
+const MFA_LOCKED = `Terlalu banyak kode salah. Coba lagi dalam ${TOTP_LOCK_MIN} menit.`;
 const ORG_TYPES = ['ARTIST', 'MANAGEMENT', 'LABEL', 'PROMOTOR'] as const;
 
 const ip = (req: FastifyRequest) => (req.headers['x-forwarded-for'] as string) ?? req.ip;
@@ -177,47 +187,37 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         const me = await buildMe(tx, userId);
         if (!me) throw forbidden('Akun telah dihapus');
         if (me.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan RAVE.');
-        return issueTokens(tx, me);
+        return completeLogin(tx, me);
       });
     }
-    if (b.grant_type === 'totp') {
-      const dest = normalizeDestination(b.destination.includes('@') ? 'email' : 'whatsapp', b.destination);
-      const provider = dest.includes('@') ? 'email' : 'whatsapp';
-      const found = await db.one(
-        `SELECT u.id FROM identities i JOIN users u ON u.id = i.user_id WHERE i.provider = $1 AND i.subject = $2 AND u.deleted_at IS NULL AND u.totp_enabled_at IS NOT NULL`,
-        [provider, dest],
-      );
-      // Pesan yang sama untuk akun tak dikenal / tanpa authenticator / kode salah (tidak membocorkan status akun).
-      if (!found) throw unauthorized(TOTP_BAD);
-      // Baris user dikunci: tebakan paralel diproses berurutan sehingga batas salah kode & anti-replay tidak bisa dilewati.
+    if (b.grant_type === 'mfa') {
+      if (!!b.code === !!b.recovery_code) throw badRequest('Isi kode authenticator atau kode pemulihan');
+      // Challenge & baris user dikunci: tebakan paralel diproses berurutan (batas salah kode & anti-replay tidak bisa dilewati).
       // Kegagalan dikembalikan (bukan dilempar) agar penghitung salah kode ikut ter-commit.
       const out = await db.tx(async (tx) => {
-        const u = (
-          await tx.query(`SELECT id, totp_secret_enc, totp_last_step, totp_failures, totp_locked_until FROM users WHERE id = $1 FOR UPDATE`, [found.id])
-        ).rows[0];
-        if (!u?.totp_secret_enc) return { fail: 'bad' as const };
-        if (u.totp_locked_until && new Date(u.totp_locked_until) > new Date()) return { fail: 'locked' as const };
-        const step = verifyTotp(decrypt(u.totp_secret_enc), b.code, { lastStep: Number(u.totp_last_step) });
-        if (step === null) {
-          const failures = u.totp_failures + 1;
-          const lock = failures >= TOTP_MAX_FAILURES;
-          await tx.query(
-            `UPDATE users SET totp_failures = $2, totp_locked_until = CASE WHEN $3::boolean THEN now() + make_interval(mins => $4) ELSE totp_locked_until END WHERE id = $1`,
-            [u.id, lock ? 0 : failures, lock, TOTP_LOCK_MIN],
-          );
-          if (lock) req.log.warn({ userId: u.id }, 'login authenticator dikunci sementara — terlalu banyak kode salah');
-          return { fail: lock ? ('locked' as const) : ('bad' as const) };
+        const ch = (await tx.query(`SELECT * FROM mfa_challenges WHERE token_hash = $1 FOR UPDATE`, [sha256(b.mfa_token)])).rows[0];
+        if (!ch || ch.consumed_at || new Date(ch.expires_at) < new Date() || ch.attempts >= MFA_MAX_ATTEMPTS) return { fail: 'expired' as const };
+        await tx.query(`UPDATE mfa_challenges SET attempts = attempts + 1 WHERE id = $1`, [ch.id]);
+        const u = (await tx.query(`SELECT ${USER_MFA_COLS} FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [ch.user_id])).rows[0];
+        if (!u?.totp_secret_enc) return { fail: 'expired' as const }; // 2FA dimatikan/di-reset di tengah jalan → masuk ulang
+        const r = await checkSecondFactor(tx, u, b);
+        if (!r.ok) {
+          if (r.locked) req.log.warn({ userId: u.id }, '2FA dikunci sementara — terlalu banyak kode salah');
+          return { fail: r.locked ? ('locked' as const) : ('bad' as const) };
         }
-        await tx.query(`UPDATE users SET totp_last_step = $2, totp_failures = 0, totp_locked_until = NULL WHERE id = $1`, [u.id, step]);
+        await tx.query(`UPDATE mfa_challenges SET consumed_at = now() WHERE id = $1`, [ch.id]);
+        if (r.method === 'recovery')
+          await audit(tx, { actorId: u.id, action: 'user.mfa.recovery_used', entity: 'user', entityId: u.id, data: { remaining: await recoveryRemaining(tx, u.id) }, ip: ip(req) });
         const me = await buildMe(tx, u.id);
         if (!me) throw forbidden('Akun telah dihapus');
         if (me.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan RAVE.');
         return { tokens: await issueTokens(tx, me) };
       });
       if ('fail' in out) {
-        if (out.fail === 'locked')
-          throw new HttpError(429, 'Too Many Requests', `Terlalu banyak kode salah. Coba lagi dalam ${TOTP_LOCK_MIN} menit, atau masuk dengan kode email.`);
-        throw unauthorized(TOTP_BAD);
+        if (out.fail === 'locked') throw new HttpError(429, 'Too Many Requests', MFA_LOCKED);
+        // Judul khusus → klien kembali ke langkah faktor pertama.
+        if (out.fail === 'expired') throw new HttpError(401, 'MFA Expired', 'Sesi verifikasi kedaluwarsa. Silakan masuk lagi.');
+        throw unauthorized(b.code ? 'Kode authenticator salah' : 'Kode pemulihan salah atau sudah dipakai');
       }
       return out.tokens;
     }
@@ -229,7 +229,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         const me = await buildMe(tx, userId);
         if (!me) throw forbidden('Akun telah dihapus');
         if (me.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan RAVE.');
-        return issueTokens(tx, me);
+        return completeLogin(tx, me);
       });
     }
     // refresh_token: rotasi + deteksi reuse (revoke seluruh family)
@@ -336,29 +336,34 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       return buildMe(pool, req.user!.sub);
     });
 
-    // ---------------- Aplikasi authenticator (TOTP) ----------------
+    // ---------------- Verifikasi 2 langkah (2FA, aplikasi authenticator) ----------------
     authed.get('/v1/me/totp', async (req) => {
       const u = await db.one(`SELECT totp_enabled_at FROM users WHERE id = $1`, [req.user!.sub]);
-      return { enabled: !!u?.totp_enabled_at, enabled_at: u?.totp_enabled_at ?? null };
+      return {
+        enabled: !!u?.totp_enabled_at,
+        enabled_at: u?.totp_enabled_at ?? null,
+        recovery_remaining: u?.totp_enabled_at ? await recoveryRemaining(pool, req.user!.sub) : 0,
+      };
     });
 
     // Langkah 1: buat secret baru (disimpan sebagai "pending" sampai dikonfirmasi dengan kode dari aplikasi).
     authed.post('/v1/me/totp/setup', async (req) => {
       const u = await db.one(`SELECT email, phone, display_name, totp_enabled_at FROM users WHERE id = $1 AND deleted_at IS NULL`, [req.user!.sub]);
       if (!u) throw notFound('Pengguna');
-      if (u.totp_enabled_at) throw conflict('Aplikasi authenticator sudah aktif. Nonaktifkan dulu untuk mendaftarkan ulang.');
+      if (u.totp_enabled_at) throw conflict('Verifikasi 2 langkah sudah aktif. Nonaktifkan dulu untuk mendaftarkan ulang.');
       const secret = newTotpSecret();
       await db.query(`UPDATE users SET totp_pending_enc = $2, updated_at = now() WHERE id = $1`, [req.user!.sub, encrypt(secret)]);
       return { secret, otpauth_uri: otpauthUri(secret, u.email ?? u.phone ?? u.display_name) };
     });
 
-    // Langkah 2: konfirmasi dengan kode dari aplikasi → aktif.
+    // Langkah 2: konfirmasi dengan kode dari aplikasi → aktif + kode pemulihan (ditampilkan sekali).
+    // Semua sesi lain dicabut (mis. sesi penyusup); perangkat ini menerima sesi baru di `session`.
     authed.post('/v1/me/totp/enable', async (req) => {
       const b = totpCodeBody.parse(req.body);
       return db.tx(async (tx) => {
         const u = (await tx.query(`SELECT totp_pending_enc, totp_enabled_at FROM users WHERE id = $1 FOR UPDATE`, [req.user!.sub])).rows[0];
-        if (u?.totp_enabled_at) throw conflict('Aplikasi authenticator sudah aktif');
-        if (!u?.totp_pending_enc) throw badRequest('Mulai pendaftaran authenticator dulu (pindai kode QR)');
+        if (u?.totp_enabled_at) throw conflict('Verifikasi 2 langkah sudah aktif');
+        if (!u?.totp_pending_enc) throw badRequest('Mulai pendaftaran dulu (pindai kode QR)');
         const step = verifyTotp(decrypt(u.totp_pending_enc), b.code);
         if (step === null) throw badRequest('Kode tidak cocok. Pastikan jam ponsel otomatis lalu coba kode terbaru.');
         await tx.query(
@@ -366,26 +371,49 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
              totp_failures = 0, totp_locked_until = NULL, mfa_enabled = true, updated_at = now() WHERE id = $1`,
           [req.user!.sub, step],
         );
-        await audit(tx, { actorId: req.user!.sub, action: 'user.totp.enable', entity: 'user', entityId: req.user!.sub, ip: ip(req) });
-        return { enabled: true };
+        const recovery_codes = await replaceRecoveryCodes(tx, req.user!.sub);
+        await tx.query(`UPDATE refresh_tokens SET revoked_at = coalesce(revoked_at, now()) WHERE user_id = $1`, [req.user!.sub]);
+        await audit(tx, { actorId: req.user!.sub, action: 'user.mfa.enable', entity: 'user', entityId: req.user!.sub, ip: ip(req) });
+        const me = await buildMe(tx, req.user!.sub);
+        if (!me) throw notFound('Pengguna');
+        return { enabled: true, recovery_codes, session: await issueTokens(tx, me) };
       });
     });
 
-    // Nonaktifkan: wajib kode authenticator yang berlaku (sesi yang dicuri saja tidak cukup).
+    /** Konfirmasi aksi sensitif 2FA dengan kode authenticator / kode pemulihan (memakai batas salah kode yang sama). */
+    async function confirmFactor(tx: Client, userId: string, body: unknown) {
+      const b = factorBody.parse(body);
+      const u = (await tx.query(`SELECT ${USER_MFA_COLS} FROM users WHERE id = $1 FOR UPDATE`, [userId])).rows[0];
+      if (!u?.totp_secret_enc) return { error: badRequest('Verifikasi 2 langkah belum aktif') };
+      const r = await checkSecondFactor(tx, u, b);
+      if (!r.ok) return { error: r.locked ? new HttpError(429, 'Too Many Requests', MFA_LOCKED) : badRequest(b.code ? 'Kode authenticator salah' : 'Kode pemulihan salah atau sudah dipakai') };
+      return { method: r.method };
+    }
+
+    // Buat ulang kode pemulihan (yang lama tidak berlaku lagi).
+    authed.post('/v1/me/totp/recovery-codes', async (req) => {
+      const out = await db.tx(async (tx) => {
+        const c = await confirmFactor(tx, req.user!.sub, req.body);
+        if ('error' in c) return c;
+        const recovery_codes = await replaceRecoveryCodes(tx, req.user!.sub);
+        await audit(tx, { actorId: req.user!.sub, action: 'user.mfa.recovery_regenerate', entity: 'user', entityId: req.user!.sub, ip: ip(req) });
+        return { recovery_codes };
+      });
+      if ('error' in out) throw out.error;
+      return out;
+    });
+
+    // Nonaktifkan: wajib kode authenticator / kode pemulihan (sesi yang dicuri saja tidak cukup).
     authed.post('/v1/me/totp/disable', async (req) => {
-      const b = totpCodeBody.parse(req.body);
-      return db.tx(async (tx) => {
-        const u = (await tx.query(`SELECT totp_secret_enc, totp_last_step FROM users WHERE id = $1 FOR UPDATE`, [req.user!.sub])).rows[0];
-        if (!u?.totp_secret_enc) throw badRequest('Aplikasi authenticator belum aktif');
-        if (verifyTotp(decrypt(u.totp_secret_enc), b.code, { lastStep: Number(u.totp_last_step) }) === null) throw badRequest('Kode authenticator salah');
-        await tx.query(
-          `UPDATE users SET totp_secret_enc = NULL, totp_pending_enc = NULL, totp_enabled_at = NULL, totp_last_step = 0,
-             totp_failures = 0, totp_locked_until = NULL, mfa_enabled = false, updated_at = now() WHERE id = $1`,
-          [req.user!.sub],
-        );
-        await audit(tx, { actorId: req.user!.sub, action: 'user.totp.disable', entity: 'user', entityId: req.user!.sub, ip: ip(req) });
+      const out = await db.tx(async (tx) => {
+        const c = await confirmFactor(tx, req.user!.sub, req.body);
+        if ('error' in c) return c;
+        await clearMfa(tx, req.user!.sub);
+        await audit(tx, { actorId: req.user!.sub, action: 'user.mfa.disable', entity: 'user', entityId: req.user!.sub, data: { method: c.method }, ip: ip(req) });
         return { enabled: false };
       });
+      if ('error' in out) throw out.error;
+      return out;
     });
 
     authed.post('/v1/me/onboarding', async (req) => {
@@ -411,9 +439,10 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         await tx.query(`UPDATE refresh_tokens SET revoked_at = coalesce(revoked_at, now()) WHERE user_id = $1`, [id]);
         await tx.query(
           `UPDATE users SET email = NULL, phone = NULL, display_name = 'Akun dihapus', avatar_url = NULL, city = NULL, genres = '{}',
-           totp_secret_enc = NULL, totp_pending_enc = NULL, totp_enabled_at = NULL, mfa_enabled = false, deleted_at = now() WHERE id = $1`,
+           deleted_at = now() WHERE id = $1`,
           [id],
         );
+        await clearMfa(tx, id);
         await tx.query(`DELETE FROM consents WHERE user_id = $1`, [id]);
         await audit(tx, { actorId: id, action: 'user.delete', entity: 'user', entityId: id, ip: ip(req) });
       });
