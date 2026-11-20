@@ -80,7 +80,10 @@ export default function Onboarding() {
 
   if (!token) return <Navigate to="/login?next=/onboarding" replace />;
 
-  const valid: Record<StepId, boolean> = { city: !!city, genre: genres.length > 0, artist: artists.length >= MIN_ARTISTS };
+  // Minimal artis menyesuaikan isi katalog: katalog kosong (platform baru) atau daftar gagal dimuat → langkah boleh dilewati,
+  // agar akun baru tidak tertahan di onboarding.
+  const needArtists = artistsQ.isError ? 0 : Math.min(MIN_ARTISTS, allArtists.length);
+  const valid: Record<StepId, boolean> = { city: !!city, genre: genres.length > 0, artist: !artistsQ.isLoading && artists.length >= needArtists };
   const current = STEPS[step]!.id;
   const isLast = step === STEPS.length - 1;
   // Langkah bisa dibuka bila semua langkah sebelumnya valid.
@@ -95,7 +98,7 @@ export default function Onboarding() {
   const hint: Record<StepId, string> = {
     city: city ? d.cityHintDone : d.cityHint,
     genre: genres.length ? d.genresCount(genres.length) : d.genreHint,
-    artist: artists.length >= MIN_ARTISTS ? d.artistReady : d.artistRemaining(MIN_ARTISTS - artists.length),
+    artist: needArtists === 0 && !artists.length ? d.artistSkip : artists.length >= needArtists ? d.artistReady : d.artistRemaining(needArtists - artists.length),
   };
 
   async function finish() {
@@ -307,6 +310,8 @@ export default function Onboarding() {
                           {d.retry}
                         </button>
                       </div>
+                    ) : allArtists.length === 0 ? (
+                      <p className="py-12 text-center text-sm text-b2b-muted">{d.noArtistsYet}</p>
                     ) : visible.length === 0 ? (
                       <p className="py-12 text-center text-sm text-b2b-muted">{d.noArtistMatch}</p>
                     ) : (
