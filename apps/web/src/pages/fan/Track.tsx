@@ -19,7 +19,7 @@ export interface Lyrics {
 export default function Track() {
   const { id = '' } = useParams();
   const d = useDict('fan');
-  const { current, playing, toggle, playQueue } = usePlayer(useShallow((s) => ({ current: s.current, playing: s.playing, toggle: s.toggle, playQueue: s.playQueue })));
+  const { current, playQueue } = usePlayer(useShallow((s) => ({ current: s.current, playQueue: s.playQueue })));
   const q = useQuery({ queryKey: ['track', id], queryFn: () => api<TrackT>(`/v1/catalog/tracks/${id}`) });
   const lyrics = useQuery({ queryKey: ['lyrics', id], queryFn: () => api<Lyrics>(`/v1/catalog/tracks/${id}/lyrics`), enabled: !!q.data?.has_lyrics, retry: false });
   const artist = useQuery({ queryKey: ['artist', q.data?.artist.slug], queryFn: () => api<Artist>(`/v1/catalog/artists/${q.data!.artist.slug}`), enabled: !!q.data });

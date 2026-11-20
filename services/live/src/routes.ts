@@ -11,7 +11,6 @@ import {
   conflict,
   forbidden,
   HttpError,
-  isAdmin,
   notFound,
   requireAuth,
   requirePermission,
@@ -298,7 +297,7 @@ export async function routes(app: FastifyInstance, ctx: ServiceContext, mgr: Liv
   });
 
   /** Data denormalisasi org/artis/event dari service pemiliknya. */
-  async function enrich(u: AuthUser, b: { org_id: string; access: string; event_id?: string | null; artist_id?: string | null }) {
+  async function enrich(b: { org_id: string; access: string; event_id?: string | null; artist_id?: string | null }) {
     const org = await callService<any>(name, 'iam', `/internal/orgs/${b.org_id}`).catch(() => null);
     if (!org) throw badRequest('Organisasi tidak ditemukan');
     const artistId = b.artist_id ?? org.artist_id ?? null;
@@ -345,7 +344,7 @@ export async function routes(app: FastifyInstance, ctx: ServiceContext, mgr: Liv
       const open = (await db.one(`SELECT count(*)::int AS n FROM streams WHERE org_id=$1 AND status <> 'ENDED' AND NOT is_demo`, [b.org_id]))!.n;
       const maxOpen = settings.num('live.max_open_per_org');
       if (open >= maxOpen) throw unprocessable(`Batas ${maxOpen} siaran terbuka per akun tercapai — akhiri atau hapus siaran lama`);
-      const { org, artist, event } = await enrich(req.user!, b);
+      const { org, artist, event } = await enrich(b);
       const key = newStreamKey();
       const id = uuidv7();
       const r = (
@@ -374,7 +373,7 @@ export async function routes(app: FastifyInstance, ctx: ServiceContext, mgr: Liv
       const accessNext = b.access ?? r.access;
       if (accessNext === 'TICKET' && r.access !== 'TICKET' && !settings.bool('live.ticketed_enabled')) throw forbidden('Siaran bertiket sedang dinonaktifkan admin');
       const eventId = b.event_id === undefined ? r.event_id : b.event_id;
-      const { event } = await enrich(req.user!, { org_id: r.org_id, access: accessNext, event_id: eventId, artist_id: r.artist_id });
+      const { event } = await enrich({ org_id: r.org_id, access: accessNext, event_id: eventId, artist_id: r.artist_id });
       await db.query(
         `UPDATE streams SET title=$2, description=$3, scheduled_at=$4, access=$5, cover_url=$6,
            event_id=$7, event_slug=$8, event_title=$9, event_city=$10, event_starts_at=$11, updated_at=now() WHERE id=$1`,

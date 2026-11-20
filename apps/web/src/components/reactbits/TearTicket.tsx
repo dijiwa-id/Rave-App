@@ -712,7 +712,7 @@ const TearTicket: React.FC<TearTicketProps> = ({
             className="pointer-events-none absolute inset-0 h-full w-full overflow-visible [&_path]:fill-none [&_path]:opacity-0 [&_path]:[stroke:var(--tt-bg)] [&_path]:[stroke-linecap:round]"
             aria-hidden="true"
           >
-            {geo.bridges.map((b, i) => (
+            {geo.bridges.map((_, i) => (
               <g key={i}>
                 <path
                   ref={el => {

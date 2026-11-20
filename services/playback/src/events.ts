@@ -26,8 +26,6 @@ const CLOCK_TOLERANCE_MS = 10_000;
 /** Aturan fraud sederhana (REQ-ADM-03). Produksi: model + fitur device/IP/ASN di pipeline streaming. */
 export const FRAUD = { loopWindow: 5, loopMaxPlayedMs: 35_000 };
 
-// Re-ekspor kompat (counter harian kini lewat delta, lihat aggregates.ts).
-export { bumpArtistDaily } from './aggregates.js';
 
 /** Deteksi pola mencurigakan sebelum stream dihitung. */
 async function fraudCheck(tx: Client, userId: string): Promise<string | null> {

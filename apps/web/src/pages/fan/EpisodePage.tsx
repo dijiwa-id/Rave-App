@@ -17,7 +17,7 @@ export default function EpisodePage() {
   const { id = '' } = useParams();
   const user = useAuth((s) => s.user);
   const d = useDict('fan');
-  const { current, playing, toggle, playOne, error } = usePlayer(useShallow((s) => ({ current: s.current, playing: s.playing, toggle: s.toggle, playOne: s.playOne, error: s.error })));
+  const { current, playOne, error } = usePlayer(useShallow((s) => ({ current: s.current, playOne: s.playOne, error: s.error })));
   const q = useQuery({ queryKey: ['episode', id], queryFn: () => api<Episode & { show: Show }>(`/v1/catalog/episodes/${id}`) });
   if (q.isLoading) return <PageLoader />;
   if (q.isError || !q.data) return <DarkError error={q.error} retry={() => q.refetch()} />;

@@ -39,8 +39,6 @@ export interface UploadProgress {
   total: number;
 }
 
-/** Ekstensi master audio yang diterima server (sama dengan AUDIO_UPLOAD_TYPES di @rave/domain/audio). */
-export const AUDIO_EXTENSIONS = Object.keys(AUDIO_UPLOAD_TYPES);
 const extOf = (name: string) => (name.match(/\.[a-z0-9]{2,5}$/i)?.[0] ?? '').toLowerCase();
 
 /** Cek berkas sebelum diunggah (ekstensi & ukuran) — server tetap memvalidasi isi berkas. */

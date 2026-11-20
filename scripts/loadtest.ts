@@ -441,7 +441,7 @@ async function checkoutVu(token: string, eventId: string, typeId: string) {
 
 // ---------------- Laporan ----------------
 const TARGETS: Record<Kind, number | null> = { read: 200, write: 500, ttfa: 1000, async: null };
-function report(extra: Record<string, unknown>) {
+function report() {
   const elapsed = ((endedAt || Date.now()) - startedAt) / 1000;
   const rows: any[] = [];
   let warn = 0;
@@ -614,7 +614,7 @@ try {
     await cancelEvent();
   }
   running = false;
-  const r = report(extra);
+  const r = report();
   if (r.errors) exitCode = 1;
   if (r.warn && flag('--strict')) exitCode = Math.max(exitCode, 1);
   console.log(`  kesimpulan: ${r.errors ? 'GALAT (lihat contoh di atas)' : r.warn ? 'WARN (latensi di atas target BRD)' : 'PASS'}`);

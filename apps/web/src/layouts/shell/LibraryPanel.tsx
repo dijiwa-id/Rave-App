@@ -7,7 +7,7 @@ import { useDict } from '@/lib/i18n';
 import type { ArtistSummary, Paged, PlaylistSummary, ReleaseSummary } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
 import { usePlayer } from '@/stores/player';
-import { LEFT, useLayout } from '@/stores/layout';
+import { useLayout } from '@/stores/layout';
 import { cx, toast } from '@/components/ui';
 import { useModule } from '@/components/ModuleGate';
 import { LanguageSwitch } from '@/components/LanguageSwitch';

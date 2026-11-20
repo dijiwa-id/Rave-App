@@ -3,9 +3,6 @@ import { cx } from '@/components/ui';
 
 // Elemen bersama halaman pemasaran (landing, premium): warna merek, kerangka section, dan judul seragam.
 
-/** Gradien merek RAVE: ungu → plum → berry (dipakai sebagai isian latar, bukan teks). */
-export const BRAND_GRADIENT = 'bg-gradient-to-r from-[#5B2A6E] via-[#2A1233] to-[#8A2F3F]';
-
 /** Tombol pemasaran seragam (rave-website .btn): pil label kapital berspasi; mustard = aksi utama, ghost = sekunder. */
 const BTN_BASE = 'rave-label group inline-flex items-center justify-center gap-2.5 rounded-none border-2 px-7 py-4 !text-[12px] shadow-[4px_4px_0_#0b0a0c] transition duration-300 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[6px_6px_0_#0b0a0c] disabled:pointer-events-none disabled:opacity-60';
 export const BTN_PRIMARY = `${BTN_BASE} border-rave-primary bg-rave-primary text-rave-on-primary hover:border-rave-paper hover:bg-rave-paper`;

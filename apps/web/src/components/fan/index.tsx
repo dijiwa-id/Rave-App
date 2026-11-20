@@ -279,7 +279,7 @@ export function CardSkeleton() {
 }
 
 /** Header halaman: cahaya warna kunci yang transparan (tekstur kanvas tetap terlihat) + sampul + judul besar. */
-export function HeroHeader({ color, image, kicker, title, meta, round }: { color: string; image?: string | null; kicker?: string; title: string; meta?: ReactNode; round?: boolean }) {
+export function HeroHeader({ color, image, kicker, title, meta }: { color: string; image?: string | null; kicker?: string; title: string; meta?: ReactNode }) {
   const big = title.length < 18 ? 'text-5xl md:text-7xl lg:text-8xl' : title.length < 32 ? 'text-4xl md:text-6xl' : 'text-3xl md:text-5xl';
   return (
     <header className="relative px-4 pt-24 pb-6 md:px-8" style={{ background: glow(color) }}>

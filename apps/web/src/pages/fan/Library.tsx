@@ -8,7 +8,7 @@ import { trackToPlayable, usePlayer } from '@/stores/player';
 import { CardSkeleton, ChoiceChips, DarkError, FanPage, MediaCard, PlayFab } from '@/components/fan';
 import { Disc3, ListMusic, MicVocal, Podcast } from 'lucide-react';
 import { usePlayMedia } from '@/components/fan/usePlayMedia';
-import { cx, EmptyState } from '@/components/ui';
+import { EmptyState } from '@/components/ui';
 import { useModule } from '@/components/ModuleGate';
 import { useDict } from '@/lib/i18n';
 

@@ -156,7 +156,6 @@ export function parseEmbed(input: string, allowed: readonly string[] = EMBED_PRO
 export const EPISODE_STATUSES = ['DRAFT', 'PENDING', 'PUBLISHED', 'REJECTED', 'HIDDEN'] as const;
 export type EpisodeStatus = (typeof EPISODE_STATUSES)[number];
 export const SHOW_STATUSES = ['ACTIVE', 'HIDDEN'] as const;
-export type ShowStatus = (typeof SHOW_STATUSES)[number];
 
 /** Status ketika kreator menekan "Terbitkan": ditinjau dulu bila `podcast.require_review` aktif. */
 export const publishTarget = (requireReview: boolean): EpisodeStatus => (requireReview ? 'PENDING' : 'PUBLISHED');

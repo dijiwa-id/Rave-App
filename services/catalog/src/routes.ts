@@ -1,7 +1,7 @@
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { forbidden, isAdmin, isPublicMediaFile, managedArtistIds, notFound, reqLocale, verifyMediaSig, z, type AuthUser, type ServiceContext } from '@rave/service-kit';
+import { forbidden, isPublicMediaFile, managedArtistIds, notFound, reqLocale, verifyMediaSig, z, type AuthUser, type ServiceContext } from '@rave/service-kit';
 import { ARTIST_SUMMARY_COLS, EPISODE_COLS, EPISODE_VISIBLE, RELEASE_SUMMARY_SELECT, SHOW_COLS, SHOW_VISIBLE, TRACK_SELECT, isUuid, releaseFull } from './queries.js';
 import { UPLOAD_DIR } from './storage.js';
 import { demoArtFile } from './demo-art.js';

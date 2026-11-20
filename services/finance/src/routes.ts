@@ -12,7 +12,6 @@ import {
   hasPermission,
   HttpError,
   idempotent,
-  isAdmin,
   managedArtistIds,
   notFound,
   publish,

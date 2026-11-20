@@ -35,7 +35,7 @@ import { SPK_TEMPLATE_VERSION, buildContractData } from './contract-data.js';
 import { enqueueContractJob } from './contract-jobs.js';
 import { contractAudit } from './routes-contracts.js';
 import { activateBooking } from './contract-sign.js';
-import { feeSplits, loadBooking, transition, releaseTerms } from './repo.js';
+import { loadBooking, transition, releaseTerms } from './repo.js';
 
 const SUMMARY_SQL = `SELECT b.*, a.name AS artist_name, a.image_url AS artist_image, a.city AS artist_city, coalesce(o.name, 'Promotor') AS promotor_name
   FROM bookings b JOIN artists a ON a.id=b.artist_id LEFT JOIN orgs o ON o.id=b.promotor_org_id`;

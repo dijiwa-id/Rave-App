@@ -8,7 +8,6 @@ import { LINK_ICON } from '@/components/studio/artist-profile';
 import { api, fmt } from '@/lib/api';
 import type { Artist, EventSummary, Paged } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
-import { useShallow } from 'zustand/react/shallow';
 import { trackToPlayable, usePlayer } from '@/stores/player';
 import { colorFor, DarkError, MediaCard, PlayFab, Shelf, TrackTable } from '@/components/fan';
 import { usePlayMedia } from '@/components/fan/usePlayMedia';
@@ -90,7 +89,7 @@ export default function ArtistPage() {
   const user = useAuth((s) => s.user);
   const qc = useQueryClient();
   const d = useDict('fan');
-  const { playQueue, current, playing, toggle } = usePlayer(useShallow((s) => ({ playQueue: s.playQueue, current: s.current, playing: s.playing, toggle: s.toggle })));
+  const playQueue = usePlayer((s) => s.playQueue);
   const play = usePlayMedia();
   const [showAll, setShowAll] = useState(false);
   const q = useQuery({ queryKey: ['artist', key], queryFn: () => api<Artist>(`/v1/catalog/artists/${key}`) });
@@ -104,7 +103,6 @@ export default function ArtistPage() {
   if (q.isLoading) return <PageLoader />;
   if (q.isError || !a) return <DarkError error={q.error} retry={() => q.refetch()} />;
   const following = !!follow.data?.following;
-  const playingThis = !!current && a.top_tracks.some((t) => t.id === current.id);
   const allEvents = events.data?.data ?? [];
   const near = user?.city ? allEvents.filter((e) => e.city.toLowerCase() === user.city!.toLowerCase()) : [];
 

@@ -85,31 +85,6 @@ function DotWave({ className }: { className?: string }) {
   );
 }
 
-/** Equalizer bergaya deck RAVE (mustard → ungu); diam bila tidak memutar / reduced motion. */
-function Equalizer({ on, bars = 32, className }: { on: boolean; bars?: number; className?: string }) {
-  return (
-    <div aria-hidden className={cx('flex items-end justify-center gap-[3px]', className)}>
-      {Array.from({ length: bars }, (_, i) => {
-        const h = 30 + ((i * 37) % 70);
-        return (
-          <span
-            key={i}
-            className="w-1.5 origin-bottom rounded-none motion-reduce:!animate-none sm:w-2"
-            style={{
-              height: `${h}%`,
-              background: i % 5 === 0 ? '#c9a0dc' : '#f4c21f',
-              opacity: 0.25 + (h / 100) * 0.55,
-              transform: on ? undefined : 'scaleY(0.12)',
-              animation: on ? `deck-eq ${0.7 + ((i * 13) % 7) / 10}s ease-in-out ${-(i % 9) / 10}s infinite alternate` : 'none',
-              transition: 'transform 300ms',
-            }}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------- Karaoke
 
 /** Lockup karaoke: logo RAVE (unggahan Super Admin atau bawaan) + "KARAOKE" berjarak lebar di bawahnya. */

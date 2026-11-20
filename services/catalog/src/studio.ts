@@ -10,7 +10,6 @@ import {
   conflict,
   forbidden,
   idempotent,
-  isAdmin,
   notFound,
   publish,
   requireAuth,
