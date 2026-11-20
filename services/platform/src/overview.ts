@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { audit, config, requireSuperAdmin, serviceHeaders, serviceUrl, settings, z, type Db, type ServiceContext } from '@rave/service-kit';
+import { audit, requireSuperAdmin, serviceHeaders, serviceUrl, settings, z, type Db, type ServiceContext } from '@rave/service-kit';
 import { lastBackupAt } from './backups.js';
 import { bucketBytes, disk } from './storage.js';
 
@@ -59,7 +59,8 @@ async function serviceStats(name: string): Promise<ServiceStat> {
 async function gatewayStat(): Promise<ServiceStat> {
   const t = Date.now();
   try {
-    const r = await fetch(`http://127.0.0.1:${config.ports.gateway}/healthz`, { signal: AbortSignal.timeout(2000) });
+    // Di Docker gateway berada di container lain → pakai GATEWAY_URL (bukan 127.0.0.1 milik container platform).
+    const r = await fetch(serviceUrl('gateway') + '/healthz', { signal: AbortSignal.timeout(2000) });
     return { name: 'gateway', ok: r.ok, latency_ms: Date.now() - t, uptime_s: null, memory_mb: null, settings_loaded_at: null, metrics: {} };
   } catch {
     return { name: 'gateway', ok: false, latency_ms: Date.now() - t, uptime_s: null, memory_mb: null, settings_loaded_at: null, metrics: {} };

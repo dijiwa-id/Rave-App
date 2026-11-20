@@ -73,7 +73,7 @@ if (!config.isDev) {
 
 export type ServiceName = keyof typeof config.ports;
 
-export function serviceUrl(name: Exclude<ServiceName, 'gateway'>): string {
+export function serviceUrl(name: ServiceName): string {
   const override = process.env[`${name.toUpperCase()}_URL`];
   return override ?? `http://127.0.0.1:${config.ports[name]}`;
 }

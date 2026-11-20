@@ -37,6 +37,7 @@ x-svc: &svc
     DATABASE_URL: ${DATABASE_URL:-postgres://rave:${POSTGRES_PASSWORD}@postgres:5432/rave}
     BUS_DRIVER: ${BUS_DRIVER:-pg}
     KAFKA_BROKERS: ${KAFKA_BROKERS:-redpanda:9092}
+    GATEWAY_URL: http://gateway:8080
     IAM_URL: http://iam:4001
     CATALOG_URL: http://catalog:4002
     LIBRARY_URL: http://library:4003
