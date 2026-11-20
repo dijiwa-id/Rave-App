@@ -2,7 +2,7 @@ import { useEffect, useState, type ComponentType, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, FlaskConical, Headphones, Landmark, MapPin, Mic2, Monitor, Moon, Radio, Search, ShieldCheck, Sun, Ticket, TrendingUp } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, FlaskConical, Headphones, KeyRound, Landmark, MapPin, Mic2, Monitor, Moon, Radio, Search, ShieldCheck, Sun, Ticket, TrendingUp } from 'lucide-react';
 import { AppleLogo, Facebook } from '@/components/fan/BrandIcons';
 import CodeSlots, { type CodeSlotsStatus } from '@/components/reactbits/CodeSlots';
 import { api, fmt } from '@/lib/api';
@@ -216,7 +216,7 @@ export default function Login() {
   const registrationsOpen = setting(usePlatformConfig(), 'general.registrations_open', true);
   const signup = params.get('signup') === '1' && registrationsOpen;
   const [intent, setIntent] = useState<Intent>(() => intentFrom(params));
-  const [step, setStep] = useState<'email' | 'otp'>('email');
+  const [step, setStep] = useState<'email' | 'otp' | 'totp'>('email');
   const [email, setEmail] = useState(readLast);
   const [devCode, setDevCode] = useState<string | null>(null);
   const [code, setCode] = useState('');
@@ -325,6 +325,32 @@ export default function Login() {
     }
   }
 
+  /** Masuk dengan kode aplikasi authenticator (TOTP) — tanpa email; hanya untuk akun yang sudah mengaktifkannya. */
+  function startTotp() {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      toast.error(d.totpNeedEmail);
+      return;
+    }
+    setCode('');
+    setStatus('idle');
+    setStep('totp');
+  }
+
+  async function verifyTotp(c: string) {
+    setBusy(true);
+    try {
+      const t = await api<TokenResponse>('/v1/auth/token', { body: { grant_type: 'totp', destination: email.trim(), code: c }, auth: false });
+      setStatus('success');
+      setTimeout(() => done(t), 350);
+    } catch (err) {
+      setStatus('error');
+      setCode('');
+      toast.error(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function demo(d: (typeof DEMO)[number]) {
     setBusy(true);
     try {
@@ -399,8 +425,8 @@ export default function Login() {
             <div className="mb-5 flex items-center justify-between gap-3">
             <ol className="flex items-center gap-3 font-label text-[10.5px] font-bold tracking-[0.14em] uppercase" aria-label={d.stepLabel}>
               {[d.stepEmail, d.stepCode].map((label, i) => {
-                const active = (i === 0 && step === 'email') || (i === 1 && step === 'otp');
-                const done = i === 0 && step === 'otp';
+                const active = (i === 0 && step === 'email') || (i === 1 && step !== 'email');
+                const done = i === 0 && step !== 'email';
                 return (
                   <li key={label} className="flex items-center gap-3" aria-current={active ? 'step' : undefined}>
                     {i > 0 && <span className={cx('h-0.5 w-8', done || active ? 'bg-rave-primary' : 'bg-b2b-line')} aria-hidden />}
@@ -472,6 +498,9 @@ export default function Login() {
                       {busy ? d.sending : d.sendCode}
                       {!busy && <ArrowRight className="size-4 transition group-hover:translate-x-0.5" />}
                     </button>
+                    <button type="button" disabled={busy} onClick={startTotp} className="flex h-11 w-full items-center justify-center gap-2 rounded-none border border-b2b-line text-sm font-bold text-b2b-ink transition hover:border-rave-accent/40 disabled:opacity-60">
+                      <KeyRound className="size-4" /> {d.useTotp}
+                    </button>
                   </form>
 
                   {socials.length > 0 && (
@@ -509,6 +538,39 @@ export default function Login() {
                       </div>
                     </div>
                   )}
+                </motion.div>
+              ) : step === 'totp' ? (
+                <motion.div key="totp" {...step$} className="text-center">
+                  <button onClick={() => setStep('email')} className="mb-6 inline-flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink">
+                    <ArrowLeft className="size-4" /> {d.changeEmail}
+                  </button>
+                  <span className="mx-auto grid size-14 place-items-center rounded-none bg-b2b-ink text-b2b-on-ink">
+                    <KeyRound className="size-7" />
+                  </span>
+                  <h1 className="mt-5 text-2xl font-black tracking-tight">{d.totpTitle}</h1>
+                  <p className="mt-2 text-sm text-b2b-muted">{d.totpSub(email.trim())}</p>
+                  <div className="mt-8 flex justify-center">
+                    <CodeSlots
+                      length={6}
+                      value={code}
+                      onChange={(c) => {
+                        setCode(c);
+                        if (status === 'error') setStatus('idle');
+                      }}
+                      onComplete={verifyTotp}
+                      status={status}
+                      autoFocus
+                      disabled={busy}
+                      accentColor="#5B2A6E"
+                      inkColor={dark ? '#f5f3f7' : '#111111'}
+                      slotColor={dark ? '#211b2a' : '#f3eff6'}
+                      ariaLabel={d.totpAria}
+                    />
+                  </div>
+                  <button onClick={() => sendOtp()} disabled={busy} className="mt-8 text-sm font-bold text-b2b-ink underline-offset-4 hover:underline disabled:text-b2b-muted disabled:no-underline">
+                    {d.useEmailCode}
+                  </button>
+                  <p className="mt-6 text-xs text-b2b-muted">{d.totpHint}</p>
                 </motion.div>
               ) : (
                 <motion.div key="otp" {...step$} className="text-center">

@@ -26,6 +26,8 @@ export interface Me {
   orgs: OrgClaim[];
   kyc_status: 'NONE' | 'PENDING' | 'VERIFIED' | 'REJECTED';
   mfa_enabled: boolean;
+  /** Aplikasi authenticator (TOTP) aktif. */
+  totp_enabled?: boolean;
   onboarded: boolean;
   premium: boolean;
   /** Jenis member (diatur Super Admin): FREE | INDIVIDUAL | STUDENT | DUO; `member_until` null = tanpa batas. */

@@ -23,6 +23,7 @@ import {
 } from '@rave/service-kit';
 import {
   buildMe,
+  decrypt,
   encrypt,
   issueTokens,
   mask,
@@ -37,13 +38,18 @@ import {
   type Q,
 } from './core.js';
 import { consumeLoginCode } from './oauth.js';
+import { newTotpSecret, otpauthUri, TOTP_LOCK_MIN, TOTP_MAX_FAILURES, verifyTotp } from './totp.js';
 
 const otpBody = z.object({ channel: z.enum(['email', 'whatsapp']), destination: z.string().min(5).max(200) });
 const tokenBody = z.discriminatedUnion('grant_type', [
   z.object({ grant_type: z.literal('otp'), destination: z.string().min(5), code: z.string().regex(/^\d{6}$/) }),
   z.object({ grant_type: z.literal('refresh_token'), refresh_token: z.string().min(20) }),
   z.object({ grant_type: z.literal('oauth_code'), code: z.string().min(20).max(200) }),
+  // Aplikasi authenticator (TOTP) — alternatif OTP email bagi akun yang sudah mengaktifkannya di Pengaturan.
+  z.object({ grant_type: z.literal('totp'), destination: z.string().min(5), code: z.string().regex(/^\d{6}$/) }),
 ]);
+const totpCodeBody = z.object({ code: z.string().regex(/^\d{6}$/, 'Kode harus 6 digit') });
+const TOTP_BAD = 'Kode authenticator salah, atau aplikasi authenticator belum diaktifkan untuk akun ini';
 const ORG_TYPES = ['ARTIST', 'MANAGEMENT', 'LABEL', 'PROMOTOR'] as const;
 
 const ip = (req: FastifyRequest) => (req.headers['x-forwarded-for'] as string) ?? req.ip;
@@ -174,6 +180,47 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         return issueTokens(tx, me);
       });
     }
+    if (b.grant_type === 'totp') {
+      const dest = normalizeDestination(b.destination.includes('@') ? 'email' : 'whatsapp', b.destination);
+      const provider = dest.includes('@') ? 'email' : 'whatsapp';
+      const found = await db.one(
+        `SELECT u.id FROM identities i JOIN users u ON u.id = i.user_id WHERE i.provider = $1 AND i.subject = $2 AND u.deleted_at IS NULL AND u.totp_enabled_at IS NOT NULL`,
+        [provider, dest],
+      );
+      // Pesan yang sama untuk akun tak dikenal / tanpa authenticator / kode salah (tidak membocorkan status akun).
+      if (!found) throw unauthorized(TOTP_BAD);
+      // Baris user dikunci: tebakan paralel diproses berurutan sehingga batas salah kode & anti-replay tidak bisa dilewati.
+      // Kegagalan dikembalikan (bukan dilempar) agar penghitung salah kode ikut ter-commit.
+      const out = await db.tx(async (tx) => {
+        const u = (
+          await tx.query(`SELECT id, totp_secret_enc, totp_last_step, totp_failures, totp_locked_until FROM users WHERE id = $1 FOR UPDATE`, [found.id])
+        ).rows[0];
+        if (!u?.totp_secret_enc) return { fail: 'bad' as const };
+        if (u.totp_locked_until && new Date(u.totp_locked_until) > new Date()) return { fail: 'locked' as const };
+        const step = verifyTotp(decrypt(u.totp_secret_enc), b.code, { lastStep: Number(u.totp_last_step) });
+        if (step === null) {
+          const failures = u.totp_failures + 1;
+          const lock = failures >= TOTP_MAX_FAILURES;
+          await tx.query(
+            `UPDATE users SET totp_failures = $2, totp_locked_until = CASE WHEN $3::boolean THEN now() + make_interval(mins => $4) ELSE totp_locked_until END WHERE id = $1`,
+            [u.id, lock ? 0 : failures, lock, TOTP_LOCK_MIN],
+          );
+          if (lock) req.log.warn({ userId: u.id }, 'login authenticator dikunci sementara — terlalu banyak kode salah');
+          return { fail: lock ? ('locked' as const) : ('bad' as const) };
+        }
+        await tx.query(`UPDATE users SET totp_last_step = $2, totp_failures = 0, totp_locked_until = NULL WHERE id = $1`, [u.id, step]);
+        const me = await buildMe(tx, u.id);
+        if (!me) throw forbidden('Akun telah dihapus');
+        if (me.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan RAVE.');
+        return { tokens: await issueTokens(tx, me) };
+      });
+      if ('fail' in out) {
+        if (out.fail === 'locked')
+          throw new HttpError(429, 'Too Many Requests', `Terlalu banyak kode salah. Coba lagi dalam ${TOTP_LOCK_MIN} menit, atau masuk dengan kode email.`);
+        throw unauthorized(TOTP_BAD);
+      }
+      return out.tokens;
+    }
     if (b.grant_type === 'oauth_code') {
       // Kode sekali pakai dari callback login sosial (oauth.ts) — diklaim atomik, berlaku 60 dtk.
       return db.tx(async (tx) => {
@@ -289,6 +336,58 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       return buildMe(pool, req.user!.sub);
     });
 
+    // ---------------- Aplikasi authenticator (TOTP) ----------------
+    authed.get('/v1/me/totp', async (req) => {
+      const u = await db.one(`SELECT totp_enabled_at FROM users WHERE id = $1`, [req.user!.sub]);
+      return { enabled: !!u?.totp_enabled_at, enabled_at: u?.totp_enabled_at ?? null };
+    });
+
+    // Langkah 1: buat secret baru (disimpan sebagai "pending" sampai dikonfirmasi dengan kode dari aplikasi).
+    authed.post('/v1/me/totp/setup', async (req) => {
+      const u = await db.one(`SELECT email, phone, display_name, totp_enabled_at FROM users WHERE id = $1 AND deleted_at IS NULL`, [req.user!.sub]);
+      if (!u) throw notFound('Pengguna');
+      if (u.totp_enabled_at) throw conflict('Aplikasi authenticator sudah aktif. Nonaktifkan dulu untuk mendaftarkan ulang.');
+      const secret = newTotpSecret();
+      await db.query(`UPDATE users SET totp_pending_enc = $2, updated_at = now() WHERE id = $1`, [req.user!.sub, encrypt(secret)]);
+      return { secret, otpauth_uri: otpauthUri(secret, u.email ?? u.phone ?? u.display_name) };
+    });
+
+    // Langkah 2: konfirmasi dengan kode dari aplikasi → aktif.
+    authed.post('/v1/me/totp/enable', async (req) => {
+      const b = totpCodeBody.parse(req.body);
+      return db.tx(async (tx) => {
+        const u = (await tx.query(`SELECT totp_pending_enc, totp_enabled_at FROM users WHERE id = $1 FOR UPDATE`, [req.user!.sub])).rows[0];
+        if (u?.totp_enabled_at) throw conflict('Aplikasi authenticator sudah aktif');
+        if (!u?.totp_pending_enc) throw badRequest('Mulai pendaftaran authenticator dulu (pindai kode QR)');
+        const step = verifyTotp(decrypt(u.totp_pending_enc), b.code);
+        if (step === null) throw badRequest('Kode tidak cocok. Pastikan jam ponsel otomatis lalu coba kode terbaru.');
+        await tx.query(
+          `UPDATE users SET totp_secret_enc = totp_pending_enc, totp_pending_enc = NULL, totp_enabled_at = now(), totp_last_step = $2,
+             totp_failures = 0, totp_locked_until = NULL, mfa_enabled = true, updated_at = now() WHERE id = $1`,
+          [req.user!.sub, step],
+        );
+        await audit(tx, { actorId: req.user!.sub, action: 'user.totp.enable', entity: 'user', entityId: req.user!.sub, ip: ip(req) });
+        return { enabled: true };
+      });
+    });
+
+    // Nonaktifkan: wajib kode authenticator yang berlaku (sesi yang dicuri saja tidak cukup).
+    authed.post('/v1/me/totp/disable', async (req) => {
+      const b = totpCodeBody.parse(req.body);
+      return db.tx(async (tx) => {
+        const u = (await tx.query(`SELECT totp_secret_enc, totp_last_step FROM users WHERE id = $1 FOR UPDATE`, [req.user!.sub])).rows[0];
+        if (!u?.totp_secret_enc) throw badRequest('Aplikasi authenticator belum aktif');
+        if (verifyTotp(decrypt(u.totp_secret_enc), b.code, { lastStep: Number(u.totp_last_step) }) === null) throw badRequest('Kode authenticator salah');
+        await tx.query(
+          `UPDATE users SET totp_secret_enc = NULL, totp_pending_enc = NULL, totp_enabled_at = NULL, totp_last_step = 0,
+             totp_failures = 0, totp_locked_until = NULL, mfa_enabled = false, updated_at = now() WHERE id = $1`,
+          [req.user!.sub],
+        );
+        await audit(tx, { actorId: req.user!.sub, action: 'user.totp.disable', entity: 'user', entityId: req.user!.sub, ip: ip(req) });
+        return { enabled: false };
+      });
+    });
+
     authed.post('/v1/me/onboarding', async (req) => {
       const b = z
         .object({
@@ -311,7 +410,8 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         await tx.query(`DELETE FROM identities WHERE user_id = $1`, [id]);
         await tx.query(`UPDATE refresh_tokens SET revoked_at = coalesce(revoked_at, now()) WHERE user_id = $1`, [id]);
         await tx.query(
-          `UPDATE users SET email = NULL, phone = NULL, display_name = 'Akun dihapus', avatar_url = NULL, city = NULL, genres = '{}', deleted_at = now() WHERE id = $1`,
+          `UPDATE users SET email = NULL, phone = NULL, display_name = 'Akun dihapus', avatar_url = NULL, city = NULL, genres = '{}',
+           totp_secret_enc = NULL, totp_pending_enc = NULL, totp_enabled_at = NULL, mfa_enabled = false, deleted_at = now() WHERE id = $1`,
           [id],
         );
         await tx.query(`DELETE FROM consents WHERE user_id = $1`, [id]);

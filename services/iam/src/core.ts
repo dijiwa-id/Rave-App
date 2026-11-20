@@ -120,6 +120,8 @@ export async function buildMe(q: Q, userId: string) {
     orgs: orgs.map((o) => ({ id: o.id, type: o.type, name: o.name, role: o.role, artist_id: o.artist_id })),
     kyc_status: await kycStatus(q, userId),
     mfa_enabled: u.mfa_enabled,
+    /** Aplikasi authenticator (TOTP) aktif — bisa masuk dengan email + kode authenticator. */
+    totp_enabled: !!u.totp_enabled_at,
     onboarded: u.onboarded,
     premium: memberActive(u),
     /** Jenis member (diatur Super Admin): FREE | INDIVIDUAL | STUDENT | DUO; `member_until` null = tanpa batas. */

@@ -1,8 +1,9 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AudioLines, Bell, ChevronDown, Monitor, Moon, Sun, Globe, Library, MonitorPlay, RotateCcw, Search, ShieldCheck, SlidersHorizontal, TriangleAlert, User, X } from 'lucide-react';
-import { api } from '@/lib/api';
+import { AudioLines, Bell, ChevronDown, Copy, KeyRound, Monitor, Moon, Sun, Globe, Library, MonitorPlay, RotateCcw, Search, ShieldCheck, SlidersHorizontal, TriangleAlert, User, X } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
+import { api, fmt } from '@/lib/api';
 import type { Me } from '@/lib/types';
 import { useAuth } from '@/stores/auth';
 import { usePlayer, type Quality } from '@/stores/player';
@@ -34,8 +35,8 @@ const NOTIF_CHANNELS: NotifChannel[] = ['push', 'email', 'whatsapp'];
 const defaultPref = (category: NotifCategory): NotifPref => ({ category, push: true, email: category === 'booking' || category === 'payment', whatsapp: false, quiet_start: null, quiet_end: null });
 const CITIES = ['Jakarta', 'Bandung', 'Yogyakarta', 'Surabaya', 'Malang', 'Bali', 'Medan', 'Semarang', 'Makassar', 'Solo', 'Palembang', 'Lainnya'];
 
-type SectionId = 'account' | 'language' | 'audio' | 'eq' | 'library' | 'display' | 'notifications' | 'privacy' | 'danger';
-const SECTION_ICON: Record<SectionId, any> = { account: User, language: Globe, audio: AudioLines, eq: SlidersHorizontal, library: Library, display: MonitorPlay, notifications: Bell, privacy: ShieldCheck, danger: TriangleAlert };
+type SectionId = 'account' | 'language' | 'audio' | 'eq' | 'library' | 'display' | 'notifications' | 'privacy' | 'security' | 'danger';
+const SECTION_ICON: Record<SectionId, any> = { account: User, language: Globe, audio: AudioLines, eq: SlidersHorizontal, library: Library, display: MonitorPlay, notifications: Bell, privacy: ShieldCheck, security: KeyRound, danger: TriangleAlert };
 
 // ───────────────────────── primitif tata letak ─────────────────────────
 /** Kata kunci pencarian aktif; baris yang tidak cocok tidak dirender, bagian tanpa baris disembunyikan via CSS :has(). */
@@ -84,6 +85,141 @@ function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: 
     <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)} className={cx('rave-switch', on && 'rave-switch--on')}>
       <span className="rave-switch__knob" />
     </button>
+  );
+}
+
+/** Kolom kode 6 digit (angka saja, cocok untuk isi-otomatis OTP di ponsel). */
+function CodeInput({ value, onChange, label, onEnter }: { value: string; onChange: (v: string) => void; label: string; onEnter: () => void }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-bold tracking-wide text-rave-muted uppercase">{label}</span>
+      <input
+        className="settings-input w-44 font-label text-lg tracking-[0.3em]"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        maxLength={6}
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
+        onKeyDown={(e) => e.key === 'Enter' && value.length === 6 && onEnter()}
+      />
+    </label>
+  );
+}
+
+/** Aplikasi authenticator (TOTP): daftar lewat QR → konfirmasi kode → aktif; nonaktifkan dengan kode. */
+function TotpRow() {
+  const s = useDict('fan').settings;
+  const d = s.totp;
+  const setUser = useAuth((x) => x.setUser);
+  const qc = useQueryClient();
+  const status = useQuery({ queryKey: ['me-totp'], queryFn: () => api<{ enabled: boolean; enabled_at: string | null }>('/v1/me/totp') });
+  const [setup, setSetup] = useState<{ secret: string; otpauth_uri: string } | null>(null);
+  const [disabling, setDisabling] = useState(false);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const on = !!status.data?.enabled;
+
+  async function refresh() {
+    await qc.invalidateQueries({ queryKey: ['me-totp'] });
+    api<Me>('/v1/me').then(setUser).catch(() => {});
+  }
+  async function run(fn: () => Promise<void>) {
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const start = () =>
+    run(async () => {
+      setSetup(await api<{ secret: string; otpauth_uri: string }>('/v1/me/totp/setup', { method: 'POST', body: {} }));
+      setCode('');
+    });
+  const confirm = () =>
+    run(async () => {
+      await api('/v1/me/totp/enable', { method: 'POST', body: { code } });
+      setSetup(null);
+      setCode('');
+      toast.success(d.enabled);
+      await refresh();
+    });
+  const disable = () =>
+    run(async () => {
+      await api('/v1/me/totp/disable', { method: 'POST', body: { code } });
+      setDisabling(false);
+      setCode('');
+      toast.success(d.disabled);
+      await refresh();
+    });
+  const cancel = () => {
+    setSetup(null);
+    setDisabling(false);
+    setCode('');
+  };
+
+  return (
+    <Row label={d.title} desc={on ? d.descOn(fmt.date(status.data?.enabled_at)) : d.descOff} keywords="authenticator totp 2fa mfa keamanan security google authy" stack={!!setup || disabling}>
+      {status.isError ? (
+        <p className="text-sm text-red-400">{d.loadFailed}</p>
+      ) : setup ? (
+        <div className="mt-2 grid gap-5 @[560px]:grid-cols-[auto_minmax(0,1fr)]">
+          <div className="w-fit border-2 border-rave-ink bg-white p-3">
+            <QRCodeSVG value={setup.otpauth_uri} size={168} level="M" bgColor="#ffffff" fgColor="#000000" title={d.scan} />
+          </div>
+          <div className="min-w-0 space-y-4">
+            <p className="text-sm text-rave-paper">{d.scan}</p>
+            <div>
+              <p className="text-xs text-rave-muted">{d.manual}</p>
+              <div className="mt-1.5 flex items-center gap-2">
+                <code className="min-w-0 font-label text-sm break-all text-white">{setup.secret.match(/.{1,4}/g)?.join(' ')}</code>
+                <button
+                  type="button"
+                  aria-label={d.copy}
+                  title={d.copy}
+                  className="shrink-0 p-1.5 text-rave-muted hover:text-white"
+                  onClick={() => navigator.clipboard?.writeText(setup.secret).then(() => toast.success(d.copied), () => {})}
+                >
+                  <Copy className="size-4" />
+                </button>
+              </div>
+            </div>
+            <CodeInput value={code} onChange={setCode} label={d.codeLabel} onEnter={confirm} />
+            <div className="flex flex-wrap gap-2">
+              <Button variant="primary" loading={busy} disabled={code.length !== 6} onClick={confirm}>
+                {d.confirm}
+              </Button>
+              <Button variant="ghost" onClick={cancel} disabled={busy}>
+                {d.cancel}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : disabling ? (
+        <div className="mt-2 space-y-3">
+          <p className="text-sm text-rave-muted">{d.disableHint}</p>
+          <CodeInput value={code} onChange={setCode} label={d.codeLabel} onEnter={disable} />
+          <div className="flex flex-wrap gap-2">
+            <Button variant="danger" loading={busy} disabled={code.length !== 6} onClick={disable}>
+              {d.disable}
+            </Button>
+            <Button variant="ghost" onClick={cancel} disabled={busy}>
+              {d.cancel}
+            </Button>
+          </div>
+        </div>
+      ) : on ? (
+        <Button variant="outline" onClick={() => setDisabling(true)} disabled={status.isLoading}>
+          {d.disable}
+        </Button>
+      ) : (
+        <Button variant="primary" loading={busy} onClick={start} disabled={status.isLoading}>
+          {d.setup}
+        </Button>
+      )}
+    </Row>
   );
 }
 
@@ -194,7 +330,7 @@ export default function Settings() {
     () => [...(Object.keys(EQ_PRESETS) as EqPreset[]).map((k) => ({ value: k as EqPreset | 'custom', label: s.eqPresets[k] })), ...(preset ? [] : [{ value: 'custom' as const, label: s.eqCustom }])],
     [s, preset],
   );
-  const sections: SectionId[] = ['account', 'language', 'audio', 'eq', 'library', 'display', 'notifications', 'privacy', 'danger'];
+  const sections: SectionId[] = ['account', 'language', 'audio', 'eq', 'library', 'display', 'notifications', 'privacy', 'security', 'danger'];
   const jump = (id: SectionId) => document.getElementById(`set-${id}`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
   const [ql, qd] = s.qualityRow;
 
@@ -439,6 +575,10 @@ export default function Settings() {
                 );
               })}
               {consents.isError && <p className="px-5 pb-4 text-sm text-red-400">{s.consentsFailed}</p>}
+            </Section>
+
+            <Section id="security" title={s.sections.security}>
+              <TotpRow />
             </Section>
 
             <Section id="danger" title={s.sections.danger} tone="danger">
