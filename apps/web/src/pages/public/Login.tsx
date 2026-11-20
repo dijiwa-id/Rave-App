@@ -2,11 +2,11 @@ import { useEffect, useState, type ComponentType, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, FlaskConical, Headphones, Landmark, MapPin, Mic2, Monitor, Moon, Radio, Search, ShieldCheck, Sun, Ticket, TrendingUp } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, FlaskConical, Headphones, KeyRound, Landmark, MapPin, Mic2, Monitor, Moon, Radio, Search, ShieldCheck, Sun, Ticket, TrendingUp } from 'lucide-react';
 import { AppleLogo, Facebook } from '@/components/fan/BrandIcons';
 import CodeSlots, { type CodeSlotsStatus } from '@/components/reactbits/CodeSlots';
-import { api, fmt } from '@/lib/api';
-import type { EventSummary, LiveStream, Paged, TokenResponse } from '@/lib/types';
+import { api, ApiError, fmt } from '@/lib/api';
+import { isMfaChallenge, type EventSummary, type LiveStream, type LoginResponse, type Paged, type TokenResponse } from '@/lib/types';
 import { isSuperAdmin, useAuth } from '@/stores/auth';
 import { RaveLogo, RaveMark } from '@/components/ui/RaveLogo';
 import { Vinyl } from './Vinyl';
@@ -216,7 +216,11 @@ export default function Login() {
   const registrationsOpen = setting(usePlatformConfig(), 'general.registrations_open', true);
   const signup = params.get('signup') === '1' && registrationsOpen;
   const [intent, setIntent] = useState<Intent>(() => intentFrom(params));
-  const [step, setStep] = useState<'email' | 'otp'>('email');
+  const [step, setStep] = useState<'email' | 'otp' | 'mfa'>('email');
+  // Langkah kedua (2FA): token challenge dari faktor pertama + tujuan "Masuk sebagai" yang dipilih saat itu.
+  const [mfa, setMfa] = useState<{ token: string; as: Intent; expiresAt: number } | null>(null);
+  const [useRecovery, setUseRecovery] = useState(false);
+  const [recovery, setRecovery] = useState('');
   const [email, setEmail] = useState(readLast);
   const [devCode, setDevCode] = useState<string | null>(null);
   const [code, setCode] = useState('');
@@ -227,11 +231,11 @@ export default function Login() {
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
-    if (step !== 'otp') return;
+    if (step === 'email') return;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [step]);
-  const left = Math.max(0, Math.round((expiresAt - now) / 1000));
+  const left = Math.max(0, Math.round(((step === 'mfa' ? mfa?.expiresAt ?? 0 : expiresAt) - now) / 1000));
   const cooldown = Math.max(0, Math.round((resendAt - now) / 1000));
 
   // Login sosial: penyedia aktif (server memutuskan; `dev` = simulasi khusus development).
@@ -265,8 +269,8 @@ export default function Login() {
     }
     const as = params.get('intent');
     setBusy(true);
-    api<TokenResponse>('/v1/auth/token', { body: { grant_type: 'oauth_code', code }, auth: false })
-      .then((t) => done(t, as === 'artist' || as === 'promotor' || as === 'fan' ? as : intent))
+    api<LoginResponse>('/v1/auth/token', { body: { grant_type: 'oauth_code', code }, auth: false })
+      .then((t) => finish(t, as === 'artist' || as === 'promotor' || as === 'fan' ? as : intent))
       .catch((err) => toast.error(err))
       .finally(() => setBusy(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sekali saat kembali dari provider
@@ -285,6 +289,18 @@ export default function Login() {
     const roleHome = isSuperAdmin(t.user) ? '/admin/platform' : t.user.roles.includes('admin') ? '/admin' : '/app';
     const home = as === 'fan' ? roleHome : INTENTS.find((i) => i.id === as)!.home;
     nav(!t.user.onboarded ? `/onboarding?next=${encodeURIComponent(next || home)}` : next || home, { replace: true });
+  }
+
+  /** Hasil faktor pertama: sesi langsung, atau lanjut ke langkah verifikasi 2FA. */
+  function finish(r: LoginResponse, as: Intent = intent) {
+    if (!isMfaChallenge(r)) return done(r, as);
+    setMfa({ token: r.mfa_token, as, expiresAt: Date.now() + r.expires_in * 1000 });
+    setCode('');
+    setRecovery('');
+    setUseRecovery(false);
+    setStatus('idle');
+    setNow(Date.now());
+    setStep('mfa');
   }
 
   async function requestOtp(dest: string) {
@@ -314,12 +330,34 @@ export default function Login() {
   async function verify(c: string) {
     setBusy(true);
     try {
-      const t = await api<TokenResponse>('/v1/auth/token', { body: { grant_type: 'otp', destination: email.trim(), code: c }, auth: false });
+      const t = await api<LoginResponse>('/v1/auth/token', { body: { grant_type: 'otp', destination: email.trim(), code: c }, auth: false });
       setStatus('success');
-      setTimeout(() => done(t), 350);
+      setTimeout(() => finish(t), 350);
     } catch (err) {
       setStatus('error');
       toast.error(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Langkah kedua: kode authenticator 6 digit atau kode pemulihan. */
+  async function verifyMfa(input: { code: string } | { recovery_code: string }) {
+    if (!mfa) return;
+    setBusy(true);
+    try {
+      const t = await api<TokenResponse>('/v1/auth/token', { body: { grant_type: 'mfa', mfa_token: mfa.token, ...input }, auth: false });
+      setStatus('success');
+      setTimeout(() => done(t, mfa.as), 350);
+    } catch (err) {
+      setStatus('error');
+      setCode('');
+      toast.error(err);
+      // Challenge kedaluwarsa / habis percobaan → mulai lagi dari faktor pertama.
+      if (err instanceof ApiError && err.status === 401 && err.problem?.title === 'MFA Expired') {
+        setMfa(null);
+        setStep('email');
+      }
     } finally {
       setBusy(false);
     }
@@ -330,8 +368,8 @@ export default function Login() {
     try {
       const r = await requestOtp(d.email);
       if (!r.dev_code) throw new Error(dict('public').login.devCodeUnavailable);
-      const t = await api<TokenResponse>('/v1/auth/token', { body: { grant_type: 'otp', destination: d.email, code: r.dev_code }, auth: false });
-      done(t, d.intent);
+      const t = await api<LoginResponse>('/v1/auth/token', { body: { grant_type: 'otp', destination: d.email, code: r.dev_code }, auth: false });
+      finish(t, d.intent);
     } catch (err) {
       toast.error(err);
     } finally {
@@ -399,8 +437,8 @@ export default function Login() {
             <div className="mb-5 flex items-center justify-between gap-3">
             <ol className="flex items-center gap-3 font-label text-[10.5px] font-bold tracking-[0.14em] uppercase" aria-label={d.stepLabel}>
               {[d.stepEmail, d.stepCode].map((label, i) => {
-                const active = (i === 0 && step === 'email') || (i === 1 && step === 'otp');
-                const done = i === 0 && step === 'otp';
+                const active = (i === 0 && step === 'email') || (i === 1 && step !== 'email');
+                const done = i === 0 && step !== 'email';
                 return (
                   <li key={label} className="flex items-center gap-3" aria-current={active ? 'step' : undefined}>
                     {i > 0 && <span className={cx('h-0.5 w-8', done || active ? 'bg-rave-primary' : 'bg-b2b-line')} aria-hidden />}
@@ -509,6 +547,80 @@ export default function Login() {
                       </div>
                     </div>
                   )}
+                </motion.div>
+              ) : step === 'mfa' ? (
+                <motion.div key="mfa" {...step$} className="text-center">
+                  <button
+                    onClick={() => {
+                      setMfa(null);
+                      setStep('email');
+                    }}
+                    className="mb-6 inline-flex items-center gap-1 text-sm font-bold text-b2b-muted hover:text-b2b-ink"
+                  >
+                    <ArrowLeft className="size-4" /> {d.mfaBack}
+                  </button>
+                  <span className="mx-auto grid size-14 place-items-center rounded-none bg-b2b-ink text-b2b-on-ink">
+                    <KeyRound className="size-7" />
+                  </span>
+                  <h1 className="mt-5 text-2xl font-black tracking-tight">{d.mfaTitle}</h1>
+                  <p className="mt-2 text-sm text-b2b-muted">{useRecovery ? d.mfaRecoverySub : d.mfaSub}</p>
+                  {useRecovery ? (
+                    <form
+                      className="mt-8 space-y-3 text-left"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (recovery.trim().length >= 8) void verifyMfa({ recovery_code: recovery.trim() });
+                      }}
+                    >
+                      <input
+                        autoFocus
+                        autoComplete="one-time-code"
+                        spellCheck={false}
+                        value={recovery}
+                        onChange={(e) => setRecovery(e.target.value)}
+                        placeholder="xxxxx-xxxxx"
+                        aria-label={d.mfaRecoveryAria}
+                        className="h-12 w-full rounded-none border border-b2b-line bg-b2b-card px-4 text-center font-mono text-lg tracking-widest text-b2b-ink focus:border-rave-accent/60 focus:ring-4 focus:ring-rave-accent/12 focus:outline-none"
+                      />
+                      <button disabled={busy || recovery.trim().length < 8} className="flex h-12 w-full items-center justify-center gap-2 rounded-none bg-b2b-ink text-sm font-bold text-b2b-on-ink transition disabled:opacity-60">
+                        {d.mfaVerify}
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="mt-8 flex justify-center">
+                      <CodeSlots
+                        length={6}
+                        value={code}
+                        onChange={(c) => {
+                          setCode(c);
+                          if (status === 'error') setStatus('idle');
+                        }}
+                        onComplete={(c) => verifyMfa({ code: c })}
+                        status={status}
+                        autoFocus
+                        disabled={busy || left === 0}
+                        accentColor="#5B2A6E"
+                        inkColor={dark ? '#f5f3f7' : '#111111'}
+                        slotColor={dark ? '#211b2a' : '#f3eff6'}
+                        ariaLabel={d.mfaAria}
+                      />
+                    </div>
+                  )}
+                  <p className={cx('mt-4 text-xs font-semibold', left === 0 ? 'text-red-500' : 'text-b2b-muted')} aria-live="polite">
+                    {left === 0 ? d.mfaExpired : d.validFor(mmss(left))}
+                  </p>
+                  <button
+                    onClick={() => {
+                      setUseRecovery((v) => !v);
+                      setCode('');
+                      setRecovery('');
+                      setStatus('idle');
+                    }}
+                    className="mt-6 text-sm font-bold text-b2b-ink underline-offset-4 hover:underline"
+                  >
+                    {useRecovery ? d.mfaUseApp : d.mfaUseRecovery}
+                  </button>
+                  <p className="mt-6 text-xs text-b2b-muted">{d.mfaHint}</p>
                 </motion.div>
               ) : (
                 <motion.div key="otp" {...step$} className="text-center">

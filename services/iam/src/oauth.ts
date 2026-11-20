@@ -2,7 +2,8 @@ import { createHash, createHmac, createPrivateKey, randomBytes, sign, timingSafe
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { enabledSocialProviders, type SocialProvider } from '@rave/domain/integrations';
 import { audit, badRequest, config, forbidden, getIntegration, HttpError, publish, settings, uuidv7, z, type Client, type ServiceContext } from '@rave/service-kit';
-import { buildMe, issueTokens, sha256 } from './core.js';
+import { buildMe, sha256 } from './core.js';
+import { completeLogin } from './mfa.js';
 
 /**
  * Login sosial (TDD §IAM, identities.provider = google | facebook | apple).
@@ -347,7 +348,8 @@ export async function oauthRoutes(app: FastifyInstance, { db }: ServiceContext) 
       const me = await buildMe(tx, r.userId);
       if (!me) throw forbidden('Akun telah dihapus');
       if (me.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan RAVE.');
-      return { status: 'done' as const, tokens: await issueTokens(tx, me) };
+      // Akun ber-2FA: aplikasi menerima challenge {mfa_required, mfa_token} → selesaikan via /v1/auth/token grant_type=mfa.
+      return { status: 'done' as const, tokens: await completeLogin(tx, me) };
     });
     if (out.status === 'done') return out.tokens;
     if (out.status === 'pending') throw new HttpError(428, 'authorization_pending', 'Menunggu login di browser');

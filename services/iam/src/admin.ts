@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { ADMIN_ROLES } from '@rave/domain/settings';
 import { audit, badRequest, conflict, forbidden, nextCursor, notFound, pageParams, publish, requirePermission, requireRole, requireService, requireSuperAdmin, z, type ServiceContext } from '@rave/service-kit';
+import { clearMfa } from './mfa.js';
 import { buildMe, MEMBER_TYPES, type MemberType } from './core.js';
 import { kycOut } from './routes.js';
 
@@ -113,6 +114,8 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
           /** Jenis member (Free/Individu/Pelajar/Duo) + batas waktu opsional (ISO; null = tanpa batas). */
           member_type: z.enum(MEMBER_TYPES).optional(),
           member_until: z.string().datetime({ offset: true }).nullable().optional(),
+          /** Reset verifikasi 2 langkah (pengguna kehilangan ponsel & kode pemulihan). */
+          reset_mfa: z.literal(true).optional(),
           reason: z.string().trim().min(5, 'Alasan minimal 5 karakter').max(500),
         })
         .parse(req.body);
@@ -161,6 +164,14 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
             // Token akses lama (≤ 15 mnt) masih membawa status lama; refresh berikutnya memakai jenis member baru.
             await publish(tx, 'iam.user.member_changed', u.id, { userId: u.id, memberType: type, memberUntil: nextUntil, premium: type !== 'FREE' });
           }
+        }
+        if (b.reset_mfa) {
+          // Akun sendiri dikelola lewat Pengaturan → Keamanan (butuh kode) — sesi Super Admin yang dicuri tidak bisa melepas 2FA-nya.
+          if (self) throw forbidden('Kelola verifikasi 2 langkah akun sendiri lewat Pengaturan → Keamanan');
+          if (!u.totp_enabled_at) throw badRequest('Pengguna ini belum mengaktifkan verifikasi 2 langkah');
+          await clearMfa(tx, u.id);
+          await tx.query(`UPDATE refresh_tokens SET revoked_at = coalesce(revoked_at, now()) WHERE user_id = $1`, [u.id]);
+          await audit(tx, { actorId: req.user!.sub, action: 'user.mfa.reset', entity: 'user', entityId: u.id, data: { reason: b.reason } });
         }
         return buildMe(tx, u.id);
       });

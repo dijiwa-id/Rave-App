@@ -26,6 +26,8 @@ export interface Me {
   orgs: OrgClaim[];
   kyc_status: 'NONE' | 'PENDING' | 'VERIFIED' | 'REJECTED';
   mfa_enabled: boolean;
+  /** Verifikasi 2 langkah (aplikasi authenticator) aktif. */
+  totp_enabled?: boolean;
   onboarded: boolean;
   premium: boolean;
   /** Jenis member (diatur Super Admin): FREE | INDIVIDUAL | STUDENT | DUO; `member_until` null = tanpa batas. */
@@ -45,6 +47,16 @@ export interface TokenResponse {
   expires_in: number;
   user: Me;
 }
+
+/** Faktor pertama berhasil, akun ber-2FA: selesaikan dengan POST /v1/auth/token {grant_type:'mfa'}. */
+export interface MfaChallenge {
+  mfa_required: true;
+  mfa_token: string;
+  methods: ('totp' | 'recovery')[];
+  expires_in: number;
+}
+export type LoginResponse = TokenResponse | MfaChallenge;
+export const isMfaChallenge = (r: LoginResponse): r is MfaChallenge => 'mfa_required' in r && r.mfa_required === true;
 
 export interface Paged<T> {
   data: T[];
