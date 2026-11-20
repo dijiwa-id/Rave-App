@@ -332,6 +332,8 @@ const dict: Shape<typeof id> = {
     matchLegend: 'matches your genres & city',
     artistRemaining: (n) => `Pick ${n} more artist${n === 1 ? '' : 's'}`,
     artistReady: 'All set! Feel free to pick more.',
+    artistSkip: 'No artists yet — you can skip this step.',
+    noArtistsYet: "RAVE's artist catalog is still being prepared. Skip this step — you can follow your favourite artists later.",
     searchArtist: 'Search artists…',
     noArtistMatch: 'No artists match your search.',
     remove: (name) => `Remove ${name}`,

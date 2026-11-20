@@ -294,7 +294,8 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         .object({
           city: z.string().min(2).max(80),
           genres: z.array(z.string().max(40)).max(20),
-          artist_ids: z.array(z.string().uuid()).min(3, 'Pilih minimal 3 artis').max(50),
+          // Tanpa minimum di server: jumlah wajib ditentukan klien dari isi katalog (katalog kosong → boleh 0).
+          artist_ids: z.array(z.string().uuid()).max(50),
         })
         .parse(req.body);
       return db.tx(async (tx) => {

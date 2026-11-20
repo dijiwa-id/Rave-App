@@ -331,6 +331,8 @@ const dict = {
     matchLegend: 'cocok dengan genre & kotamu',
     artistRemaining: (n: number) => `Pilih ${n} artis lagi`,
     artistReady: 'Siap! Kamu bisa pilih lebih banyak.',
+    artistSkip: 'Belum ada artis — langkah ini bisa dilewati.',
+    noArtistsYet: 'Katalog artis RAVE masih disiapkan. Lewati langkah ini — kamu bisa mengikuti artis favorit nanti.',
     searchArtist: 'Cari artis…',
     noArtistMatch: 'Tidak ada artis yang cocok dengan pencarianmu.',
     remove: (name: string) => `Hapus ${name}`,
