@@ -393,7 +393,8 @@ export function B2BLayout({ product, accent, nav, context, roleLabel }: { produc
             <UserMenu roleLabel={roleLabel} />
           </div>
         </header>
-        <main className="min-w-0 flex-1 overflow-y-auto">
+        {/* relative: elemen absolut (mis. sr-only, input file tersembunyi) ikut wadah gulir ini, bukan memanjangkan dokumen. */}
+        <main className="relative min-w-0 flex-1 overflow-y-auto">
           <motion.div
             key={location.pathname}
             className="w-full px-4 py-5 sm:px-6 sm:py-6 xl:px-8 xl:py-8 2xl:px-10"
