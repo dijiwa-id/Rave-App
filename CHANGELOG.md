@@ -5,6 +5,18 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-11-21
+
+### Fitur
+
+- **iam:** login Google native untuk aplikasi mobile (Credential Manager Android) (067c2ea)
+
+### Perbaikan
+
+- **gateway:** CORS mengizinkan origin aplikasi RAVE Desktop (Tauri) (d11d4eb)
+
+### Catatan rilis
+
 ### Perbaikan
 
 - **gateway:** CORS produksi kini selalu mengizinkan origin aplikasi RAVE Desktop (`tauri://localhost`, `http(s)://tauri.localhost`) selain origin web — sebelumnya preflight dari aplikasi desktop dijawab tanpa `Access-Control-Allow-Origin` sehingga API & stream ber-`crossOrigin` (equalizer/spektrum) diblokir. Dapat dimatikan dengan `CORS_APP_ORIGINS=0`.
