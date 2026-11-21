@@ -93,7 +93,8 @@ function toForm(d: Detail): Form {
 const splitParagraphs = (text: string) => text.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
 const cleanBlocks = (b: NewsBlock[]) => b.filter((x) => ('p' in x ? x.p.trim() : 'h' in x ? x.h.trim() : x.quote.trim()));
 const payload = (f: Form) => ({
-  slug: f.slug,
+  // Slug dinormalkan (tanpa '--' / tanda hubung di ujung); kosong → server membuat dari judul (saat buat) atau tidak diubah.
+  slug: slugify(f.slug) || undefined,
   category: f.category,
   author: f.author.trim() || 'Tim RAVE',
   image_url: f.image_url,
@@ -107,12 +108,18 @@ export function AdminNews() {
   const qc = useQueryClient();
   const [status, setStatus] = useState<(typeof STATUSES)[number]>('all');
   const [search, setSearch] = useState('');
+  // Cari setelah jeda mengetik (bukan satu permintaan per ketukan).
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    const h = setTimeout(() => setQuery(search.trim()), 300);
+    return () => clearTimeout(h);
+  }, [search]);
   const [category, setCategory] = useState<NewsCategory | ''>('');
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const list = useQuery({
-    queryKey: ['admin-news', status, search, category],
-    queryFn: () => api<{ data: Row[]; counts: Counts }>('/v1/admin/platform/news', { query: { status, q: search || undefined, category: category || undefined } }),
+    queryKey: ['admin-news', status, query, category],
+    queryFn: () => api<{ data: Row[]; counts: Counts }>('/v1/admin/platform/news', { query: { status, q: query || undefined, category: category || undefined } }),
   });
   const rows = list.data?.data ?? [];
   const counts = list.data?.counts;
@@ -122,9 +129,13 @@ export function AdminNews() {
     qc.invalidateQueries({ queryKey: ['news-article'] });
   };
 
+  // Pilih otomatis hanya dari daftar yang segar: setelah hapus, daftar lama masih memuat artikel terhapus sampai refetch.
+  const [deleted, setDeleted] = useState<string | null>(null);
   useEffect(() => {
-    if (!selected && rows.length) setSelected(rows[0].id);
-  }, [rows, selected]);
+    if (selected) return;
+    const next = rows.find((r) => r.id !== deleted);
+    if (next) setSelected(next.id);
+  }, [rows, selected, deleted]);
 
   return (
     <div>
@@ -199,7 +210,7 @@ export function AdminNews() {
         </section>
         <section className="min-w-0">
           {selected ? (
-            <Editor key={selected} id={selected} onChanged={refresh} onDeleted={() => (setSelected(null), refresh())} />
+            <Editor key={selected} id={selected} onChanged={refresh} onDeleted={() => (setDeleted(selected), setSelected(null), refresh())} />
           ) : (
             <Empty title={t.pick} />
           )}

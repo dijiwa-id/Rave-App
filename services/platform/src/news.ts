@@ -170,7 +170,7 @@ export async function newsRoutes(app: FastifyInstance, { db }: ServiceContext) {
     async function uniqueSlug(base: string, exceptId?: string) {
       const root = base || 'berita';
       for (let i = 1; i < 200; i++) {
-        const cand = i === 1 ? root : `${root.slice(0, L.slug - 4)}-${i}`;
+        const cand = i === 1 ? root : `${root.slice(0, L.slug - 4).replace(/-+$/, '')}-${i}`;
         const hit = await db.one(`SELECT id FROM news_articles WHERE slug = $1 AND ($2::uuid IS NULL OR id <> $2)`, [cand, exceptId ?? null]);
         if (!hit) return cand;
       }
@@ -179,7 +179,12 @@ export async function newsRoutes(app: FastifyInstance, { db }: ServiceContext) {
     /** Jalankan perubahan dalam transaksi; menyetel cerita utama melepas cerita utama lain. */
     async function save(req: FastifyRequest, id: string, sets: Record<string, unknown>, action: string, data?: unknown) {
       await db.tx(async (tx) => {
-        if (sets.featured === true) await tx.query(`UPDATE news_articles SET featured = false WHERE featured AND id <> $1`, [id]);
+        // Cerita utama hanya satu di antara artikel tayang/terjadwal: draf boleh ditandai tanpa menggeser cerita utama yang
+        // sedang tayang — penanda itu baru "mengambil alih" saat artikelnya terbit.
+        const cur = (await tx.query(`SELECT status, featured FROM news_articles WHERE id = $1`, [id])).rows[0];
+        const willPublish = (sets.status ?? cur?.status) === 'published';
+        const willFeature = sets.featured ?? cur?.featured;
+        if (willPublish && willFeature) await tx.query(`UPDATE news_articles SET featured = false WHERE featured AND status = 'published' AND id <> $1`, [id]);
         const keys = Object.keys(sets);
         const cols = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
         await tx.query(`UPDATE news_articles SET ${cols}${cols ? ', ' : ''}updated_by = $${keys.length + 2}, updated_at = now() WHERE id = $1`, [
@@ -203,22 +208,24 @@ export async function newsRoutes(app: FastifyInstance, { db }: ServiceContext) {
         scheduled: `status = 'published' AND published_at > now()`,
         published: `status = 'published' AND published_at <= now()`,
       };
-      const rows = await db.query(
+      const [rows, counts] = await Promise.all([
+        db.query(
         `SELECT * FROM news_articles
           WHERE ${statusSql[q.status]}
             AND ($1::text IS NULL OR content->'id'->>'title' ILIKE '%' || $1 || '%' OR slug ILIKE '%' || $1 || '%' OR author ILIKE '%' || $1 || '%')
             AND ($2::text IS NULL OR category = $2)
           ORDER BY (status = 'draft') DESC, coalesce(published_at, updated_at) DESC`,
         [q.q || null, q.category ?? null],
-      );
-      const counts = await db.one(
+      ),
+        db.one(
         `SELECT count(*)::int AS all,
                 count(*) FILTER (WHERE status = 'draft')::int AS draft,
                 count(*) FILTER (WHERE status = 'published' AND published_at > now())::int AS scheduled,
                 count(*) FILTER (WHERE status = 'published' AND published_at <= now())::int AS published,
                 count(*) FILTER (WHERE status = 'archived')::int AS archived
            FROM news_articles`,
-      );
+        ),
+      ]);
       return { data: rows.map(adminOut), counts };
     });
 
@@ -229,7 +236,6 @@ export async function newsRoutes(app: FastifyInstance, { db }: ServiceContext) {
       const s = await uniqueSlug(b.slug ?? slugify(content.id.title));
       if (b.slug && s !== b.slug) throw conflict(`Slug "${b.slug}" sudah dipakai artikel lain`);
       await db.tx(async (tx) => {
-        if (b.featured) await tx.query(`UPDATE news_articles SET featured = false WHERE featured`);
         await tx.query(
           `INSERT INTO news_articles (id, slug, category, content, image_url, author, featured, read_min, created_by, updated_by)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)`,
