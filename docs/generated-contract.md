@@ -56,6 +56,9 @@ Status implementasi: **Tahap 0–3 selesai** (dokumen, skema, domain murni, temp
 | Variabel | Fungsi |
 |---|---|
 | `CHROMIUM_PATH` | Path Chromium/headless-shell. Bila kosong dicari di `~/.cache/ms-playwright`, `~/.cache/puppeteer`, lalu `/usr/bin`. Produksi: pasang Chromium sistem. |
+| `CONTRACT_PDF_MAX_RENDERS` | Browser Chromium untuk PDF di-recycle setelah sekian render (default `25`). Browser lama ditutup setelah render yang sedang berjalan selesai. |
+| `CONTRACT_PDF_IDLE_MS` | Chromium ditutup bila tidak ada render selama sekian ms (default `60000`); diluncurkan ulang otomatis saat dibutuhkan. |
+| `CONTRACT_PDF_CONCURRENCY` | Jumlah render PDF bersamaan maksimum per proses booking (default `2`); sisanya antre FIFO. |
 | `PUBLIC_WEB_URL` | Basis URL halaman verifikasi pada QR (default `http://localhost:5173`). |
 | `CONTRACT_DIR` | Lokasi storage dokumen (default `storage/contracts`). |
 | `MEDIA_SIGNING_SECRET` | Rahasia HMAC signed URL (wajib diganti di produksi). |

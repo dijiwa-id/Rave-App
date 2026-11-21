@@ -5,6 +5,10 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+### Perbaikan
+
+- **booking:** Chromium untuk PDF kontrak di-recycle, ditutup saat idle/shutdown, dan render dibatasi konkurensinya (#4). Browser yang crash/terputus otomatis diganti. Env baru (opsional): `CONTRACT_PDF_MAX_RENDERS` (default 25), `CONTRACT_PDF_IDLE_MS` (default 60000), `CONTRACT_PDF_CONCURRENCY` (default 2) — lihat docs/generated-contract.md.
+
 ## [0.5.0] — 2026-11-21
 
 ### Fitur

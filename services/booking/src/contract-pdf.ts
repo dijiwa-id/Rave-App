@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import puppeteer, { type Browser } from 'puppeteer-core';
+import puppeteer, { type Browser, type Page } from 'puppeteer-core';
 
 /** Cari Chromium: CHROMIUM_PATH → cache Playwright/Puppeteer → path sistem. */
 export function findChromium(): string {
@@ -24,26 +24,138 @@ export function findChromium(): string {
   throw new Error('Chromium tidak ditemukan. Set CHROMIUM_PATH atau pasang Chromium (lihat docs/generated-contract.md).');
 }
 
-let browser: Promise<Browser> | null = null;
-function getBrowser(): Promise<Browser> {
-  if (!browser) {
-    browser = puppeteer
-      .launch({
-        executablePath: findChromium(),
-        headless: true,
-        // Di WSL/kontainer tanpa user namespace Chromium butuh --no-sandbox; konten yang dirender sepenuhnya dikendalikan templat (JS dimatikan, jaringan diblokir).
-        args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--proxy-server=127.0.0.1:1', '--proxy-bypass-list=<-all>'],
-      })
-      .catch((e) => {
-        browser = null;
-        throw e;
-      });
-  }
-  return browser;
+/** Bilangan bulat positif dari env; kosong/tidak valid → default. Dibaca saat dipakai (bisa diatur tanpa rebuild). */
+function envInt(name: string, def: number): number {
+  const n = Number(process.env[name]);
+  return Number.isInteger(n) && n > 0 ? n : def;
 }
+/** Recycle browser setelah N render (Chromium menumpuk memori/zombie renderer seiring waktu). */
+const maxRenders = () => envInt('CONTRACT_PDF_MAX_RENDERS', 25);
+/** Tutup browser bila tidak ada render selama sekian ms (VPS 2 GB — jangan simpan Chromium menganggur). */
+const idleMs = () => envInt('CONTRACT_PDF_IDLE_MS', 60_000);
+/** Render PDF bersamaan maksimum; sisanya antre FIFO. */
+const maxConcurrency = () => envInt('CONTRACT_PDF_CONCURRENCY', 2);
+
+/** Satu instance Chromium. `active` = render yang sedang memakai; browser yang `retired` ditutup saat active = 0. */
+interface Slot {
+  browser: Promise<Browser>;
+  instance: Browser | null;
+  renders: number;
+  active: number;
+  retired: boolean;
+  closed: boolean;
+}
+let current: Slot | null = null;
+/** Semua slot yang belum ditutup (termasuk yang sudah retired tapi masih dipakai render). */
+const live = new Set<Slot>();
+let idleTimer: NodeJS.Timeout | null = null;
+
+function launchSlot(): Slot {
+  const slot: Slot = { browser: null as unknown as Promise<Browser>, instance: null, renders: 0, active: 0, retired: false, closed: false };
+  slot.browser = puppeteer
+    .launch({
+      executablePath: findChromium(),
+      headless: true,
+      // Di WSL/kontainer tanpa user namespace Chromium butuh --no-sandbox; konten yang dirender sepenuhnya dikendalikan templat (JS dimatikan, jaringan diblokir).
+      args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--proxy-server=127.0.0.1:1', '--proxy-bypass-list=<-all>'],
+    })
+    .then((b) => {
+      slot.instance = b;
+      // Chromium crash / dibunuh OOM → singleton di-reset agar render berikutnya meluncurkan browser baru.
+      b.on('disconnected', () => {
+        slot.retired = true;
+        slot.closed = true;
+        live.delete(slot);
+        if (current === slot) current = null;
+      });
+      return b;
+    })
+    .catch((e) => {
+      slot.retired = true;
+      slot.closed = true;
+      live.delete(slot);
+      if (current === slot) current = null;
+      throw e;
+    });
+  live.add(slot);
+  return slot;
+}
+
+function closeSlot(slot: Slot): Promise<void> {
+  slot.retired = true;
+  if (current === slot) current = null;
+  live.delete(slot);
+  if (slot.closed && !slot.instance) return Promise.resolve();
+  slot.closed = true;
+  return slot.browser.then((b) => b.close()).catch(() => undefined);
+}
+
+function clearIdle() {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = null;
+}
+
+/** Pinjam browser untuk satu render. Wajib dipasangkan dengan `releaseBrowser`. */
+function leaseBrowser(): Slot {
+  clearIdle();
+  let slot = current;
+  if (slot && (slot.retired || (slot.instance && !slot.instance.isConnected()))) {
+    slot.retired = true;
+    if (slot.active === 0) void closeSlot(slot); // sisanya ditutup releaseBrowser saat render terakhir selesai
+    else if (current === slot) current = null;
+    slot = null;
+  }
+  if (!slot) slot = current = launchSlot();
+  slot.active++;
+  slot.renders++;
+  // Render ke-N memakai browser ini untuk terakhir kali; render berikutnya meluncurkan yang baru.
+  if (slot.renders >= maxRenders()) {
+    slot.retired = true;
+    if (current === slot) current = null;
+  }
+  return slot;
+}
+
+function releaseBrowser(slot: Slot) {
+  slot.active--;
+  if (slot.retired && slot.active === 0 && !slot.closed) void closeSlot(slot);
+  if (current && current.active === 0 && !idleTimer) {
+    const idle = current;
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      if (current === idle && idle.active === 0) void closeSlot(idle);
+    }, idleMs());
+    idleTimer.unref(); // timer idle tidak boleh menahan proses tetap hidup
+  }
+}
+
+/** Semaphore FIFO kecil: membatasi jumlah tab Chromium yang merender bersamaan. */
+let running = 0;
+const waiters: Array<() => void> = [];
+async function acquireRenderSlot(): Promise<void> {
+  if (running < maxConcurrency()) {
+    running++;
+    return;
+  }
+  await new Promise<void>((resolve) => waiters.push(resolve));
+}
+function releaseRenderSlot() {
+  const next = waiters.shift();
+  if (next) next(); // slot diteruskan langsung ke antrean (running tetap)
+  else running--;
+}
+
+/** Tutup semua Chromium sekarang (shutdown service / akhir tes). Render yang sedang berjalan akan gagal. */
 export async function closePdfBrowser() {
-  if (browser) await (await browser).close().catch(() => undefined);
-  browser = null;
+  clearIdle();
+  const slots = [...live];
+  current = null;
+  await Promise.all(slots.map(closeSlot));
+}
+
+/** Diagnostik (tes/ops): jumlah browser hidup, render aktif & antrean. */
+export function pdfBrowserStats() {
+  return { browsers: live.size, active: running, queued: waiters.length, currentRenders: current?.renders ?? 0 };
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -109,7 +221,20 @@ export function headerFooter(f: PdfFooter): { headerTemplate: string; footerTemp
  * Header tiap halaman: logo + nomor kontrak; footer: QR verifikasi, nomor kontrak, versi, SHA-256 ringkas, "Halaman x dari y".
  */
 export async function renderPdf(html: string, footer: PdfFooter): Promise<{ pdf: Buffer; blocked: string[] }> {
-  const page = await (await getBrowser()).newPage();
+  await acquireRenderSlot();
+  try {
+    const slot = leaseBrowser(); // bisa melempar (Chromium tidak ditemukan) → slot semaphore tetap dilepas
+    try {
+      return await renderOnPage(await (await slot.browser).newPage(), html, footer);
+    } finally {
+      releaseBrowser(slot);
+    }
+  } finally {
+    releaseRenderSlot();
+  }
+}
+
+async function renderOnPage(page: Page, html: string, footer: PdfFooter): Promise<{ pdf: Buffer; blocked: string[] }> {
   const blocked: string[] = [];
   try {
     await page.setJavaScriptEnabled(false);

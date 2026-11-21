@@ -2,6 +2,7 @@ import { createService, config } from '@rave/service-kit';
 import './common.js';
 import { consumers } from './consumers.js';
 import { contractJobs } from './contract-jobs.js';
+import { closePdfBrowser } from './contract-pdf.js';
 import { bookingTimers } from './jobs.js';
 import { adminRoutes } from './routes-admin.js';
 import { artistRoutes } from './routes-artist.js';
@@ -34,6 +35,8 @@ const svc = createService({
               (SELECT count(*) FROM disputes WHERE status = 'OPEN')::int AS disputes_open`,
   )) ?? {},
   seed,
+  // SIGTERM/SIGINT → service-kit menutup HTTP & bus lalu memanggil ini: jangan tinggalkan proses Chromium yatim.
+  onShutdown: () => closePdfBrowser(),
 });
 
 await svc.start();

@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { LOCKED_CLAUSE_TEXT, renderContractHtml, riderHtml } from './contract-template.js';
-import { closePdfBrowser, findChromium, normalizePdfDates, pdfDate, renderPdf } from './contract-pdf.js';
+import { closePdfBrowser, findChromium, normalizePdfDates, pdfBrowserStats, pdfDate, renderPdf } from './contract-pdf.js';
 import { attestationSigners, maskIp, maskUserId, renderFinalPdf, renderSpkPdf, type SignatureRow } from './contract-jobs.js';
 import { createHash } from 'node:crypto';
 import { putContractFile, readContractFile, signFileToken, verifyFileToken } from './contract-storage.js';
@@ -224,4 +224,26 @@ describe.skipIf(!chromium)('render PDF (Chromium nyata)', () => {
     expect(blocked.length).toBeGreaterThan(0);
     expect(blocked.every((u) => u.includes('127.0.0.1:9'))).toBe(true);
   }, 60_000);
+  it('20 render berturut-turut dengan recycle browser: hash tetap sama, tidak ada Chromium tertinggal (#4)', async () => {
+    const prev = process.env.CONTRACT_PDF_MAX_RENDERS;
+    process.env.CONTRACT_PDF_MAX_RENDERS = '6'; // memaksa 3× recycle dalam 20 render
+    try {
+      await closePdfBrowser();
+      const html = await renderContractHtml(base(), opts);
+      const f = { contractNo: 'RAVE/SPK/202610/ABCD1234', version: 2, note: 'DRAF', fixedDate: base().generated_at };
+      const hashes = new Set<string>();
+      for (let i = 0; i < 20; i++) hashes.add(createHash('sha256').update((await renderPdf(html, f)).pdf).digest('hex'));
+      expect(hashes.size).toBe(1); // deterministik lintas instance Chromium
+      // Konkuren: semaphore membatasi, semua selesai, hash sama.
+      const par = await Promise.all(Array.from({ length: 4 }, () => renderPdf(html, f)));
+      for (const r of par) expect(hashes.has(createHash('sha256').update(r.pdf).digest('hex'))).toBe(true);
+      expect(pdfBrowserStats()).toMatchObject({ active: 0, queued: 0 });
+      expect(pdfBrowserStats().browsers).toBeLessThanOrEqual(1);
+      await closePdfBrowser();
+      expect(pdfBrowserStats().browsers).toBe(0);
+    } finally {
+      if (prev === undefined) delete process.env.CONTRACT_PDF_MAX_RENDERS;
+      else process.env.CONTRACT_PDF_MAX_RENDERS = prev;
+    }
+  }, 300_000);
 });
