@@ -5,6 +5,16 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-21
+
+### Fitur
+
+- **royalty:** royalti streaming bulanan + Laporan Penggunaan Musik LMKN (BRD §4.3, §7.5, REQ-ROY-02..04) (c4df5ee)
+- **pro:** RAVE Pro — langganan B2B organisasi (BRD §4.1, REQ-PAY-03) (8544424)
+- **iam:** verifikasi akun (badge Verified) sekaligus KYC identitas (NIK) + OTP email/WhatsApp (1964adb)
+
+### Catatan rilis
+
 ### Fitur
 
 - **royalty:** Royalti streaming bulanan (BRD §4.3, §7.5, REQ-ROY-02..04): periode bulan WIB, atribusi pendapatan Premium (DPP prorata) & iklan (per impresi) ke pendengar, UCPS hybrid / pro-rata, split MASTER/PUBLISHING per lagu (ditahan sampai split disetujui, dilepas otomatis), pihak belum terdaftar diklaim saat mendaftar, cadangan koreksi + pelepasan otomatis, PPh & ambang terutang (dibawa, tidak hangus), kontrol ganda hitung/setujui, terbit otomatis tgl statement, jurnal ledger & wallet sumber royalti, anomali untuk review Finance, ekspor rincian, Laporan Penggunaan Musik LMKN (.xlsx template resmi PP 56/2021 terisi otomatis) & log CSV untuk unggah massal SILM; Studio → Royalti (statement per lagu/sumber/kota, CSV, cetak), Back Office → Royalti (meja kerja periode); izin baru `royalty.manage`
