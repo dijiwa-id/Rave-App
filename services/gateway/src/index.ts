@@ -3,6 +3,7 @@
  * rate limit (lebih ketat di endpoint login & tiket), request-id, CORS.
  * Endpoint /internal/* TIDAK pernah diteruskan.
  */
+import { corsOrigins } from './cors.js';
 import cors from '@fastify/cors';
 import proxy from '@fastify/http-proxy';
 import rateLimit from '@fastify/rate-limit';
@@ -132,18 +133,8 @@ const settingsPoll = startSettingsPolling('gateway', 30_000);
 settingsPoll.unref();
 const settingsListener = startSettingsListener('gateway', { log: (o, m) => app.log.warn(o, m) });
 
-/**
- * CORS: `CORS_ORIGINS` (daftar origin dipisah koma, atau `*`). Default dev: semua origin; default produksi: hanya
- * PUBLIC_WEB_URL — web produksi dilayani nginx dari origin yang sama, jadi origin asing tidak perlu (dan tidak boleh) lolos.
- */
-function corsOrigin(): boolean | string[] {
-  const raw = process.env.CORS_ORIGINS?.trim();
-  if (raw === '*') return true;
-  if (raw) return raw.split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean);
-  if (config.isDev) return true;
-  return process.env.PUBLIC_WEB_URL ? [new URL(process.env.PUBLIC_WEB_URL).origin] : false;
-}
-await app.register(cors, { origin: corsOrigin(), credentials: true, exposedHeaders: ['Idempotent-Replayed', 'X-Request-Id'] });
+// CORS: lihat cors.ts — origin web (PUBLIC_WEB_URL / CORS_ORIGINS) + origin aplikasi desktop RAVE (Tauri).
+await app.register(cors, { origin: corsOrigins(process.env, config.isDev), credentials: true, exposedHeaders: ['Idempotent-Replayed', 'X-Request-Id'] });
 
 /**
  * Kelas rate limit dari path saja (tanpa query string) dengan pola ber-anchor — query seperti `?x=/ingest/`
