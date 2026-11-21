@@ -1722,6 +1722,72 @@ console.log('\n▶ Akses per peran (fan, artis, manajer, promotor, admin, Super 
     check('pencabutan admin → hak Pro berakhir', after.data?.subscription?.entitled === false && after.data?.subscription?.status === 'CANCELLED', after.data?.subscription);
     await call(P, 'POST', `/v1/booking/bookings/${iqPro.data?.id}/cancel`, { reason: 'bersihkan data uji e2e' }).catch(() => null);
   }
+
+  // ---- Royalti streaming bulanan (BRD §4.3, §7.5, REQ-ROY-02..04) ----
+  console.log('\n▶ Royalti streaming');
+  {
+    // Stream qualified dari pendengar Premium → pendapatan langganan teratribusi ke lagu yang ia dengar (UCPS).
+    const PREM = (await login(SEED.emails.premium)).access_token;
+    const ps = await call(PREM, 'POST', '/v1/playback/sessions', { track_id: track.id, quality: 'normal' });
+    const pq = await call(PREM, 'POST', '/v1/events/play', {
+      events: [
+        { session_id: ps.data?.session_id, track_id: track.id, type: 'start', position_ms: 0, played_ms: 0, at: new Date().toISOString() },
+        { session_id: ps.data?.session_id, track_id: track.id, type: 'progress', position_ms: 60000, played_ms: 60000, at: new Date().toISOString() },
+      ],
+    });
+    check('pendengar Premium menghasilkan stream qualified', pq.data?.qualified === 1, pq.data);
+    const rl = await call(S, 'GET', '/v1/admin/royalty/periods');
+    const per = rl.data?.allow_open_period as string;
+    check('daftar periode royalti (mode dev boleh menghitung bulan berjalan)', rl.status === 200 && /^\d{4}-\d{2}$/.test(per ?? ''), rl.data);
+    const opsCompute = await call(OPS, 'POST', `/v1/admin/royalty/periods/${per}/compute`, { ad_revenue_idr: 0 });
+    check('menghitung royalti butuh izin royalty.manage (OPS 403)', opsCompute.status === 403, opsCompute.status);
+    const closed = await call(S, 'POST', '/v1/admin/royalty/periods/2999-01/compute', { ad_revenue_idr: 0 });
+    check('periode yang belum berakhir ditolak (409)', closed.status === 409, closed.status);
+    // Bersihkan run sebelumnya di DB dev (periode berjalan bisa sudah terbit) — e2e terisolasi selalu mulai kosong.
+    const prevRun = await call(S, 'GET', `/v1/admin/royalty/periods/${per}`);
+    if (prevRun.data?.status === 'PUBLISHED') console.log('  … periode sudah terbit di DB ini — uji hitung dilewati');
+    else {
+      const c1 = await call(S, 'POST', `/v1/admin/royalty/periods/${per}/compute`, { ad_revenue_idr: 1_000_000, note: 'e2e' });
+      const sumGross = (c1.data?.statements ?? []).reduce((a: number, s: any) => a + s.gross, 0);
+      check('draf UCPS: porsi pemegang hak = dibagikan + ditahan + tak bertuan; Σ statement = dibagikan', c1.status === 200 && c1.data?.status === 'DRAFT' && c1.data.rightsholder_pool === c1.data.distributed + c1.data.held + c1.data.unclaimed - c1.data.released_held && sumGross === c1.data.distributed && c1.data.revenue.premium > 0, c1.data && { pool: c1.data.rightsholder_pool, dist: c1.data.distributed, held: c1.data.held, un: c1.data.unclaimed, sumGross, prem: c1.data.revenue?.premium });
+      check('statement: bruto = cadangan + PPh + dibayar + dibawa (− bawaan)', (c1.data?.statements ?? []).every((s: any) => s.gross + s.carry_in === s.reserve + s.withholding + s.payable + s.carry_out), c1.data?.statements?.slice(0, 3));
+      const c2 = await call(S, 'POST', `/v1/admin/royalty/periods/${per}/compute`, { ad_revenue_idr: 1_000_000, premium_revenue_idr: 500_000 });
+      check('hitung ulang dengan angka Premium final Finance', c2.data?.revenue?.premium === 500_000 && c2.data?.revenue?.premium_override === true, c2.data?.revenue);
+      const ap = await call(S, 'POST', `/v1/admin/royalty/periods/${per}/approve`, {});
+      const locked = await call(S, 'POST', `/v1/admin/royalty/periods/${per}/compute`, { ad_revenue_idr: 0 });
+      check('disetujui → angka terkunci (hitung ulang 409)', ap.data?.status === 'APPROVED' && locked.status === 409, [ap.data?.status, locked.status]);
+      const ro = await call(S, 'POST', `/v1/admin/royalty/periods/${per}/reopen`, {});
+      await call(S, 'POST', `/v1/admin/royalty/periods/${per}/approve`, {});
+      const top = [...(c2.data?.statements ?? [])].sort((a: any, b: any) => b.payable - a.payable)[0];
+      const wBefore = top ? Number((await call(S, 'GET', `/v1/finance/wallets/${top.party_id}`)).data?.balances?.royalty ?? 0) : 0;
+      const pb = await call(S, 'POST', `/v1/admin/royalty/periods/${per}/publish`, {});
+      check('dibuka kembali lalu disetujui & diterbitkan', ro.data?.status === 'DRAFT' && pb.data?.status === 'PUBLISHED', [ro.data?.status, pb.data?.status, pb.data?.detail]);
+      const recon = await call(S, 'GET', '/v1/admin/finance/reconciliation');
+      check('ledger seimbang setelah statement royalti', recon.data?.balanced === true, recon.data && { d: recon.data.total_debit, c: recon.data.total_credit });
+      if (top) {
+        const wAfter = Number((await call(S, 'GET', `/v1/finance/wallets/${top.party_id}`)).data?.balances?.royalty ?? 0);
+        check('saldo wallet sumber royalti bertambah sebesar yang dibayarkan', wAfter - wBefore === top.payable, [wBefore, wAfter, top.payable]);
+        const ov = await call(S, 'GET', `/v1/royalty/statements?party_id=${top.party_id}`);
+        const det = await call(S, 'GET', `/v1/royalty/statements/${per}?party_id=${top.party_id}`);
+        const lineSum = (det.data?.lines ?? []).reduce((a: number, l: any) => a + l.total, 0);
+        check('statement pihak: per lagu, per sumber, per kota; Σ baris = bruto', ov.data?.data?.some((r: any) => r.period === per) && lineSum === det.data?.totals?.gross && Array.isArray(det.data?.by_city) && det.data?.by_source?.premium >= 0, [lineSum, det.data?.totals]);
+        const other = await call(P, 'GET', `/v1/royalty/statements?party_id=${top.party_id}`);
+        check('statement pihak lain tertutup (403)', other.status === 403 || top.party_id === SEED.orgs.pensiPromotor, other.status);
+        const csvRes = await fetch(`${BASE}/v1/royalty/statements/${per}/export.csv?party_id=${top.party_id}`, { headers: { authorization: `Bearer ${S}` } });
+        check('statement CSV', csvRes.status === 200 && (await csvRes.text()).startsWith('period,source_period,isrc'), csvRes.status);
+      }
+      const usage = await fetch(`${BASE}/v1/admin/royalty/periods/${per}/usage.csv`, { headers: { authorization: `Bearer ${S}` } });
+      const usageText = (await usage.text()).replace(/^\uFEFF/, '');
+      check('log SILM (CSV, kolom identik sheet "Log Pemakaian Musik")', usage.status === 200 && usageText.startsWith('No,Tanggal (YYYY-MM-DD),Waktu Mulai (HH:MM),Judul Lagu') && usageText.split('\n').length > 2, [usage.status, usageText.slice(0, 120)]);
+      const xl = await fetch(`${BASE}/v1/admin/royalty/periods/${per}/lmkn.xlsx`, { headers: { authorization: `Bearer ${S}` } });
+      const xb = Buffer.from(await xl.arrayBuffer());
+      check('laporan LMKN (.xlsx template resmi terisi)', xl.status === 200 && xb.subarray(0, 2).toString() === 'PK' && (xl.headers.get('content-type') ?? '').includes('spreadsheetml') && xb.length > 5000, [xl.status, xl.headers.get('content-type'), xb.length]);
+      const again = await call(S, 'POST', `/v1/admin/royalty/periods/${per}/publish`, {});
+      check('terbit idempoten (tanpa jurnal ganda)', again.status === 200 && again.data?.status === 'PUBLISHED', again.status);
+      const rep = await call(S, 'GET', '/v1/admin/reports/royalty');
+      check('laporan layanan Royalti', rep.status === 200 && rep.data?.table?.rows?.some((r: any) => r.period === per), rep.status);
+    }
+  }
 }
 
 console.log(`\n${failed ? '\x1b[31m' : '\x1b[32m'}${passed} lulus, ${failed} gagal\x1b[0m\n`);

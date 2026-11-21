@@ -35,7 +35,7 @@ export const RAVE_SERVICES: RaveService[] = [
   { id: 'transcoding', report: true, type: 'music', icon: AudioWaveform, status: 'ready', groups: ['transcoding'] },
   { id: 'upload', type: 'music', icon: UploadCloud, status: 'ready', groups: ['upload'] },
   { id: 'podcast', type: 'music', icon: Mic, status: 'ready', groups: ['podcast'] },
-  { id: 'royalty', report: true, type: 'music', icon: Coins, status: 'soon', groups: ['royalty'] },
+  { id: 'royalty', report: true, type: 'music', icon: Coins, status: 'ready', groups: ['royalty'] },
   { id: 'downloads', type: 'music', icon: Download, status: 'soon', groups: ['subscription'], keys: isDownload },
   // Event & live
   { id: 'live', report: true, type: 'event', icon: Radio, status: 'ready', groups: ['live'] },

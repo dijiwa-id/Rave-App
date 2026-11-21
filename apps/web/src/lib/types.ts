@@ -1010,3 +1010,69 @@ export interface AdminProSummary {
   revenue_30d: number;
   by_plan: Record<ProPlan, number>;
 }
+
+// ---------- Royalti streaming ----------
+export interface RoyaltyStatementRow {
+  period: string;
+  gross: number;
+  reserve: number;
+  withholding: number;
+  carry_in: number;
+  payable: number;
+  carry_out: number;
+  tracks: number;
+  streams: number;
+  issued_at: string | null;
+}
+export interface RoyaltyOverview {
+  data: RoyaltyStatementRow[];
+  summary: { lifetime_payable: number; lifetime_gross: number; reserve_pending: number; next_reserve_release: string | null; carry_forward: number; held: number };
+  held_tracks: { period: string; track_id: string; title: string; total: number; held_reason: 'SPLIT_PENDING' | 'NO_RIGHTS' | 'NO_PAYEE' }[];
+  next: { period: string; status: 'DRAFT' | 'APPROVED' | null; statement_day: number };
+  params: { rightsholder_share_pct: number; publishing_share_pct: number; reserve_pct: number; reserve_release_months: number; min_payable: number; withholding_pct: number };
+}
+export interface RoyaltyStatementDetail {
+  period: string;
+  party: { id: string; name: string; type: 'org' | 'user' };
+  published_at: string;
+  model: 'user_centric' | 'pro_rata';
+  params: { rightsholder_share_pct: number; publishing_share_pct: number; reserve_pct: number; withholding_pct: number };
+  totals: { gross: number; reserve: number; withholding: number; carry_in: number; payable: number; carry_out: number; streams: number; tracks: number };
+  by_source: { premium: number; ads: number; pool: number };
+  by_city: { city: string; amount: number }[];
+  lines: { track_id: string; title: string; isrc: string | null; artist_name: string; type: 'MASTER' | 'PUBLISHING'; pct: number; streams: number; premium: number; ads: number; pool: number; total: number; source_period: string; released_from_hold: boolean }[];
+}
+export interface RoyaltyAnomaly {
+  kind: string;
+  severity: 'info' | 'warn';
+  message: string;
+  ref?: string;
+}
+export interface RoyaltyPeriod {
+  period: string;
+  status: 'DRAFT' | 'APPROVED' | 'PUBLISHED';
+  model: 'user_centric' | 'pro_rata';
+  params: { rightsholder_share_pct: number; publishing_share_pct: number; reserve_pct: number; withholding_pct: number; min_payable: number; hybrid_floor: number };
+  revenue: { premium_auto: number; premium: number; premium_override: boolean; ads: number; attributed: number };
+  rightsholder_pool: number;
+  distributed: number;
+  held: number;
+  unclaimed: number;
+  released_held: number;
+  streams: number;
+  listeners: { total: number; direct: number; pooled: number; premium: number };
+  excluded: { streams: number; listeners: number };
+  tracks: number;
+  parties: number;
+  anomalies: RoyaltyAnomaly[];
+  note: string | null;
+  computed: { at: string; by: string; by_id: string | null } | null;
+  approved: { at: string; by: string } | null;
+  published_at: string | null;
+}
+export interface RoyaltyPeriodDetail extends RoyaltyPeriod {
+  top_tracks: { track_id: string; title: string; isrc: string | null; artist_name: string; streams: number; listeners: number; premium: number; ads: number; pool: number; total: number; held_reason: string | null; per_stream: number | null }[];
+  statements: { party_key: string; party_type: 'org' | 'user'; party_id: string; party_name: string; gross: number; reserve: number; withholding: number; carry_in: number; payable: number; carry_out: number; tracks: number; streams: number }[];
+  unclaimed_parties: { party_email: string; party_name: string; total: number; tracks: number }[];
+  lmkn_missing: string[];
+}

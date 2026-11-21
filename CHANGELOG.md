@@ -7,6 +7,7 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ### Fitur
 
+- **royalty:** Royalti streaming bulanan (BRD §4.3, §7.5, REQ-ROY-02..04): periode bulan WIB, atribusi pendapatan Premium (DPP prorata) & iklan (per impresi) ke pendengar, UCPS hybrid / pro-rata, split MASTER/PUBLISHING per lagu (ditahan sampai split disetujui, dilepas otomatis), pihak belum terdaftar diklaim saat mendaftar, cadangan koreksi + pelepasan otomatis, PPh & ambang terutang (dibawa, tidak hangus), kontrol ganda hitung/setujui, terbit otomatis tgl statement, jurnal ledger & wallet sumber royalti, anomali untuk review Finance, ekspor rincian, Laporan Penggunaan Musik LMKN (.xlsx template resmi PP 56/2021 terisi otomatis) & log CSV untuk unggah massal SILM; Studio → Royalti (statement per lagu/sumber/kota, CSV, cetak), Back Office → Royalti (meja kerja periode); izin baru `royalty.manage`
 - **pro:** RAVE Pro — langganan B2B organisasi (BRD §4.1, REQ-PAY-03): paket Starter/Pro/Label bulanan & tahunan, checkout lewat invoice SUBSCRIPTION (sandbox/Midtrans), PPN keluaran terpisah di ledger, upgrade prorata, downgrade terjadwal, berhenti/lanjutkan, tagihan perpanjangan otomatis, masa tenggang & kedaluwarsa
 - **booking:** take rate Pro per booking (promotor 3%, artis 5% bila org artis/manajemennya Pro), dikunci di kontrak; Insight Pro (konversi, GMV, pipeline, waktu ke kontrak, kota, kategori, roster, mitra) + ekspor CSV
 - **iam:** status Pro di profil org (`/v1/me`), batas roster multi-roster per paket, pencarian org Back Office

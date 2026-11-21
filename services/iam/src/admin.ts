@@ -33,6 +33,22 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
     return o;
   });
 
+  // Internal (finance — royalti): anggota Premium untuk atribusi pendapatan langganan per pendengar.
+  app.get('/internal/royalty/premium', { preHandler: requireService }, async () => {
+    const rows = await db.query(
+      `SELECT id AS user_id, member_type, member_updated_at, member_until FROM users WHERE deleted_at IS NULL AND member_type <> 'FREE'`,
+    );
+    return { data: rows };
+  });
+
+  // Internal (finance — royalti): email pihak split → akun RAVE (pihak yang belum terdaftar tidak dikembalikan).
+  app.post('/internal/users/resolve-emails', { preHandler: requireService }, async (req) => {
+    const b = z.object({ emails: z.array(z.string().email()).max(2000) }).parse(req.body);
+    if (!b.emails.length) return { data: [] };
+    const rows = await db.query(`SELECT id, lower(email) AS email, display_name FROM users WHERE deleted_at IS NULL AND lower(email) = ANY($1::text[])`, [b.emails.map((e) => e.toLowerCase())]);
+    return { data: rows.map((r) => ({ email: r.email, user_id: r.id, name: r.display_name })) };
+  });
+
   // Internal: kontak pengguna untuk worker notifikasi (email/WhatsApp). Tidak diteruskan gateway (/internal/*).
   app.get('/internal/users/:id/contact', { preHandler: requireService }, async (req) => {
     const { id } = req.params as { id: string };

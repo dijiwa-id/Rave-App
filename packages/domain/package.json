@@ -21,6 +21,7 @@
     "./integrations": "./src/integrations.ts",
     "./reports": "./src/reports.ts",
     "./podcast": "./src/podcast.ts",
-    "./pro": "./src/pro.ts"
+    "./pro": "./src/pro.ts",
+    "./royalty": "./src/royalty.ts"
   }
 }

@@ -87,6 +87,11 @@ export interface DomainEvents {
   /** Tagihan perpanjangan RAVE Pro diterbitkan (pengingat ke pemilik organisasi). */
   'finance.pro.renewal_due': { orgId: string; plan: 'STARTER' | 'PRO' | 'LABEL'; invoiceId: string; amount: number; dueAt: string; periodEnd: string };
 
+  /** Statement royalti periode terbit (BRD §7.5): royalti masuk wallet pihak penerima. */
+  'finance.royalty.statement_issued': { period: string; partyId: string; partyType: 'org' | 'user'; gross: number; payable: number; carryOut: number; held: number };
+  /** Cadangan koreksi periode lama dilepas ke wallet. */
+  'finance.royalty.reserve_released': { period: string; partyId: string; partyType: 'org' | 'user'; amount: number; payable: number };
+
   // Live streaming
   'live.stream.started': { streamId: string; orgId: string; artistId: string | null; title: string };
   'live.stream.ended': { streamId: string; reason: string; durationS: number; peakViewers: number };

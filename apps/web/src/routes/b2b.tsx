@@ -38,6 +38,7 @@ const studio = {
   profile: () => import('@/pages/studio/Profile'),
   podcasts: () => import('@/pages/studio/Podcasts'),
   podcaster: () => import('@/pages/studio/PodcasterStudio'),
+  royalty: () => import('@/pages/studio/Royalty'),
 };
 const promotor = {
   layout: () => import('@/pages/promotor/PromotorLayout'),
@@ -52,6 +53,7 @@ const promotor = {
 const pro = { page: () => import('@/pages/pro/RavePro'), insights: () => import('@/pages/pro/ProInsights') };
 const admin = () => import('@/pages/admin/Admin');
 const adminPro = () => import('@/pages/admin/AdminPro');
+const adminRoyalty = () => import('@/pages/admin/AdminRoyalty');
 const adminLive = () => import('@/pages/admin/AdminLive');
 const adminAds = () => import('@/pages/admin/AdminAds');
 const adminEditorial = () => import('@/pages/admin/AdminEditorial');
@@ -98,6 +100,7 @@ export const b2bRoutes: RouteObject[] = [
           ]),
           { path: 'pro', element: named(pro.page, 'StudioPro') },
           { path: 'finance', element: named(studio.finance, 'default') },
+          { path: 'royalty', element: named(studio.royalty, 'default') },
           { path: 'team', element: named(studio.team, 'default') },
           { path: 'live', element: named(live, 'StudioLive') },
           { path: 'live/:id', element: named(live, 'StudioLiveDetail') },
@@ -155,6 +158,7 @@ export const b2bRoutes: RouteObject[] = [
               access(['live.moderate'], [{ path: 'live', element: named(adminLive, 'AdminLive') }]),
               access(['finance.view', 'finance.refund', 'finance.payout'], [{ path: 'finance', element: named(admin, 'AdminFinance') }]),
               access(['finance.view', 'billing.manage'], [{ path: 'pro', element: named(adminPro, 'AdminPro') }]),
+              access(['royalty.manage', 'finance.view'], [{ path: 'royalty', element: named(adminRoyalty, 'AdminRoyalty') }]),
               access(['users.view'], [{ path: 'users', element: named(admin, 'AdminUsers') }]),
               access(['users.verify'], [{ path: 'verifications', element: named(admin, 'AdminVerifications') }]),
               access(['audit.view'], [{ path: 'audit', element: named(admin, 'AdminAudit') }]),

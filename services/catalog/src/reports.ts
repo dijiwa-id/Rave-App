@@ -54,6 +54,21 @@ export async function reportRoutes(app: FastifyInstance, { db }: ServiceContext)
     };
   });
 
+  // Registri hak untuk royalti (finance): lagu + ISRC + artis + org artis + split MASTER/PUBLISHING (REQ-ROY-01).
+  app.post('/internal/royalty/rights', { preHandler: requireService }, async (req) => {
+    const b = z.object({ track_ids: z.array(z.string().uuid()).max(5000) }).parse(req.body);
+    if (!b.track_ids.length) return { data: [] };
+    const tracks = await db.query(
+      `SELECT t.id AS track_id, t.title, t.isrc, t.duration_ms, t.artist_id, a.name AS artist_name, a.org_id AS artist_org_id, r.title AS release_title, r.upc, r.label
+         FROM tracks t JOIN artists a ON a.id = t.artist_id JOIN releases r ON r.id = t.release_id WHERE t.id = ANY($1)`,
+      [b.track_ids],
+    );
+    const shares = await db.query(`SELECT track_id, type, party_name, lower(email) AS email, pct, approved_at FROM rights_shares WHERE track_id = ANY($1) ORDER BY type, created_at`, [b.track_ids]);
+    const by = new Map<string, any[]>();
+    for (const s of shares) by.set(s.track_id, [...(by.get(s.track_id) ?? []), { type: s.type, party_name: s.party_name, email: s.email, pct: Number(s.pct), approved: !!s.approved_at }]);
+    return { data: tracks.map((t) => ({ ...t, shares: by.get(t.track_id) ?? [] })) };
+  });
+
   // Nama lagu & artis untuk laporan service lain (token service).
   app.post('/internal/names', { preHandler: requireService }, async (req) => {
     const b = z.object({ tracks: z.array(z.string().uuid()).max(200).default([]), artists: z.array(z.string().uuid()).max(200).default([]) }).parse(req.body);

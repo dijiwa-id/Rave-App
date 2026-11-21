@@ -59,39 +59,5 @@ export async function reportRoutes(app: FastifyInstance, { db }: ServiceContext)
   });
 
   // Pratinjau dasar royalti (perhitungan & statement belum dibangun): stream qualified per artis bulan berjalan.
-  app.get('/v1/admin/reports/royalty', { preHandler: requireSuperAdmin }, async (): Promise<ServiceReport> => {
-    const k = await db.one(
-      `SELECT count(*) FILTER (WHERE NOT suspicious)::int AS streams, count(DISTINCT artist_id) FILTER (WHERE NOT suspicious)::int AS artists,
-              count(*) FILTER (WHERE suspicious)::int AS excluded, count(DISTINCT user_id) FILTER (WHERE NOT suspicious)::int AS listeners
-         FROM qualified_streams WHERE at >= date_trunc('month', now() AT TIME ZONE 'Asia/Jakarta') AT TIME ZONE 'Asia/Jakarta'`,
-    );
-    const rows = await db.query(
-      `SELECT artist_id, count(*)::int AS streams, count(DISTINCT user_id)::int AS listeners, count(DISTINCT track_id)::int AS tracks
-         FROM qualified_streams WHERE NOT suspicious AND at >= date_trunc('month', now() AT TIME ZONE 'Asia/Jakarta') AT TIME ZONE 'Asia/Jakarta'
-        GROUP BY 1 ORDER BY 2 DESC LIMIT 30`,
-    );
-    const total = k?.streams || 1; // porsi terhadap SEMUA stream qualified bulan ini, bukan hanya 30 teratas
-    const n = await names([], rows.map((r) => r.artist_id));
-    return {
-      kpis: [
-        { label: L('Stream qualified bulan ini', 'Qualified streams this month'), value: k?.streams ?? 0, format: 'num' },
-        { label: L('Artis menerima stream', 'Artists with streams'), value: k?.artists ?? 0, format: 'num' },
-        { label: L('Pendengar unik', 'Unique listeners'), value: k?.listeners ?? 0, format: 'num' },
-        { label: L('Dikecualikan (fraud)', 'Excluded (fraud)'), value: k?.excluded ?? 0, format: 'num', tone: (k?.excluded ?? 0) > 0 ? 'warn' : 'neutral' },
-      ],
-      table: {
-        title: L('Dasar pembagian per artis — bulan berjalan (pratinjau)', 'Split basis per artist — month to date (preview)'),
-        columns: [
-          { key: 'artist', label: L('Artis', 'Artist') },
-          { key: 'streams', label: L('Stream', 'Streams'), format: 'num' },
-          { key: 'share', label: L('Porsi', 'Share'), format: 'pct' },
-          { key: 'listeners', label: L('Pendengar', 'Listeners'), format: 'num' },
-          { key: 'tracks', label: L('Lagu', 'Tracks'), format: 'num' },
-        ],
-        rows: rows.map((r) => ({ artist: n.artists[r.artist_id] ?? short(r.artist_id), streams: r.streams, share: (r.streams * 100) / total, listeners: r.listeners, tracks: r.tracks })),
-        empty: L('Belum ada stream qualified bulan ini', 'No qualified streams this month'),
-      },
-      generated_at: new Date().toISOString(),
-    };
-  });
+  // Laporan royalti dilayani finance (pemilik periode & statement): GET /v1/admin/reports/royalty.
 }

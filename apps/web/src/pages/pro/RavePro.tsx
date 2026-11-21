@@ -172,7 +172,7 @@ function RavePro({ org, picker }: { org: OrgClaim; picker?: ReactNode }) {
 
 function Notice({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'amber' }) {
   return (
-    <p className={cx('rounded-none border p-3 text-sm', tone === 'amber' ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-b2b-line bg-b2b-card text-b2b-muted')}>{children}</p>
+    <p className={cx('rounded-none border p-3 text-sm', tone === 'amber' ? 'border-amber-500/70 bg-amber-500/10 text-b2b-ink' : 'border-b2b-line bg-b2b-card text-b2b-muted')}>{children}</p>
   );
 }
 

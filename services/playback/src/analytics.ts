@@ -238,6 +238,33 @@ export async function analyticsRoutes(app: FastifyInstance, ctx: ServiceContext)
       if (!req.user.roles.includes('service') && !req.user.roles.includes('admin')) throw forbidden('Khusus service');
     });
 
+    // Dasar royalti periode (finance, BRD §7.5): stream qualified non-fraud per pendengar × lagu, per kota, dan jumlah yang dikecualikan.
+    s.get('/internal/royalty/streams', async (req) => {
+      const q = z.object({ from: z.string().datetime(), to: z.string().datetime() }).parse(req.query);
+      const rows = await db.query(
+        `SELECT user_id, track_id, artist_id, count(*)::int AS n FROM qualified_streams
+          WHERE NOT suspicious AND at >= $1 AND at < $2 GROUP BY 1, 2, 3`,
+        [q.from, q.to],
+      );
+      const cities = await db.query(
+        `SELECT track_id, coalesce(city, '—') AS city, count(*)::int AS n FROM qualified_streams
+          WHERE NOT suspicious AND at >= $1 AND at < $2 GROUP BY 1, 2`,
+        [q.from, q.to],
+      );
+      const ex = await db.one(
+        `SELECT count(*)::int AS streams, count(DISTINCT user_id)::int AS listeners FROM qualified_streams WHERE suspicious AND at >= $1 AND at < $2`,
+        [q.from, q.to],
+      );
+      // Log harian untuk laporan penggunaan LMKN: per tanggal (WIB) × lagu, jam pemutaran pertama & frekuensi.
+      const usage = await db.query(
+        `SELECT to_char((at AT TIME ZONE 'Asia/Jakarta')::date, 'YYYY-MM-DD') AS day, track_id,
+                to_char(min(at) AT TIME ZONE 'Asia/Jakarta', 'HH24:MI') AS first_time, count(*)::int AS plays, count(DISTINCT user_id)::int AS listeners
+           FROM qualified_streams WHERE NOT suspicious AND at >= $1 AND at < $2 GROUP BY 1, 2 ORDER BY 1, 3`,
+        [q.from, q.to],
+      );
+      return { rows, cities, usage, excluded: { streams: ex?.streams ?? 0, listeners: ex?.listeners ?? 0 } };
+    });
+
     s.get('/internal/analytics/artists/:artistId/epk', async (req) => {
       const { artistId } = req.params as { artistId: string };
       const { id } = z.object({ id: z.string().uuid() }).parse({ id: artistId });

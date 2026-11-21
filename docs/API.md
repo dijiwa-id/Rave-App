@@ -369,6 +369,22 @@ Pemilik data: **finance** (`pro_subscriptions`, `pro_orders`). Domain murni: `pa
 
 Aturan: pembayaran → `finance.pro.changed` (booking: proyeksi take rate; iam: `orgs[].pro` & batas roster; notification). Take rate Pro dihitung per pihak dan **dikunci di booking saat kontrak dibuat** (`bookings.commission_*`). Job `pro-lifecycle` (tiap menit): tagihan perpanjangan `subscription.pro_renewal_invoice_days` hari sebelum akhir periode (`finance.pro.renewal_due`), masa tenggang `subscription.pro_grace_days`, lalu `EXPIRED`. Jurnal: kas → `revenue:subscription:pro` + `liability:tax:ppn_out`. Batas roster manajemen tanpa Pro / per paket → **402** `PRO_REQUIRED` di `POST /v1/orgs/:id/manage-artist`.
 
+### 6b. Royalti streaming bulanan (BRD §4.3, §7.5, REQ-ROY-02..04)
+
+Pemilik: **finance** (`royalty_periods`, `royalty_tracks`, `royalty_lines`, `royalty_statements`, `royalty_reserves`). Domain murni: `packages/domain/src/royalty.ts`. Data mentah dari service pemilik lewat internal API: playback `/internal/royalty/streams` (stream qualified non-fraud per pendengar×lagu & kota), iam `/internal/royalty/premium` + `/internal/users/resolve-emails`, ads `/internal/royalty/impressions` (impresi berbayar selesai), catalog `/internal/royalty/rights` (ISRC, org artis, split).
+
+| Endpoint | Akses | Keterangan |
+|---|---|---|
+| `GET /v1/royalty/statements?party_id=` | anggota org / akun sendiri / admin keuangan | Daftar statement terbit, ringkasan (diterima, cadangan, dibawa, ditahan), lagu tertahan, periode berikutnya |
+| `GET /v1/royalty/statements/:period?party_id=` · `/export.csv` | idem | Statement: waterfall bruto→saldo, per sumber, per kota, per lagu × hak |
+| `GET /v1/admin/royalty/periods` · `/:period` | `royalty.manage` / `finance.view` | Daftar & detail periode (parameter beku, pendapatan, anomali, lagu teratas, statement pihak, pihak belum terdaftar) |
+| `POST /v1/admin/royalty/periods/:period/compute` `{ad_revenue_idr, premium_revenue_idr?, note?}` | `royalty.manage` | Hitung/hitung ulang draf (hanya periode yang sudah berakhir; dev: `ROYALTY_ALLOW_OPEN_PERIOD`) |
+| `POST …/approve` · `/reopen` · `/publish` | `royalty.manage` | Setujui (penyetuju ≠ penghitung kecuali Super Admin) · kembali ke draf · terbitkan (idempoten) |
+| `GET …/lines.csv` · `/lmkn.xlsx` · `/usage.csv` | `royalty.manage` / `finance.view` | Rincian per pihak · **Laporan Penggunaan Musik LMKN** (template resmi `services/finance/assets/lmkn-template.xlsx` terisi: identitas & ringkasan, log harian per lagu — tanggal, jam pertama, judul, pencipta, artis, label, frekuensi, durasi, jenis "Rekaman", ISRC) · log yang sama sebagai CSV untuk unggah massal SILM |
+| `GET /v1/admin/reports/royalty` | Super Admin | Laporan layanan |
+
+Aturan: pihak split tanpa email → org artis; email terdaftar → akun pengguna; email belum terdaftar → **tak bertuan** (ditahan, diklaim di periode berikutnya setelah mendaftar). Split belum disetujui / registri kosong → lagu **ditahan** dan dilepas otomatis saat lengkap. Jurnal terbit: `expense:royalty:streaming` (+ pelepasan `liability:royalty:held|unclaimed`, + `liability:royalty:carry:<pihak>`) → `liability:payable:<pihak>:royalty`, `liability:royalty:reserve:<pihak>`, `liability:tax_withholding:pph`, `liability:royalty:carry:<pihak>`. Job `royalty-cycle`: draf otomatis tgl `royalty.compute_day`, terbit otomatis tgl `royalty.statement_day` bila sudah disetujui, pelepasan cadangan setelah `royalty.reserve_release_months`. Event: `finance.royalty.statement_issued`, `finance.royalty.reserve_released` (notifikasi).
+
 ## 7. Ticketing (REQ-EVT-01, REQ-TIX-01..05)
 
 | Method & Path | Aktor | Body / Query | Respons |

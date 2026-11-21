@@ -1,4 +1,4 @@
-import { createService, config, type ServiceContext } from '@rave/service-kit';
+import { createService, config, requireService, z, type ServiceContext } from '@rave/service-kit';
 import type { FastifyInstance } from 'fastify';
 import { adminRoutes } from './admin.js';
 import { seed } from './seed.js';
@@ -15,6 +15,16 @@ const svc = createService({
   routes: async (app: FastifyInstance, ctx: ServiceContext) => {
     await servingRoutes(app, ctx);
     await adminRoutes(app, ctx);
+    // Internal (finance — royalti): impresi iklan berbayar yang selesai per pendengar → atribusi pendapatan iklan (BRD §4.3).
+    app.get('/internal/royalty/impressions', { preHandler: requireService }, async (req) => {
+      const q = z.object({ from: z.string().datetime(), to: z.string().datetime() }).parse(req.query);
+      const rows = await ctx.db.query(
+        `SELECT i.user_id, count(*)::int AS n FROM impressions i JOIN campaigns c ON c.id = i.campaign_id
+          WHERE NOT c.is_house AND i.completed_at IS NOT NULL AND i.served_at >= $1 AND i.served_at < $2 GROUP BY 1`,
+        [q.from, q.to],
+      );
+      return { data: rows };
+    });
   },
   // Hitungan "lagu" untuk masa bebas iklan & jarak antar-jeda berasal dari server (bukan laporan klien).
   consumers: () => ({

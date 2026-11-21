@@ -40,7 +40,7 @@ export const ROUTES: [prefix: string, upstream: Upstream][] = [
   ['/v1/admin/catalog', 'catalog'],
   // Laporan sub-layanan (Super Admin → Pengaturan Layanan) — dilayani service pemilik datanya.
   ['/v1/admin/reports/streaming', 'playback'],
-  ['/v1/admin/reports/royalty', 'playback'],
+  ['/v1/admin/reports/royalty', 'finance'],
   ['/v1/admin/reports/transcoding', 'catalog'],
   ['/v1/admin/reports/live', 'live'],
   ['/v1/admin/reports/booking', 'booking'],
@@ -60,6 +60,8 @@ export const ROUTES: [prefix: string, upstream: Upstream][] = [
   ['/v1/webhooks/pg', 'finance'],
   ['/v1/admin/finance', 'finance'],
   ['/v1/pro', 'finance'],
+  ['/v1/royalty', 'finance'],
+  ['/v1/admin/royalty', 'finance'],
   ['/v1/admin/pro', 'finance'],
   ['/v1/ticketing', 'ticketing'],
   ['/v1/admin/ticketing', 'ticketing'],

@@ -131,6 +131,32 @@ export function consumers(ctx: ServiceContext): Consumers {
         link: '/promotor/invoices',
       });
     },
+    // ---- Royalti streaming (BRD §7.5) ----
+    'finance.royalty.statement_issued': async (e, tx) => {
+      const p = e.payload;
+      const to = p.partyType === 'org' ? await orgRecipients(tx, p.partyId) : [p.partyId];
+      if (!to.length) return;
+      const bulan = periodeLabel(p.period);
+      await notifyUsers(tx, to, e.id, {
+        category: 'payment',
+        title: `Statement royalti ${bulan} terbit`,
+        body: p.payable > 0
+          ? `${rupiah(p.payable)} masuk ke saldo royalti Anda (bruto ${rupiah(p.gross)}). Lihat rincian per lagu, kota & sumber.`
+          : `Royalti ${rupiah(p.gross)} tercatat; total di bawah ambang terutang sehingga dibawa ke statement berikutnya (tidak hangus).`,
+        link: p.partyType === 'org' ? '/studio/royalty' : '/settings',
+      });
+    },
+    'finance.royalty.reserve_released': async (e, tx) => {
+      const p = e.payload;
+      const to = p.partyType === 'org' ? await orgRecipients(tx, p.partyId) : [p.partyId];
+      if (!to.length) return;
+      await notifyUsers(tx, to, e.id, {
+        category: 'payment',
+        title: 'Cadangan koreksi royalti dilepas',
+        body: `${rupiah(p.payable)} dari cadangan periode ${periodeLabel(p.period)} masuk ke saldo royalti Anda.`,
+        link: p.partyType === 'org' ? '/studio/royalty' : '/settings',
+      });
+    },
     // ---- RAVE Pro (langganan organisasi) ----
     'finance.pro.changed': async (e, tx) => {
       const p = e.payload;
@@ -360,3 +386,5 @@ async function proLink(tx: Client, orgId: string): Promise<string> {
   const r = await tx.query(`SELECT org_type FROM org_members WHERE org_id=$1 LIMIT 1`, [orgId]);
   return ['PROMOTOR', 'VENUE'].includes(r.rows[0]?.org_type) ? '/promotor/pro' : '/studio/pro';
 }
+/** 'YYYY-MM' → 'November 2026'. */
+const periodeLabel = (period: string) => new Date(`${period}-15T00:00:00Z`).toLocaleDateString('id-ID', { month: 'long', year: 'numeric', timeZone: 'UTC' });
