@@ -5,6 +5,44 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-11-21
+
+### Fitur
+
+- **web:** tata letak seragam halaman bergabung Promotor, Artis & Podcaster (120dc76)
+- **iam:** verifikasi 2 langkah (2FA) wajib setelah login + kode pemulihan (6cffc65)
+- **iam:** masuk dengan aplikasi authenticator (TOTP, RFC 6238) (93ba4d1)
+- **landing:** popup kota bergantian di Audience Match, kolase Join the next dengan kaset berwarna, walkman & turntable (e3cc84f)
+- Podcaster, Back Office editorial & podcast, kebijakan iklan tier Gratis/anonim, unggah berkas iklan (450f0ef)
+- **library:** API editor playlist editorial untuk Back Office (izin library.curate) (60ad393)
+- **iam:** login sosial Google/Facebook/Apple untuk web, desktop & mobile (9ebcc16)
+- spektrum per lagu, player web dirombak, kebijakan kualitas & Studio rilis baru (768f8fd)
+- **demo:** snapshot data demo dari DB dev + skrip export/import (a738396)
+- **ops:** deploy VPS kecil tanpa build di server (scripts/vps.sh) (b232756)
+- **web:** sistem tombol seragam, Kategori Jelajahi baru, tema gelap stabil (13af416)
+- **catalog:** taksonomi genre bersama — 79 genre kekinian global & Indonesia (b1033dc)
+
+### Perbaikan
+
+- **iam:** onboarding hanya untuk login pertama (75eab8d)
+- **platform:** cek kesehatan gateway via GATEWAY_URL, bukan 127.0.0.1 (d5d3d22)
+- **onboarding:** artis favorit boleh dilewati saat katalog kosong (81028f3)
+- **ads:** promosi internal tanpa frequency cap agar iklan setiap lagu tetap tayang; tunggu event complete sebelum jeda (663e8d5)
+- **ops:** vps.sh — arsip storage lewat stdout, skrip remote sebagai berkas (b6691c4)
+- **catalog:** sinkronkan taksonomi genre saat boot (produksi tanpa seed) (8ff65ce)
+- **stability:** galat input Postgres jadi 4xx, timeout upstream gateway (e27baf3)
+
+### Performa
+
+- **web:** font di-host sendiri (woff2 latin & latin-ext) (0d5bad9)
+- **live:** kanal demo dari loop pra-render tanpa encode ulang (8f96b0a)
+
+### Lain-lain
+
+- bersihkan dead code (import, parameter, export & komponen tak terpakai) (9c4071e)
+
+### Catatan rilis
+
 ### Diperbaiki
 - **Iklan "setiap lagu" tier Gratis berhenti setelah beberapa lagu**: promosi internal RAVE kini tidak terkena frequency
   cap harian (dirotasi: yang paling jarang tampil ke pendengar hari itu), sehingga slot iklan tetap terisi setelah
