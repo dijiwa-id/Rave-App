@@ -1,0 +1,30 @@
+{
+  "generated_at": "2026-11-21T17:57:27.860Z",
+  "desktop": {
+    "platform": "windows",
+    "version": "0.4.2",
+    "installer": {
+      "file": "RAVE_0.4.2_x64-setup.exe",
+      "url": "/downloads/desktop/RAVE_0.4.2_x64-setup.exe",
+      "size": 3120227,
+      "sha256": "80b9ebe7ed9e0722fc40686ac316e98438cfc97f72e79aebc76c65b88472f371"
+    },
+    "msi": {
+      "file": "RAVE_0.4.2_x64_en-US.msi",
+      "url": "/downloads/desktop/RAVE_0.4.2_x64_en-US.msi",
+      "size": 4009984,
+      "sha256": "6ce79867413051305ed026feb955d244bff5418ddf7d3459c6d47cfb63ae5c35"
+    }
+  },
+  "android": {
+    "version": "0.3.2",
+    "build": "11",
+    "apk": {
+      "file": "RAVE_0.3.2_android-arm64.apk",
+      "url": "/downloads/mobile/RAVE_0.3.2_android-arm64.apk",
+      "size": 22695205,
+      "sha256": "cc5bebc4265f26f4ff6f55c8e95f5e41bd44f47494c626b1d44b1e040324d5f5"
+    },
+    "min_android": "7.0"
+  }
+}

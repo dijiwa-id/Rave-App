@@ -29,7 +29,7 @@ Google native) dan menampilkan "belum tersedia" sampai server-nya diperbarui. Pe
 | Alur bisnis | Midtrans `deny` tidak lagi membatalkan booking/order (uji di sandbox!), kunci wallet denda artis, batas tiket per akun, event hanya diedit editor org, chat siaran bertiket butuh akses, event iklan `complete` wajib `start` | — |
 | Keuangan | Setting `finance.subscription_ppn_pct` (11) & `finance.artist_cancel_penalty_pct` (25, dibekukan per kontrak) — Super Admin → Monetisasi → Keuangan | — |
 | Bagikan | Tombol bagikan Instagram/X/Facebook di setiap lagu (web, desktop, mobile); `GET/POST /v1/catalog/tracks/:id/share`, halaman Open Graph `/s/t/:id` + gambar pratinjau berlogo RAVE asli `/v1/catalog/share/t/:id/og.jpg` (komposit ffmpeg, aset `services/catalog/assets/share-logo.png`), laporan `GET /v1/admin/reports/share`; Super Admin → Pengaturan Layanan → Bagikan ke Medsos | migrasi catalog `019_track_shares` (otomatis); image **gateway** (rute laporan) & **web** (nginx `/s/t/`) wajib dibangun ulang |
-| Unduhan aplikasi | Folder `downloads/` (installer Windows + APK) disajikan di `/downloads/`, menu unduh di player, halaman `/unduh` | folder `./downloads` di server (bind mount `./downloads:/srv/downloads:ro` di service web) + `npm run apps:publish` |
+| Unduhan aplikasi | Folder `downloads/` (installer Windows + APK) disajikan di `/downloads/`, menu unduh di player, halaman `/unduh` | folder `./downloads` ikut repo (installer desktop 0.4.2 + APK 0.3.2 sudah di-commit) — cukup `git pull`; bind mount `./downloads:/srv/downloads:ro` di service web |
 | Performa (LCP) | Varian gambar WebP `?w=` dari ffmpeg (cache `<UPLOAD_DIR>/variants`), preload gambar hero per rute, satu loader boot | image **catalog** (ffmpeg sudah ada); volume storage bertambah oleh cache varian (aman dihapus, dibuat ulang otomatis) |
 | Desain | Vinyl vintage hyperrealistic (tekstur `public/textures/`) | image **web** |
 
@@ -39,7 +39,6 @@ Google native) dan menampilkan "belum tersedia" sampai server-nya diperbarui. Pe
 git pull rave main                                   # di direktori server
 npm run prod:preflight                               # wajib lolos tanpa BLOCKER (PUBLIC_WEB_URL dkk.)
 npm run prod:backup                                  # dump DB sebelum migrasi (atau scripts/prod.sh backup)
-npm run apps:publish                                 # isi downloads/ (atau salin folder downloads/ dari mesin build)
 npm run prod:build && npm run prod:up                # SEMUA image dibangun ulang (catalog, gateway, web, platform, …)
 npm run prod:smoke
 ```

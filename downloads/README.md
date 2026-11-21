@@ -17,4 +17,5 @@ Perbarui setelah membangun installer/APK baru:
 npm run apps:publish          # salin build terbaru dari ../RAVE-Desktop-apps & ../RAVE-mobile-apps + tulis manifest
 ```
 
-Biner & manifest di-gitignore; salin folder ini ke server bersama deploy (lihat docs/GO-LIVE.md).
+Installer & manifest **ikut di-commit** (installer Windows ±7 MB, APK ±22 MB): setelah `npm run apps:publish`,
+commit folder ini lalu `git pull` di server — tombol unduh langsung menyajikan versi baru.

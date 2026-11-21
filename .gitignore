@@ -15,8 +15,5 @@ storage/
 .claude/scheduled_tasks.lock
 *.tsbuildinfo
 
-# Installer aplikasi (diisi `npm run apps:publish`, disajikan di /downloads/) — biner tidak masuk git.
-downloads/**/*.exe
-downloads/**/*.msi
-downloads/**/*.apk
-downloads/manifest.json
+# Installer aplikasi di downloads/ (diisi `npm run apps:publish`, disajikan di /downloads/) SENGAJA ikut git
+# agar server cukup `git pull` untuk menyajikan versi terbaru — jangan tambahkan aturan ignore untuknya.
