@@ -142,11 +142,14 @@ export function createService(def: ServiceDefinition) {
     await app.register(async (scoped) => {
       await def.routes(scoped, ctx);
     });
+    // Pengaturan platform dimuat SEBELUM menerima permintaan: tanpa ini service sempat melayani nilai bawaan registri
+    // (mis. saklar penjualan yang dimatikan Super Admin terbaca menyala beberapa detik setelah restart/deploy).
+    // Platform belum siap (start bersamaan) → coba lagi hingga ±20 dtk, lalu lanjut dengan bawaan + refresh berkala.
+    for (let i = 0; i < 20 && !(await refreshSettings(def.name)); i++) await new Promise((r) => setTimeout(r, 1000));
     await app.listen({ port: def.port, host: process.env.HOST ?? '0.0.0.0' });
     await bus.startRelay();
-    // Pengaturan platform: snapshot awal + LISTEN/NOTIFY `rave_settings` (setiap replika, termasuk platform —
-    // platform memuat dari DB lewat setSettingsLoader) + event bus + refresh berkala sebagai jaring pengaman.
-    await refreshSettings(def.name);
+    // Lalu LISTEN/NOTIFY `rave_settings` (setiap replika, termasuk platform — platform memuat dari DB lewat
+    // setSettingsLoader) + event bus + refresh berkala sebagai jaring pengaman.
     timers.push(setInterval(() => void refreshSettings(def.name), 60_000));
     settingsListener = startSettingsListener(def.name, { log: (o, m) => log.warn(o, m) });
     const own = def.consumers ? def.consumers(ctx) : {};
