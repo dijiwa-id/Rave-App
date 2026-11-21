@@ -136,8 +136,26 @@ export async function buildMe(q: Q, userId: string) {
 }
 export type Me = NonNullable<Awaited<ReturnType<typeof buildMe>>>;
 
-/** Terbitkan access token (JWT 15 mnt) + refresh token berotasi dalam family yang sama. */
-export async function issueTokens(q: Q, me: Me, familyId: string = uuidv7()) {
+/**
+ * Catat sesi login baru. Onboarding hanya wajib pada login pertama: bila akun sudah pernah login sebelumnya
+ * (`last_login_at` terisi), `onboarded` ditandai true walau onboarding dulu tidak diselesaikan.
+ */
+async function recordLogin(q: Q, me: Me): Promise<Me> {
+  const r = (
+    await q.query(`UPDATE users SET onboarded = onboarded OR last_login_at IS NOT NULL, last_login_at = now() WHERE id = $1 RETURNING onboarded`, [me.id])
+  ).rows[0];
+  return r ? { ...me, onboarded: r.onboarded } : me;
+}
+
+/**
+ * Terbitkan access token (JWT 15 mnt) + refresh token berotasi dalam family yang sama.
+ * Tanpa `familyId` = sesi baru (login) → dicatat sebagai login; dengan `familyId` = rotasi refresh.
+ */
+export async function issueTokens(q: Q, me: Me, familyId?: string) {
+  if (!familyId) {
+    me = await recordLogin(q, me);
+    familyId = uuidv7();
+  }
   const access = await signAccessToken({
     sub: me.id,
     email: me.email ?? undefined,
