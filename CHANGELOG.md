@@ -5,6 +5,14 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-11-21
+
+### Perbaikan
+
+- **service-kit:** muat pengaturan platform sebelum menerima permintaan (6a1a6b3)
+
+### Catatan rilis
+
 ### Perbaikan
 
 - **service-kit:** pengaturan platform dimuat sebelum service menerima permintaan (coba ulang ±20 dtk bila platform belum siap) — sebelumnya beberapa detik setelah restart/deploy service melayani nilai bawaan registri, mis. saklar penjualan RAVE Pro yang dimatikan Super Admin terbaca menyala
