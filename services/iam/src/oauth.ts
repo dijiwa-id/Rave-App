@@ -1,4 +1,4 @@
-import { createHash, createHmac, createPrivateKey, randomBytes, sign, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, createPrivateKey, createPublicKey, randomBytes, sign, timingSafeEqual, verify as verifySig, type JsonWebKey } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { enabledSocialProviders, type SocialProvider } from '@rave/domain/integrations';
 import { audit, badRequest, config, forbidden, getIntegration, HttpError, publish, settings, uuidv7, z, type Client, type ServiceContext } from '@rave/service-kit';
@@ -15,6 +15,8 @@ import { completeLogin } from './mfa.js';
  *   POST /v1/auth/token {grant_type:'oauth_code'} → token (routes.ts)
  *   POST /v1/auth/oauth/:provider/app → peluncuran untuk aplikasi desktop/mobile (browser sistem + konfirmasi kode)
  *   POST /v1/auth/oauth/poll {poll_token} → 428 authorization_pending | 200 TokenResponse | 400 gagal | 410 kedaluwarsa
+ *   POST /v1/auth/oauth/google/native {id_token} → login Google native aplikasi mobile (Credential Manager Android):
+ *        ID token diverifikasi (tanda tangan JWKS Google, aud = Client ID web, iss, exp) → TokenResponse | tantangan 2FA
  *
  * Kredensial: Super Admin → Platform → Integrasi → "Login sosial" (rahasia terenkripsi), cadangan env dengan nama
  * field yang sama (GOOGLE_CLIENT_ID, …). Provider `dev` (simulasi, tanpa pihak ketiga) hanya ada di development.
@@ -231,6 +233,43 @@ async function exchange(p: OAuthProvider, get: (k: string) => string | undefined
   return { sub: `dev:${d.email}`, email: d.email, emailVerified: true, name: d.name || undefined };
 }
 
+// ---------------- Login Google native (aplikasi mobile) ----------------
+
+/**
+ * ID token dari perangkat (Credential Manager Android / Google Sign-In) TIDAK datang dari endpoint token Google lewat
+ * TLS server-ke-server, jadi tanda tangannya wajib diverifikasi dengan kunci publik Google (JWKS, di-cache sesuai
+ * Cache-Control). Aplikasi meminta token dengan `serverClientId` = Client ID web → aud = GOOGLE_CLIENT_ID.
+ */
+type Jwks = { keys: (JsonWebKey & { kid?: string; alg?: string })[] };
+let jwksCache: { at: number; maxAge: number; jwks: Jwks } | null = null;
+export async function googleJwks(fetcher: typeof fetch = fetch): Promise<Jwks> {
+  if (jwksCache && Date.now() - jwksCache.at < jwksCache.maxAge) return jwksCache.jwks;
+  const r = await fetcher('https://www.googleapis.com/oauth2/v3/certs', { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new OAuthFail(`Kunci publik Google tidak dapat diambil (${r.status})`);
+  const jwks = (await r.json()) as Jwks;
+  const maxAge = Number(/max-age=(\d+)/.exec(r.headers.get('cache-control') ?? '')?.[1] ?? 3600) * 1000;
+  jwksCache = { at: Date.now(), maxAge: Math.min(Math.max(maxAge, 60_000), 24 * 3600_000), jwks };
+  return jwks;
+}
+
+export async function verifyGoogleIdToken(idToken: string, audiences: string[], jwks: Jwks, now = Date.now()): Promise<Profile> {
+  const parts = idToken.split('.');
+  if (parts.length !== 3) throw new OAuthFail('ID token Google tidak valid');
+  const [h, p, s] = parts as [string, string, string];
+  const header = JSON.parse(Buffer.from(h, 'base64url').toString('utf8'));
+  if (header.alg !== 'RS256') throw new OAuthFail('Algoritma ID token Google tidak didukung');
+  const jwk = jwks.keys.find((k) => k.kid === header.kid);
+  if (!jwk) throw new OAuthFail('Kunci ID token Google tidak dikenal — coba lagi');
+  const ok = verifySig('RSA-SHA256', Buffer.from(`${h}.${p}`), createPublicKey({ key: jwk, format: 'jwk' }), Buffer.from(s, 'base64url'));
+  if (!ok) throw new OAuthFail('Tanda tangan ID token Google tidak sah');
+  const c = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
+  if (!['accounts.google.com', 'https://accounts.google.com'].includes(c.iss)) throw new OAuthFail('Penerbit ID token bukan Google');
+  if (!audiences.filter(Boolean).includes(c.aud)) throw new OAuthFail('ID token bukan untuk aplikasi RAVE');
+  if (typeof c.exp !== 'number' || c.exp * 1000 < now - 60_000) throw new OAuthFail('ID token Google kedaluwarsa');
+  if (typeof c.iat === 'number' && c.iat * 1000 > now + 5 * 60_000) throw new OAuthFail('ID token Google belum berlaku');
+  return { sub: String(c.sub), email: c.email, emailVerified: c.email_verified === true || c.email_verified === 'true', name: c.name, picture: c.picture };
+}
+
 // ---------------- Akun ----------------
 
 /** Cari / tautkan / buat akun untuk profil provider. Mengembalikan user id. */
@@ -319,7 +358,40 @@ export async function oauthRoutes(app: FastifyInstance, { db }: ServiceContext) 
   const providerParam = z.object({ provider: z.enum(ALL as [OAuthProvider, ...OAuthProvider[]]) });
   const clientIp = (req: FastifyRequest) => (req.headers['x-forwarded-for'] as string) ?? req.ip;
 
-  app.get('/v1/auth/oauth/providers', async () => ({ providers: await enabledProviders() }));
+  app.get('/v1/auth/oauth/providers', async () => {
+    const providers = await enabledProviders();
+    // Client ID web (publik) = `serverClientId` login Google native di aplikasi mobile.
+    const googleClientId = providers.includes('google') ? (await credentials())('GOOGLE_CLIENT_ID') ?? null : null;
+    return { providers, google_client_id: googleClientId };
+  });
+
+  /** Login Google native (aplikasi mobile): ID token dari lembar akun Google sistem → sesi RAVE (atau tantangan 2FA). */
+  app.post('/v1/auth/oauth/google/native', async (req) => {
+    const b = z.object({ id_token: z.string().min(100).max(8000), client: z.enum(['mobile']).default('mobile') }).parse(req.body ?? {});
+    if (!(await enabledProviders()).includes('google')) throw new HttpError(404, 'Not Found', 'Login Google belum diaktifkan.');
+    const get = await credentials();
+    let profile: Profile;
+    try {
+      profile = await verifyGoogleIdToken(b.id_token, [get('GOOGLE_CLIENT_ID')!, ...(get('GOOGLE_ANDROID_CLIENT_IDS') ?? '').split(',').map((x) => x.trim())], await googleJwks());
+    } catch (e) {
+      if (e instanceof OAuthFail) throw new HttpError(401, 'Unauthorized', e.message);
+      throw e;
+    }
+    return db.tx(async (tx) => {
+      let userId: string;
+      try {
+        userId = await resolveUser(tx, 'google', profile, clientIp(req));
+      } catch (e) {
+        if (e instanceof OAuthFail) throw forbidden(e.message);
+        throw e;
+      }
+      const me = await buildMe(tx, userId);
+      if (!me) throw forbidden('Akun telah dihapus');
+      if (me.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan RAVE.');
+      await audit(tx, { actorId: userId, action: 'user.login.social', entity: 'user', entityId: userId, data: { provider: 'google', client: b.client, native: true }, ip: clientIp(req) });
+      return completeLogin(tx, me);
+    });
+  });
 
   /**
    * Aplikasi desktop/mobile: buat peluncuran → buka `start_path` (relatif ke server yang dipakai aplikasi) di browser

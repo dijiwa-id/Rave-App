@@ -1,7 +1,7 @@
-import { createPublicKey, generateKeyPairSync, verify } from 'node:crypto';
+import { createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { enabledSocialProviders, validateIntegration } from '@rave/domain/integrations';
-import { appleClientSecret, normalizePem } from './oauth.js';
+import { appleClientSecret, normalizePem, verifyGoogleIdToken } from './oauth.js';
 
 const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
 const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -39,5 +39,33 @@ describe('login sosial — konfigurasi', () => {
     const half = validateIntegration('social', 'oauth', { GOOGLE_CLIENT_ID: 'a', FACEBOOK_APP_ID: 'b' }, new Set(['GOOGLE_CLIENT_SECRET']));
     expect(half.map((e) => e.path)).toEqual(['FACEBOOK_APP_SECRET']);
     expect(validateIntegration('social', 'off', {}, new Set())).toEqual([]);
+  });
+});
+
+describe('login Google native (mobile) — verifikasi ID token', () => {
+  const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = { ...rsa.publicKey.export({ format: 'jwk' }), kid: 'k1', alg: 'RS256' };
+  const jwks = { keys: [jwk] };
+  const AUD = 'web-client.apps.googleusercontent.com';
+  const mk = (claims: Record<string, unknown>, kid = 'k1', key = rsa.privateKey) => {
+    const h = Buffer.from(JSON.stringify({ alg: 'RS256', kid })).toString('base64url');
+    const p = Buffer.from(JSON.stringify(claims)).toString('base64url');
+    const s = sign('sha256', Buffer.from(`${h}.${p}`), key).toString('base64url');
+    return `${h}.${p}.${s}`;
+  };
+  const now = Math.floor(Date.now() / 1000);
+  const good = { iss: 'https://accounts.google.com', aud: AUD, sub: '1234', email: 'a@gmail.com', email_verified: true, name: 'A', iat: now, exp: now + 3600 };
+
+  it('token sah → profil (sub, email terverifikasi, nama)', async () => {
+    const p = await verifyGoogleIdToken(mk(good), [AUD], jwks);
+    expect(p).toMatchObject({ sub: '1234', email: 'a@gmail.com', emailVerified: true, name: 'A' });
+  });
+  it('menolak tanda tangan palsu, aud lain, penerbit lain, kedaluwarsa, kid tak dikenal', async () => {
+    const other = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey;
+    await expect(verifyGoogleIdToken(mk(good, 'k1', other), [AUD], jwks)).rejects.toThrow(/Tanda tangan/);
+    await expect(verifyGoogleIdToken(mk({ ...good, aud: 'evil' }), [AUD], jwks)).rejects.toThrow(/bukan untuk aplikasi/);
+    await expect(verifyGoogleIdToken(mk({ ...good, iss: 'https://evil.example' }), [AUD], jwks)).rejects.toThrow(/Penerbit/);
+    await expect(verifyGoogleIdToken(mk({ ...good, exp: now - 3600 }), [AUD], jwks)).rejects.toThrow(/kedaluwarsa/);
+    await expect(verifyGoogleIdToken(mk(good, 'k9'), [AUD], jwks)).rejects.toThrow(/tidak dikenal/);
   });
 });

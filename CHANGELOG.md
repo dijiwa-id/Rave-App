@@ -5,6 +5,10 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+### Fitur
+
+- **iam:** login Google native untuk aplikasi mobile — `POST /v1/auth/oauth/google/native {id_token}` memverifikasi ID token Credential Manager Android (tanda tangan JWKS Google di-cache, aud = Client ID web, iss, exp) lalu memakai alur akun & 2FA yang sama; `GET /v1/auth/oauth/providers` kini menyertakan `google_client_id` (publik) sebagai `serverClientId` aplikasi
+
 ## [0.4.0] — 2026-11-21
 
 ### Fitur
