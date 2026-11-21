@@ -14,6 +14,7 @@ import { LiveCard, useLiveSettings, useLiveStreams } from '@/components/live/com
 import { SponsorBanner } from '@/components/ads/SponsorBanner';
 import { useLanding } from '@/lib/landing';
 import { useDict } from '@/lib/i18n';
+import { sized } from '@/lib/media';
 
 interface HomeFeed {
   quick_picks: MediaItem[];
@@ -41,7 +42,7 @@ function QuickPick({ item, onPlay }: { item: MediaItem; onPlay: () => void }) {
   const d = useDict('fan');
   return (
     <div onClick={() => nav(item.href)} className="rave-card group relative flex h-20 cursor-pointer items-center gap-4 overflow-hidden pr-[4.25rem]">
-      {item.image_url ? <img src={item.image_url} alt="" decoding="async" width={80} height={80} className="size-20 shrink-0 object-cover shadow-xl" /> : <div className="size-20 shrink-0" style={{ background: colorFor(item.id) }} />}
+      {item.image_url ? <img src={sized(item.image_url, 80)} alt="" decoding="async" width={80} height={80} className="size-20 shrink-0 object-cover shadow-xl" /> : <div className="size-20 shrink-0" style={{ background: colorFor(item.id) }} />}
       <Link to={item.href} onClick={(e) => e.stopPropagation()} className="line-clamp-2 font-bold text-white">
         {item.title}
       </Link>
@@ -210,7 +211,7 @@ export default function Home() {
             {(events.data?.data ?? []).slice(0, 5).map((e) => (
               <Link key={e.id} to={`/app/events/${e.slug}`} className="media-card block">
                 {e.poster_url ? (
-                  <img src={e.poster_url} alt="" className="mb-4 aspect-square w-full rounded-none object-cover" loading="lazy" decoding="async" />
+                  <img src={sized(e.poster_url, 480)} alt="" className="mb-4 aspect-square w-full rounded-none object-cover" loading="lazy" decoding="async" />
                 ) : (
                   <div className="mb-4 aspect-square w-full rounded-none" style={{ background: `linear-gradient(135deg, ${colorFor(e.id)}, ${colorFor(e.slug)})` }} />
                 )}

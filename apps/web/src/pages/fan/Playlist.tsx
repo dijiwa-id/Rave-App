@@ -10,6 +10,7 @@ import { ActionBar, colorFor, DarkError, HeroHeader, PlayFab, TrackTable } from 
 import { Button, confirmDialog, EmptyState, Input, Modal, PageLoader, toast } from '@/components/ui';
 import { useDict } from '@/lib/i18n';
 import { IMAGE_ACCEPT, uploadFile } from '@/lib/upload';
+import { sized } from '@/lib/media';
 
 function AddTracks({ playlistId, onAdded }: { playlistId: string; onAdded: () => void }) {
   const d = useDict('fan');
@@ -39,7 +40,7 @@ function AddTracks({ playlistId, onAdded }: { playlistId: string; onAdded: () =>
       <ul className="mt-4 max-w-3xl">
         {(res.data?.tracks ?? []).slice(0, 8).map((t) => (
           <li key={t.id} className="flex items-center gap-3 rounded-none px-2 py-2 hover:bg-white/10">
-            {t.release.cover_url && <img src={t.release.cover_url} alt="" loading="lazy" decoding="async" width={40} height={40} className="size-10 rounded-none" />}
+            {t.release.cover_url && <img src={sized(t.release.cover_url, 40)} alt="" loading="lazy" decoding="async" width={40} height={40} className="size-10 rounded-none" />}
             <div className="min-w-0 flex-1">
               <p className="truncate">{t.title}</p>
               <p className="truncate text-sm text-rave-muted">{t.artist.name}</p>

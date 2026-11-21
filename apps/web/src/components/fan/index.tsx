@@ -11,6 +11,8 @@ import { LikeButton } from '@/layouts/PlayerBar';
 import { AddToPlaylist } from './AddToPlaylist';
 import { useMediaPlaying } from './usePlayMedia';
 import { trackToPlayable, usePlayer, type Playable } from '@/stores/player';
+import { sized } from '@/lib/media';
+import { ShareButton } from './ShareButton';
 
 /** Warna gradien header deterministik dari string (pengganti ekstraksi warna dominan artwork). */
 const PALETTE = ['#5B2A6E', '#8A2F3F', '#1F5C52', '#B8901A', '#2A1233', '#7A3E91', '#6B2431', '#24463F', '#4A1F5C', '#9A6B12', '#3B2F45', '#5E3A1E'];
@@ -109,7 +111,7 @@ export function MediaCard({
         <div className="artist-card__shadow">
         <div className="artist-card__frame relative">
           {image ? (
-            <img src={image} alt="" loading="lazy" decoding="async" className="artist-card__photo aspect-square w-full object-cover" />
+            <img src={sized(image, 320)} alt="" loading="lazy" decoding="async" className="artist-card__photo aspect-square w-full object-cover" />
           ) : (
             <div className="grid aspect-square w-full place-items-center bg-gradient-to-br from-rave-purple to-rave-plum">
               <span className="font-display text-7xl leading-none text-rave-primary/90">{title.slice(0, 1)}</span>
@@ -137,7 +139,7 @@ export function MediaCard({
     <div className={cx('media-card group cursor-pointer', active && 'media-card--active')} onClick={() => nav(href)}>
       <div className="relative mb-4">
         {image ? (
-          <img src={image} alt="" loading="lazy" decoding="async" className="aspect-square w-full rounded-none border-2 border-rave-ink object-cover" />
+          <img src={sized(image, 320)} alt="" loading="lazy" decoding="async" className="aspect-square w-full rounded-none border-2 border-rave-ink object-cover" />
         ) : (
           <div className="grid aspect-square w-full place-items-center rounded-none bg-rave-highlight">
             <Music2 className="size-12 text-rave-subtle" />
@@ -286,7 +288,7 @@ export function HeroHeader({ color, image, kicker, title, meta }: { color: strin
       <div className="flex flex-col items-start gap-6 md:flex-row md:items-end">
         {image !== undefined &&
           (image ? (
-            <img src={image} alt="" className={cx('size-44 shrink-0 object-cover shadow-[6px_6px_0_#0b0a0c] md:size-56', 'rounded-none border-2 border-rave-ink')} />
+            <img src={sized(image, 240)} alt="" className={cx('size-44 shrink-0 object-cover shadow-[6px_6px_0_#0b0a0c] md:size-56', 'rounded-none border-2 border-rave-ink')} />
           ) : (
             <div className="grid size-44 shrink-0 place-items-center rounded-none bg-rave-highlight shadow-2xl md:size-56">
               <Music2 className="size-16 text-rave-subtle" />
@@ -363,7 +365,7 @@ const TrackRow = memo(function TrackRow({ t, i, active, playing, showAlbum, show
     <div
       role="row"
       onDoubleClick={() => onPlay(i)}
-      className="group grid grid-cols-[24px_minmax(0,1fr)_84px] items-center gap-4 rounded-none px-4 py-2 text-sm text-rave-muted hover:bg-white/10 @[640px]:grid-cols-[24px_minmax(0,4fr)_minmax(0,3fr)_150px]"
+      className="group grid grid-cols-[24px_minmax(0,1fr)_116px] items-center gap-4 rounded-none px-4 py-2 text-sm text-rave-muted hover:bg-white/10 @[640px]:grid-cols-[24px_minmax(0,4fr)_minmax(0,3fr)_190px]"
     >
       <button onClick={() => (active ? onToggle() : onPlay(i))} aria-label={active && playing ? d.fan.pause : d.fan.playTrack(t.title)} aria-pressed={active ? playing : undefined} className="grid h-6 w-6 place-items-end">
         <span className={cx('group-hover:hidden group-focus-within:hidden', active && 'text-rave-primary-text')}>
@@ -374,7 +376,7 @@ const TrackRow = memo(function TrackRow({ t, i, active, playing, showAlbum, show
         </span>
       </button>
       <div className="flex min-w-0 items-center gap-3">
-        {showCover && (t.release.cover_url ? <img src={t.release.cover_url} alt="" loading="lazy" decoding="async" width={40} height={40} className="size-10 rounded-none" /> : <div className="size-10 rounded-none bg-rave-highlight" />)}
+        {showCover && (t.release.cover_url ? <img src={sized(t.release.cover_url, 40)} alt="" loading="lazy" decoding="async" width={40} height={40} className="size-10 rounded-none" /> : <div className="size-10 rounded-none bg-rave-highlight" />)}
         <div className="min-w-0">
           <Link to={`/app/track/${t.id}`} className={cx('block truncate text-base hover:underline', active ? 'text-rave-primary-text' : 'text-white')}>
             {t.title}
@@ -396,6 +398,8 @@ const TrackRow = memo(function TrackRow({ t, i, active, playing, showAlbum, show
         <span className="hidden opacity-0 group-hover:opacity-100 sm:inline">
           <LikeButton trackId={t.id} batched={batched} />
         </span>
+        {/* Bagikan: ikon & posisi sama di setiap daftar lagu (album, playlist, artis, cari, koleksi) */}
+        <ShareButton trackId={t.id} trackTitle={t.title} className="sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100 sm:aria-expanded:opacity-100" />
         <span className="tabular-nums">{fmt.duration(t.duration_ms)}</span>
         {onMove && (
           <span className="hidden items-center gap-0.5 group-focus-within:inline-flex group-hover:inline-flex">
@@ -453,7 +457,7 @@ export function TrackTable({
   const d = useDict('common');
   return (
     <div className="@container px-4 md:px-8" role="table" aria-label={d.fan.trackList}>
-      <div role="row" className="mb-2 grid grid-cols-[24px_minmax(0,1fr)_84px] items-center gap-4 border-b border-white/10 px-4 pb-2 text-xs tracking-widest text-rave-muted uppercase @[640px]:grid-cols-[24px_minmax(0,4fr)_minmax(0,3fr)_150px]">
+      <div role="row" className="mb-2 grid grid-cols-[24px_minmax(0,1fr)_116px] items-center gap-4 border-b border-white/10 px-4 pb-2 text-xs tracking-widest text-rave-muted uppercase @[640px]:grid-cols-[24px_minmax(0,4fr)_minmax(0,3fr)_190px]">
         <span>#</span>
         <span>{d.fan.colTitle}</span>
         <span className="hidden @[640px]:block">{showAlbum ? d.fan.colAlbum : ''}</span>

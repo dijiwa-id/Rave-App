@@ -101,8 +101,9 @@ export function Field({ label, hint, error, children, theme = 'light' }: { label
 // ---------- Feedback ----------
 /** Piringan hitam (alur + label ungu + spindle) — dasar semua indikator muat RAVE. */
 const DISC_BG =
-  // label ungu memudar + tekstur piringan vintage (scripts/vinyl-textures.ts)
-  "radial-gradient(circle, #0a0807 0 7%, transparent 7.5%), radial-gradient(circle, #6a4572 0 31%, #4a2c52 33%, #0b0908 33.5% 34.5%, transparent 35%), url('/textures/vinyl-disc.webp') center / cover no-repeat, #100d0b";
+  // Piringan vintage versi loader: tekstur 256 px (±8 KB, sama dengan boot loader index.html) — bukan tekstur penuh
+  // 160 KB yang berebut bandwidth dengan JS & menunda LCP. Label ungu memudar + lubang spindle.
+  "radial-gradient(circle, #050403 0 6%, #2a2520 7%, transparent 7.5%), radial-gradient(circle, #6a4572 0 26%, #4a2c52 31%, #0b0908 32% 33%, transparent 33.5%), url('/textures/vinyl-disc-sm.webp') center / cover no-repeat, #100d0b";
 
 /** Indikator muat mini: piringan berputar (tanpa logo) — dipakai di tombol & daftar. */
 export function Spinner({ className = 'size-6' }: { className?: string }) {
@@ -130,7 +131,7 @@ export function VinylLoader({ size = 120, label }: { size?: number; label?: stri
         <span className="absolute inset-0 translate-x-[3px] translate-y-[4px] rounded-full bg-black/60 blur-md" aria-hidden />
         <span className="absolute inset-0 animate-[rave-spin_1.8s_linear_infinite] rounded-full shadow-[0_0_0_2px_#050505] motion-reduce:animate-none" style={{ background: DISC_BG }} aria-hidden />
         <span
-          className="absolute inset-0 rounded-full bg-[conic-gradient(from_120deg,transparent_0deg,rgba(255,255,255,0.16)_20deg,transparent_55deg,transparent_180deg,rgba(255,255,255,0.1)_200deg,transparent_235deg)]"
+          className="absolute inset-0 rounded-full bg-[conic-gradient(from_120deg,transparent_0deg,rgba(255,232,200,0.16)_20deg,transparent_55deg,transparent_180deg,rgba(255,232,200,0.1)_200deg,transparent_235deg)]"
           aria-hidden
         />
         <img src={b.logoDark} alt="" aria-hidden className="absolute top-1/2 left-1/2 w-[28%] -translate-x-1/2 -translate-y-1/2 drop-shadow-[1px_1px_0_#0b0a0c]" />

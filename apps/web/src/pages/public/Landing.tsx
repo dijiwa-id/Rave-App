@@ -30,6 +30,7 @@ import { cx, toast } from '@/components/ui';
 import { useModule } from '@/components/ModuleGate';
 import { setting, usePlatformConfig } from '@/lib/platform';
 import { usePricing } from '@/lib/pricing';
+import { useAppDownloads } from '@/lib/appDownloads';
 import { Hero, RaveBand } from './LandingHero';
 import { Movement, RoleStack, Spotlight, WaveFrame, WhyRave, type RoleCard } from './LandingScroll';
 import { BTN_PRIMARY, BTN_PRIMARY_SM, CARD_TITLE, Heading, Section } from './marketing';
@@ -381,6 +382,8 @@ const CITIES = ['Jakarta', 'Bandung', 'Yogyakarta', 'Surabaya', 'Malang', 'Bali'
 function Waitlist() {
   const waitlistOpen = useModule('waitlist');
   const d = useDict('public').waitlist;
+  const dl = useDict('common').apps;
+  const apps = useAppDownloads().data ?? {};
   const [form, setForm] = useState({ email: '', name: '', segment: 'fan', city: '', consent_marketing: false, referral_code: '' });
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ position: number; referral_code: string } | null>(null);
@@ -429,8 +432,24 @@ function Waitlist() {
                 <Link to="/app" className={BTN_PRIMARY_SM}>
                   {d.openWebPlayer}
                 </Link>
+                {apps.desktop ? (
+                  <a href={apps.desktop.installer.url} download={apps.desktop.installer.file} className="rave-label rounded-none border-2 border-rave-paper px-5 py-3 !text-[11px] text-rave-paper transition hover:bg-rave-paper hover:text-rave-ink">
+                    {dl.download} {dl.windows}
+                  </a>
+                ) : (
+                  <span className="rave-label rounded-none border border-white/20 px-5 py-3 !text-[11px] text-white/50">{d.soon(dl.windows)}</span>
+                )}
+                {apps.android ? (
+                  <a href={apps.android.apk.url} download={apps.android.apk.file} className="rave-label rounded-none border-2 border-rave-paper px-5 py-3 !text-[11px] text-rave-paper transition hover:bg-rave-paper hover:text-rave-ink">
+                    {dl.download} {dl.android}
+                  </a>
+                ) : (
+                  <span className="rave-label rounded-none border border-white/20 px-5 py-3 !text-[11px] text-white/50">{d.soon('Google Play')}</span>
+                )}
                 <span className="rave-label rounded-none border border-white/20 px-5 py-3 !text-[11px] text-white/50">{d.soon('App Store')}</span>
-                <span className="rave-label rounded-none border border-white/20 px-5 py-3 !text-[11px] text-white/50">{d.soon('Google Play')}</span>
+                <Link to="/unduh" className="self-center text-sm font-bold text-white/70 underline underline-offset-4 hover:text-rave-paper">
+                  {dl.allOptions}
+                </Link>
               </div>
             </div>
           </div>

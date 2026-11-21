@@ -19,8 +19,8 @@
     <style>
       .rave-boot{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(circle at 50% 45%,rgba(11,10,12,.35) 0,rgba(11,10,12,.82) 62%,rgba(11,10,12,.92) 100%),radial-gradient(rgba(237,237,237,.1) 1.2px,transparent 1.7px) 0 0/9px 9px,#181818}
       .rave-boot__disc{position:relative;width:128px;height:128px}
-      .rave-boot__spin{position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 2px #050505;background:radial-gradient(circle,#181818 0 7%,transparent 7.5%),radial-gradient(circle,#5B2A6E 0 33%,#0b0b0b 33.5% 36%,transparent 36.5%),repeating-radial-gradient(circle,#0d0d0d 0 1.5px,#1a1a1a 1.5px 2.6px);animation:rave-boot-spin 1.8s linear infinite}
-      .rave-boot__shine{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 120deg,transparent 0deg,rgba(255,255,255,.16) 20deg,transparent 55deg,transparent 180deg,rgba(255,255,255,.1) 200deg,transparent 235deg)}
+      .rave-boot__spin{position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 2px #050403;background:radial-gradient(circle,#050403 0 6%,#2a2520 7%,transparent 7.5%),radial-gradient(circle,#6a4572 0 26%,#4a2c52 31%,#0b0908 32% 33%,transparent 33.5%),url('/textures/vinyl-disc-sm.webp') center/cover no-repeat,#100d0b;animation:rave-boot-spin 1.8s linear infinite}
+      .rave-boot__shine{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 120deg,transparent 0deg,rgba(255,232,200,.16) 20deg,transparent 55deg,transparent 180deg,rgba(255,232,200,.1) 200deg,transparent 235deg)}
       .rave-boot__logo{position:absolute;top:50%;left:50%;width:28%;transform:translate(-50%,-50%)}
       .rave-boot__label{margin-top:20px;text-align:center;font:700 11px 'Space Mono',ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#F4C21F}
       @keyframes rave-boot-spin{to{transform:rotate(360deg)}}

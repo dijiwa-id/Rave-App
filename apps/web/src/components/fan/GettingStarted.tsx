@@ -5,6 +5,7 @@ import { useDict } from '@/lib/i18n';
 import { cx } from '@/components/ui';
 import { PlayFab } from '@/components/fan';
 import { useMediaPlaying } from '@/components/fan/usePlayMedia';
+import { sized } from '@/lib/media';
 
 
 type StepId = 'play' | 'like' | 'playlist' | 'follow' | 'live' | 'events';
@@ -122,7 +123,7 @@ export function GettingStarted({ covers, liveOn, eventsOn, aside }: { covers: st
                   <div aria-hidden className="gs-collage">
                     {[0, 1, 2].map((k) => {
                       const src = covers[(i + k) % Math.max(1, covers.length)];
-                      return src ? <img key={k} src={src} alt="" loading="lazy" className={`gs-collage__img gs-collage__img--${k}`} /> : <span key={k} className={`gs-collage__img gs-collage__img--${k} bg-rave-highlight`} />;
+                      return src ? <img key={k} src={sized(src, 200)} alt="" loading="lazy" className={`gs-collage__img gs-collage__img--${k}`} /> : <span key={k} className={`gs-collage__img gs-collage__img--${k} bg-rave-highlight`} />;
                     })}
                   </div>
                 </article>
@@ -196,7 +197,7 @@ export function PickTile({ title, subtitle, image, href, playKey, onPlay, label 
   const { active } = useMediaPlaying(playKey);
   return (
     <Link to={href} className={cx('pick-tile group', active && 'pick-tile--on')}>
-      {image ? <img src={image} alt="" loading="lazy" className="pick-tile__img" /> : <span className="pick-tile__img rave-dots bg-gradient-to-br from-rave-purple to-rave-plum" />}
+      {image ? <img src={sized(image, 320)} alt="" loading="lazy" className="pick-tile__img" /> : <span className="pick-tile__img rave-dots bg-gradient-to-br from-rave-purple to-rave-plum" />}
       <span className="pick-tile__shade" aria-hidden />
       <span className="absolute inset-x-0 bottom-0 flex items-end gap-3 p-4">
         <span className="min-w-0 flex-1">

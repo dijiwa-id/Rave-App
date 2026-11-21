@@ -43,6 +43,7 @@ export const ROUTES: [prefix: string, upstream: Upstream][] = [
   ['/v1/admin/reports/streaming', 'playback'],
   ['/v1/admin/reports/royalty', 'finance'],
   ['/v1/admin/reports/transcoding', 'catalog'],
+  ['/v1/admin/reports/share', 'catalog'],
   ['/v1/admin/reports/live', 'live'],
   ['/v1/admin/reports/booking', 'booking'],
   ['/v1/admin/reports/contract', 'booking'],

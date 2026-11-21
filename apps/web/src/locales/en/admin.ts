@@ -205,6 +205,7 @@ const admin: Shape<typeof id> = {
       contract: { name: 'Contracts & Legal', description: '', plan: '', steps: [] as string[] },
       ticketing: { name: 'Tickets & Refunds', description: '', plan: '', steps: [] as string[] },
       ads: { name: 'Ads', description: '', plan: '', steps: [] as string[] },
+      share: { name: 'Social Sharing', description: '', plan: '', steps: [] as string[] },
       finance: { name: 'Finance', description: '', plan: '', steps: [] as string[] },
       payout: { name: 'Payouts', description: '', plan: '', steps: [] as string[] },
       royalty: {

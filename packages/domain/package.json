@@ -23,6 +23,7 @@
     "./podcast": "./src/podcast.ts",
     "./pro": "./src/pro.ts",
     "./royalty": "./src/royalty.ts",
-    "./news": "./src/news.ts"
+    "./news": "./src/news.ts",
+    "./share": "./src/share.ts"
   }
 }

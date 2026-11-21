@@ -19,7 +19,8 @@ const dict: Shape<typeof id> = {
     takeRave: 'Put RAVE in your pocket',
     storeAria: (store) => `${store} — coming soon, join the waitlist to hear about the launch`,
     comingTo: 'Coming to',
-    storeNote: 'iOS & Android · join the waitlist for first access',
+    downloadFor: 'Download for',
+    storeNote: 'Windows & Android ready to download · iOS soon (join the waitlist)',
     tagline: "Indonesia's home for DIY & indie music — listen free, show up to the gig, support artists directly.",
     cols: [
       { title: 'Company', links: ['About', 'News', 'Careers', 'For Media'] },

@@ -15,6 +15,8 @@ export const publicRoutes: RouteObject[] = [
   { path: '/login', element: page(() => import('@/pages/public/Login')) },
   { path: '/onboarding', element: page(() => import('@/pages/public/Onboarding')) },
   { path: '/premium', element: page(() => import('@/pages/public/Premium')) },
+  // Unduh aplikasi desktop & Android (berkas dari /downloads/manifest.json)
+  { path: '/unduh', element: page(() => import('@/pages/public/Download')) },
   // Link EPK privat dari Studio (`/epk/{slug}?token=…`, booking/routes-artist.ts)
   { path: '/epk/:slug', element: page(() => import('@/pages/public/EpkPublic')) },
   // Halaman perusahaan (tautan footer): tentang, karier, media, artis, promotor, developer, iklan, investor

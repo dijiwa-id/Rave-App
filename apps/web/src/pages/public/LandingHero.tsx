@@ -329,7 +329,7 @@ export function RaveBand({ fallback: fallbackProp }: { fallback?: string[] }) {
         <div className="items-center font-display text-[clamp(26px,3.6vw,50px)] leading-none uppercase" style={{ animationDuration: `${Math.max(24, run.length * 3.2)}s` }} aria-hidden>
           {all.map((it, i) => {
             const body = it.logo ? (
-              <img src={it.logo} alt="" loading="lazy" className="h-[clamp(28px,3.4vw,46px)] w-auto max-w-[12rem] object-contain [filter:brightness(0)] opacity-90" />
+              <img src={it.logo} alt="" loading="lazy" decoding="async" fetchPriority="low" className="h-[clamp(28px,3.4vw,46px)] w-auto max-w-[12rem] object-contain [filter:brightness(0)] opacity-90" />
             ) : (
               it.name
             );

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { LanguageSwitch } from '@/components/LanguageSwitch';
 import { Link, NavLink } from 'react-router-dom';
+import { Monitor } from 'lucide-react';
 import { AppleLogo, GooglePlay } from '@/components/fan/BrandIcons';
+import { useAppDownloads } from '@/lib/appDownloads';
 import { RaveLogo } from '@/components/ui/RaveLogo';
 import { useAuth } from '@/stores/auth';
 import { cx } from '@/components/ui';
@@ -78,10 +80,8 @@ const COL_HREFS: string[][] = [
   ['/bantuan', '/app', '/#unduh', '/premium'],
 ];
 
-const STORES = [
-  { icon: AppleLogo, store: 'App Store', href: '/#waitlist' },
-  { icon: GooglePlay, store: 'Google Play', href: '/#waitlist' },
-];
+/** iOS belum rilis (waitlist); Windows & Android memakai installer terbaru dari /downloads/manifest.json. */
+const IOS_STORE = { icon: AppleLogo, store: 'App Store', href: '/#waitlist' };
 
 /** Tepi sobek (zigzag tak beraturan) untuk lembar kertas footer. */
 const TORN = 'polygon(0 0,100% 0,100% 86%,97% 93%,94% 87%,90% 96%,86% 89%,82% 95%,78% 88%,73% 97%,69% 90%,65% 94%,61% 87%,57% 96%,52% 89%,48% 95%,44% 88%,40% 97%,35% 90%,31% 94%,27% 87%,23% 96%,18% 89%,14% 95%,10% 88%,6% 96%,3% 90%,0 95%)';
@@ -93,6 +93,8 @@ const TORN = 'polygon(0 0,100% 0,100% 86%,97% 93%,94% 87%,90% 96%,86% 89%,82% 95
 export function PublicFooter() {
   const d = useDict('public');
   const f = d.footer;
+  const dl = useDict('common').apps;
+  const apps = useAppDownloads().data ?? {};
   let n = 0;
   return (
     <footer className="relative bg-rave-ink text-sm text-rave-paper">
@@ -108,16 +110,23 @@ export function PublicFooter() {
           <div className="flex flex-col items-start gap-3 md:items-end">
             <p className="rave-label text-rave-ink/75">{f.takeRave}</p>
             <div className="flex flex-wrap gap-3">
-              {STORES.map(({ icon: Icon, store, href }) => (
+              {[
+                ...(apps.desktop ? [{ icon: Monitor, store: dl.windows, href: apps.desktop.installer.url, file: apps.desktop.installer.file, ready: true }] : []),
+                apps.android
+                  ? { icon: GooglePlay, store: dl.android, href: apps.android.apk.url, file: apps.android.apk.file, ready: true }
+                  : { icon: GooglePlay, store: 'Google Play', href: '/#waitlist', file: undefined, ready: false },
+                { ...IOS_STORE, file: undefined, ready: false },
+              ].map(({ icon: Icon, store, href, file, ready }) => (
                 <a
                   key={store}
                   href={href}
-                  aria-label={f.storeAria(store)}
+                  download={file}
+                  aria-label={ready ? `${dl.download} ${store}` : f.storeAria(store)}
                   className="group flex min-w-[11.5rem] items-center gap-3 border-2 border-rave-ink bg-rave-ink px-4 py-2.5 text-rave-paper shadow-[4px_4px_0_#5B2A6E] transition hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[6px_6px_0_#5B2A6E]"
                 >
                   <Icon className="size-7 shrink-0" />
                   <span className="text-left leading-none">
-                    <span className="block font-label text-[9.5px] font-bold tracking-[0.14em] text-rave-primary-text uppercase">{f.comingTo}</span>
+                    <span className="block font-label text-[9.5px] font-bold tracking-[0.14em] text-rave-primary-text uppercase">{ready ? f.downloadFor : f.comingTo}</span>
                     <span className="mt-1 block font-display text-[1.6rem] leading-none uppercase">{store}</span>
                   </span>
                 </a>

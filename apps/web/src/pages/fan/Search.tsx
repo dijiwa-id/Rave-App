@@ -9,6 +9,7 @@ import { EmptyState, Skeleton } from '@/components/ui';
 import { usePlayMedia } from '@/components/fan/usePlayMedia';
 import { useModule } from '@/components/ModuleGate';
 import { useDict } from '@/lib/i18n';
+import { sized } from '@/lib/media';
 
 interface SearchResult {
   artists: ArtistSummary[];
@@ -23,7 +24,7 @@ function CategoryTile({ c }: { c: Category }) {
   return (
     <Link to={c.href} className="relative block aspect-square overflow-hidden rounded-none p-4 transition hover:scale-[1.02]" style={{ background: c.color }}>
       <span className="text-2xl font-bold break-words text-white">{c.name}</span>
-      {c.image_url && <img src={c.image_url} alt="" className="absolute -right-4 -bottom-2 size-[45%] rotate-[25deg] rounded-none shadow-[0_2px_4px_rgba(0,0,0,0.2)]" loading="lazy" decoding="async" />}
+      {c.image_url && <img src={sized(c.image_url, 160)} alt="" className="absolute -right-4 -bottom-2 size-[45%] rotate-[25deg] rounded-none shadow-[0_2px_4px_rgba(0,0,0,0.2)]" loading="lazy" decoding="async" />}
     </Link>
   );
 }
@@ -62,7 +63,7 @@ function TopResult({ r }: { r: SearchResult }) {
   const href = isArtist ? `/app/artist/${a.slug}` : `/app/track/${t.id}`;
   return (
     <div onClick={() => nav(href)} className="group relative cursor-pointer rounded-none bg-rave-elevated p-5 transition hover:bg-rave-highlight">
-      <img src={(isArtist ? a.image_url : t.release.cover_url) ?? ''} alt="" decoding="async" width={96} height={96} className={`mb-5 size-24 object-cover shadow-xl rounded-none border-2 border-rave-ink`} />
+      <img src={sized((isArtist ? a.image_url : t.release.cover_url) ?? '', 96)} alt="" decoding="async" width={96} height={96} className={`mb-5 size-24 object-cover shadow-xl rounded-none border-2 border-rave-ink`} />
       <p className="truncate text-3xl font-bold">{isArtist ? a.name : t.title}</p>
       <p className="mt-1 text-sm text-rave-muted">
         {isArtist ? d.shared.artist : t.artist.name} <span className="ml-2 rounded-none bg-black/40 px-3 py-1 text-xs font-bold text-white">{isArtist ? d.shared.artist : d.shared.song}</span>

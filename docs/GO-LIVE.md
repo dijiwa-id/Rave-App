@@ -68,6 +68,9 @@ Sengaja belum dikerjakan sampai env server baru dan alamat domain tetap. Selesai
       = 149.000; Label tampil "Hubungi kami" padahal ada `pro_price_label_idr`. Samakan copy dengan setting atau sebaliknya.
 - [x] **PPN langganan & kompensasi pembatalan artis** kini setting (Super Admin → Monetisasi → Keuangan):
       `finance.subscription_ppn_pct` (default 11) dan `finance.artist_cancel_penalty_pct` (default 25, dibekukan per kontrak).
+- [ ] **Unduhan aplikasi**: setelah build installer/APK baru (`build-apk.bat <domain final>`, installer desktop dengan
+      `VITE_RAVE_API=<domain final>`), jalankan `npm run apps:publish` lalu salin folder `downloads/` ke server (bind mount
+      `./downloads:/srv/downloads:ro` di service web). Tanpa manifest, tombol unduh menampilkan "segera".
 - [ ] **Kosmetik**: footer email `brandedEmail` belum memakai `general.platform_name`.
 - [ ] **Uji di lingkungan nyata**: smoke + `npm run monitor:prod`, login OTP lewat email sungguhan, redirect OAuth Google
       dengan domain final, checkout + webhook Midtrans (sandbox → production), link email/kontrak mengarah ke domain final,

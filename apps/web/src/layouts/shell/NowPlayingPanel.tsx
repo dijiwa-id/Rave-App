@@ -14,16 +14,18 @@ import { cx, toast } from '@/components/ui';
 import { LikeButton, PlayerLcd, usePlayerView } from '../playerParts';
 import { EqBars, useCoverColor } from './bits';
 import { usePrefs } from '@/stores/prefs';
+import { sized } from '@/lib/media';
+import { ShareButton } from '@/components/fan/ShareButton';
 
 /** Sampul + piringan hitam yang menyembul & berputar saat lagu diputar. */
 function VinylCover({ image, color, playing, label }: { image: string | null | undefined; color: string; playing: boolean; label?: string | null }) {
   return (
     <div className="shell-vinyl relative mx-auto w-full" data-on={playing}>
       <div className="shell-vinyl__disc" aria-hidden style={{ ['--disc-label' as any]: color }}>
-        <span className="shell-vinyl__label">{image && <img src={image} alt="" className="size-full rounded-full object-cover" />}</span>
+        <span className="shell-vinyl__label">{image && <img src={sized(image, 160)} alt="" className="size-full rounded-full object-cover" />}</span>
       </div>
       <div className="shell-vinyl__sleeve">
-        {image ? <img src={image} alt="" className="size-full object-cover" /> : <div className={cx('size-full', BRAND_GRADIENT)} />}
+        {image ? <img src={sized(image, 480)} alt="" className="size-full object-cover" /> : <div className={cx('size-full', BRAND_GRADIENT)} />}
         {label && <span className="shell-tape-label">{label}</span>}
       </div>
     </div>
@@ -59,7 +61,7 @@ function ArtistCard({ id }: { id: string }) {
     <section className="shell-card overflow-hidden">
       <div className="relative aspect-[4/3] overflow-hidden bg-rave-highlight">
         {img ? (
-          <img src={img} alt="" loading="lazy" className="size-full object-cover transition duration-700 hover:scale-105" />
+          <img src={sized(img, 480)} alt="" loading="lazy" className="size-full object-cover transition duration-700 hover:scale-105" />
         ) : (
           <div className="rave-dots grid size-full place-items-center bg-gradient-to-br from-rave-purple to-rave-plum">
             <span className="font-display text-[96px] leading-none text-rave-primary/90">{a.name.slice(0, 1)}</span>
@@ -99,7 +101,7 @@ function QueueRow({ p, n, active, onPlay }: { p: Playable; n: number; active?: b
   return (
     <button type="button" onClick={onPlay} disabled={!onPlay} className={cx('shell-row group flex w-full items-center gap-3 px-2 py-1.5 text-left', active && 'shell-row--on')}>
       <span className="w-5 shrink-0 text-center font-label text-xs text-rave-subtle tabular-nums">{active ? <EqBars on={playing} /> : n}</span>
-      {p.image_url ? <img src={p.image_url} alt="" loading="lazy" className="size-10 shrink-0 border-2 border-rave-ink object-cover" /> : <span className="size-10 shrink-0 bg-rave-highlight" />}
+      {p.image_url ? <img src={sized(p.image_url, 40)} alt="" loading="lazy" className="size-10 shrink-0 border-2 border-rave-ink object-cover" /> : <span className="size-10 shrink-0 bg-rave-highlight" />}
       <span className="min-w-0 flex-1">
         <span className={cx('block truncate text-sm font-semibold', active ? 'text-rave-primary-text' : 'text-white')}>{p.title}</span>
         <span className="block truncate text-xs text-rave-muted">{p.subtitle}</span>
@@ -204,6 +206,7 @@ export function NowPlayingPanel() {
                   <p className="mt-1 truncate text-sm text-white/75">{p.current?.subtitle}</p>
                 )}
               </div>
+              {!ad && p.current?.kind === 'track' && <ShareButton trackId={p.current.id} trackTitle={p.current.title} className="mt-1" iconClassName="size-[22px]" />}
               {!ad && p.current?.kind === 'track' && <LikeButton trackId={p.current.id} className="mt-1 [&>svg]:size-6" />}
             </div>
 

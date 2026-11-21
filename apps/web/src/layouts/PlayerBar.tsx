@@ -9,11 +9,13 @@ import { usePlayer } from '@/stores/player';
 import { useLayout, useMediaQuery, useRightOpen } from '@/stores/layout';
 import { NowPlayingSheet } from './NowPlaying';
 import { AdProgress, DeckKey, IconBtn, LikeButton, PlayButton, PlayerError, PlayerLcd, Progress, Range, usePlayerView, VOLUME_CONTROLLABLE } from './playerParts';
+import { sized } from '@/lib/media';
+import { ShareButton } from '@/components/fan/ShareButton';
 
 export { LikeButton };
 
 function Cover({ src, color, brand, className }: { src?: string | null; color?: string | null; brand?: boolean; className: string }) {
-  if (src) return <img src={src} alt="" className={cx('shrink-0 rounded-none object-cover', className)} />;
+  if (src) return <img src={sized(src, 64)} alt="" className={cx('shrink-0 rounded-none object-cover', className)} />;
   return <div className={cx('shrink-0 rounded-none', brand ? BRAND_GRADIENT : 'bg-rave-highlight', className)} style={color ? { background: color } : undefined} />;
 }
 
@@ -50,6 +52,7 @@ export function PlayerBar() {
           </span>
         </button>
         {!ad && p.current?.kind === 'track' && <LikeButton trackId={p.current.id} className="mx-1" />}
+        {!ad && p.current?.kind === 'track' && <ShareButton trackId={p.current.id} trackTitle={p.current.title} />}
         <PlayButton />
         {/* Garis progres tipis di tepi atas (hanya tampilan; seek ada di sheet) */}
         {!ad && <MiniProgress />}
@@ -88,6 +91,7 @@ export function PlayerBar() {
                 )}
               </div>
               {p.current.kind === 'track' && <LikeButton trackId={p.current.id} className="mx-2 shrink-0" />}
+              {p.current.kind === 'track' && <ShareButton trackId={p.current.id} trackTitle={p.current.title} className="shrink-0" />}
             </>
           ) : (
             <p className="text-sm text-rave-subtle">{d.player.pickSong}</p>

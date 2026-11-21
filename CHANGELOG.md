@@ -10,6 +10,20 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 - **berita:** Back Office → Konten → **Ruang Berita** (`/admin/news`, izin baru `news.publish`, default peran Editorial). Artikel dwibahasa ID/EN dengan editor blok (paragraf, subjudul, kutipan; tempel beberapa paragraf otomatis dipecah), foto utama 16:9 (unggah `purpose: news`), slug otomatis, cerita utama, pratinjau sesuai tampilan publik, terbitkan sekarang / jadwalkan / batalkan terbit / arsipkan / hapus — semua tercatat di audit log
 - **web:** halaman publik `/berita` dan `/berita/:slug` kini membaca artikel dari service Platform (`GET /v1/platform/news`), dengan jumlah per kategori, kerangka muat, keadaan kosong/galat, dan versi bahasa Inggris (fallback ke Indonesia)
 
+- **bagikan:** tombol bagikan lagu ke Instagram Story (kartu 1080×1920), X, dan Facebook di player, panel Sedang Diputar, setiap baris lagu, dan halaman lagu — web, desktop, mobile; `GET/POST /v1/catalog/tracks/:id/share`, halaman Open Graph `/s/t/:id` dengan gambar pratinjau 1200×630 berlogo RAVE asli (kartu Instagram Story juga memakai logo asli), Super Admin → Pengaturan Layanan → **Bagikan ke Medsos** (saklar per platform, teks & tagar) + laporan
+- **unduhan:** folder `downloads/` (installer Windows + APK Android, `npm run apps:publish`) disajikan di `/downloads/`; menu unduh di header player, halaman `/unduh`, Landing & footer
+- **keuangan:** PPN langganan (`finance.subscription_ppn_pct`) & kompensasi pembatalan artis (`finance.artist_cancel_penalty_pct`, dibekukan per kontrak) jadi pengaturan Super Admin → Keuangan
+- **desain:** piringan hitam vintage hyperrealistic (web, desktop, mobile) + loader boot tunggal
+
+### Perbaikan
+
+- **go-live:** konfigurasi produksi gagal-tertutup (`PUBLIC_WEB_URL` wajib, saklar dev keuangan ditolak), Midtrans `deny` tidak membatalkan order, kunci wallet denda artis, batas tiket per akun, akses chat siaran bertiket, validasi event iklan
+- **performa:** varian gambar WebP `?w=` dari ffmpeg + cache, preload gambar hero per rute, satu loader (LCP 4G lambat: /berita 8,1→4,7 dtk, /login 9,4→3,8 dtk)
+
+### Catatan deploy
+
+**Wajib baca `docs/DEPLOY-NEXT.md`** — `rave.danantrex.my.id` masih v0.3.1 (ketinggalan v0.4.0–v0.4.2 + semua di atas). Migrasi baru: platform `005_news_featured`, catalog `019_track_shares`; `PUBLIC_WEB_URL` wajib; folder `./downloads` harus ada di server; image gateway, web, catalog wajib dibangun ulang.
+
 ## [0.4.2] — 2026-11-21
 
 ### Perbaikan

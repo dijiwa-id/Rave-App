@@ -5,6 +5,7 @@ import { forbidden, isPublicMediaFile, managedArtistIds, notFound, reqLocale, ve
 import { ARTIST_SUMMARY_COLS, EPISODE_COLS, EPISODE_VISIBLE, RELEASE_SUMMARY_SELECT, SHOW_COLS, SHOW_VISIBLE, TRACK_SELECT, isUuid, releaseFull } from './queries.js';
 import { UPLOAD_DIR } from './storage.js';
 import { demoArtFile } from './demo-art.js';
+import { DEFAULT_MAX_WIDTH, imageVariant, isRasterImage, shouldOptimize, snapWidth } from './image-variants.js';
 import { GENRES } from '@rave/domain';
 
 const GENRE_META = new Map(GENRES.map((g) => [g.id, g]));
@@ -273,8 +274,24 @@ export async function publicRoutes(app: FastifyInstance, { db }: ServiceContext)
       if (!verifyMediaSig(`/v1/catalog/media/${file}`, q.exp, q.sig)) throw forbidden('Tautan media tidak valid atau kedaluwarsa');
     }
     const p = join(UPLOAD_DIR, file);
-    if (!existsSync(p)) throw notFound('Media');
+    if (!existsSync(p) || !statSync(p).isFile()) throw notFound('Media');
     const size = statSync(p).size;
+    // Gambar publik: `?w=` → varian WebP diperkecil (cache disk); tanpa `?w` gambar besar dikirim sebagai WebP ≤ 1280 px
+    // bila browser menerimanya (Vary: Accept). Gagal membuat varian → kirim asli. (Performa LCP; asli tetap utuh.)
+    if (!signed && isRasterImage(file)) {
+      const w = Number((req.query as { w?: string }).w);
+      const acceptsWebp = /image\/webp/.test(String(req.headers.accept ?? ''));
+      const width = Number.isFinite(w) && w > 0 ? snapWidth(w) : acceptsWebp && shouldOptimize(size) ? DEFAULT_MAX_WIDTH : 0;
+      if (width) {
+        const v = await imageVariant(file, width);
+        if (v) {
+          reply.header('content-type', 'image/webp').header('cache-control', 'public, max-age=31536000, immutable').header('vary', 'Accept');
+          reply.header('content-length', statSync(v).size);
+          return reply.send(createReadStream(v));
+        }
+      }
+      reply.header('vary', 'Accept');
+    }
     const ext = file.slice(file.lastIndexOf('.')).toLowerCase();
     reply.header('content-type', MIME[ext] ?? 'application/octet-stream');
     reply.header('accept-ranges', 'bytes');

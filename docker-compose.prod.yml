@@ -151,6 +151,8 @@ services:
     security_opt: ['no-new-privileges:true']
     depends_on: [gateway]
     environment: { RAVE_GATEWAY_UPSTREAM: 'gateway:8080', RAVE_MAX_UPLOAD: '${RAVE_MAX_UPLOAD:-2g}' }
+    # Installer desktop & APK Android untuk tombol unduh (/downloads/) — isi lewat `npm run apps:publish`.
+    volumes: ['./downloads:/srv/downloads:ro']
     # Tanpa profil tls: web melayani HTTP langsung (pasang TLS di LB/Cloudflare). Dengan profil tls: set WEB_BIND=127.0.0.1:8081.
     ports: ['${WEB_BIND:-80}:8080']
 

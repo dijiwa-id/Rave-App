@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { VerifiedBadge } from '@/components/ui/VerifiedBadge';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, ChevronDown, Moon, Sun, ChevronLeft, ChevronRight, Download, Heart, Home, LayoutGrid, Library, LogOut, Radio, Search, Sparkles, Ticket, User } from 'lucide-react';
+import { Bell, ChevronDown, Moon, Sun, ChevronLeft, ChevronRight, Download, Heart, Monitor, Smartphone, Home, LayoutGrid, Library, LogOut, Radio, Search, Sparkles, Ticket, User } from 'lucide-react';
 import { api } from '@/lib/api';
+import { fmtSize, useAppDownloads } from '@/lib/appDownloads';
 import { useDict } from '@/lib/i18n';
 import { hasRole, isSuperAdmin, useAuth } from '@/stores/auth';
 import { RaveLogo } from '@/components/ui/RaveLogo';
@@ -44,6 +45,66 @@ function LiveDot() {
 const HDR_BTN =
   'relative grid size-9 shrink-0 place-items-center border-2 border-rave-ink bg-[#1e1c1f] text-rave-paper shadow-[3px_3px_0_#0b0a0c] transition hover:-translate-y-px hover:bg-rave-primary hover:text-rave-on-primary active:translate-x-[2px] active:translate-y-[2px] active:shadow-none disabled:pointer-events-none disabled:opacity-35 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rave-primary';
 const MENU_ITEM = 'flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm font-bold text-rave-paper/85 transition hover:bg-rave-primary hover:text-rave-on-primary';
+
+/** Tombol unduh header: menu langsung ke installer Windows & APK Android terbaru (+ halaman /unduh). */
+function DownloadMenu() {
+  const d = useDict('common');
+  const a = d.apps;
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const q = useAppDownloads();
+  const m = q.data ?? {};
+  useEffect(() => {
+    const h = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  const items = [
+    { key: 'win', icon: Monitor, name: a.windows, hint: a.windowsHint, asset: m.desktop?.installer, version: m.desktop?.version },
+    { key: 'android', icon: Smartphone, name: a.android, hint: a.androidHint(m.android?.min_android ?? '7.0'), asset: m.android?.apk, version: m.android?.version },
+  ];
+  return (
+    <div ref={ref} className="relative hidden xl:block">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu" title={d.layout.installApp} aria-label={d.layout.installApp} className={cx(HDR_BTN, open && 'translate-x-[2px] translate-y-[2px] !shadow-none')}>
+        <Download className="size-4" />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 z-40 mt-3 w-72 border-2 border-rave-ink bg-[#1e1c1f] text-sm shadow-[6px_6px_0_#F4C21F]" onClick={() => setOpen(false)}>
+          <p className="border-b-2 border-dashed border-white/15 px-3 py-3 font-label text-[11px] font-bold tracking-[0.1em] text-rave-primary-text uppercase">{a.title}</p>
+          <div className="p-1">
+            {items.map(({ key, icon: Icon, name, hint, asset, version }) =>
+              asset ? (
+                <a key={key} role="menuitem" href={asset.url} download={asset.file} className={cx(MENU_ITEM, 'items-start')}>
+                  <Icon className="mt-0.5 size-4 shrink-0" />
+                  <span className="min-w-0">
+                    <span className="block">{a.download} {name}</span>
+                    <span className="block text-xs font-normal opacity-70">
+                      {version && `v${version} · `}
+                      {fmtSize(asset.size)} · {hint}
+                    </span>
+                  </span>
+                </a>
+              ) : (
+                <span key={key} role="menuitem" aria-disabled className={cx(MENU_ITEM, 'pointer-events-none items-start opacity-50')}>
+                  <Icon className="mt-0.5 size-4 shrink-0" />
+                  <span>
+                    <span className="block">{name}</span>
+                    <span className="block text-xs font-normal">{q.isLoading ? '…' : a.soon}</span>
+                  </span>
+                </span>
+              ),
+            )}
+          </div>
+          <div className="border-t-2 border-dashed border-white/15 p-1">
+            <Link role="menuitem" to="/unduh" className={MENU_ITEM}>
+              {a.allOptions}
+            </Link>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function UserMenu() {
   const user = useAuth((s) => s.user);
@@ -269,9 +330,7 @@ function GlobalHeader() {
           </Link>
         )}
         {!token && <ThemeQuickToggle />}
-        <a href="/#unduh" title={d.layout.installApp} aria-label={d.layout.installApp} className={cx(HDR_BTN, 'hidden xl:grid')}>
-          <Download className="size-4" />
-        </a>
+        <DownloadMenu />
         {token ? (
           <UserMenu />
         ) : (

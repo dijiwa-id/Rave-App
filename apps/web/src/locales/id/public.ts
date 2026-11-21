@@ -18,7 +18,8 @@ const dict = {
     takeRave: 'Bawa RAVE ke saku',
     storeAria: (store: string) => `${store} — segera hadir, daftar waitlist untuk kabar rilis`,
     comingTo: 'Segera di',
-    storeNote: 'iOS & Android · gabung waitlist untuk akses pertama',
+    downloadFor: 'Unduh untuk',
+    storeNote: 'Windows & Android siap diunduh · iOS segera (gabung waitlist)',
     tagline: 'Rumah musik DIY & indie Indonesia — dengar gratis, datang ke panggungnya, dukung langsung.',
     cols: [
       { title: 'Perusahaan', links: ['Tentang', 'Berita', 'Karier', 'Untuk Media'] },

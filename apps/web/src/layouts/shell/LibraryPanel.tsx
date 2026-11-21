@@ -16,6 +16,7 @@ import { setting, usePlatformConfig } from '@/lib/platform';
 import { useAnyLive } from '@/components/live/common';
 import { EqBars } from './bits';
 import { usePrefs } from '@/stores/prefs';
+import { sized } from '@/lib/media';
 
 interface Summary {
   liked_count: number;
@@ -101,7 +102,7 @@ function Thumb({ item, size }: { item: Item; size: string }) {
       </span>
     );
   return item.image ? (
-    <img src={item.image} alt="" loading="lazy" decoding="async" className={cx('block shrink-0 border-2 border-rave-ink object-cover', item.kind === 'artist' && 'grayscale-[0.6]', size)} />
+    <img src={sized(item.image, 64)} alt="" loading="lazy" decoding="async" className={cx('block shrink-0 border-2 border-rave-ink object-cover', item.kind === 'artist' && 'grayscale-[0.6]', size)} />
   ) : (
     // Tanpa sampul (mis. playlist baru): kotak blok berukuran tetap + ikon, agar baris & tombol putar tidak runtuh.
     <span className={cx('grid shrink-0 place-items-center border-2 border-rave-ink bg-gradient-to-br from-rave-highlight to-rave-plum text-rave-muted', size)}>

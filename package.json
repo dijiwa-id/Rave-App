@@ -22,6 +22,7 @@
     "e2e": "node --import tsx scripts/e2e.ts",
     "e2e:isolated": "node --import tsx scripts/e2e-isolated.ts",
     "spectrum:backfill": "node --import tsx scripts/spectrum-backfill.ts",
+    "apps:publish": "node --import tsx scripts/publish-apps.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "bash scripts/rave.sh start",
     "stop": "bash scripts/rave.sh stop",

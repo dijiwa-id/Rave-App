@@ -203,6 +203,7 @@ const admin = {
       contract: { name: 'Kontrak & Legalitas', description: '', plan: '', steps: [] as string[] },
       ticketing: { name: 'Tiket & Refund', description: '', plan: '', steps: [] as string[] },
       ads: { name: 'Iklan', description: '', plan: '', steps: [] as string[] },
+      share: { name: 'Bagikan ke Medsos', description: '', plan: '', steps: [] as string[] },
       finance: { name: 'Keuangan', description: '', plan: '', steps: [] as string[] },
       payout: { name: 'Payout', description: '', plan: '', steps: [] as string[] },
       royalty: {

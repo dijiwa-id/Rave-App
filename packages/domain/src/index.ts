@@ -13,5 +13,6 @@ export * from './contract.js';
 export * from './audio.js';
 export * from './integrations.js';
 export * from './reports.js';
+export * from './share.js';
 export * from './pro.js';
 export * from './royalty.js';

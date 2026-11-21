@@ -14,3 +14,9 @@ storage/
 # Artefak lokal Claude Code / tooling
 .claude/scheduled_tasks.lock
 *.tsbuildinfo
+
+# Installer aplikasi (diisi `npm run apps:publish`, disajikan di /downloads/) — biner tidak masuk git.
+downloads/**/*.exe
+downloads/**/*.msi
+downloads/**/*.apk
+downloads/manifest.json

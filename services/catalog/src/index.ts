@@ -4,6 +4,7 @@ import { adminRoutes, scheduledReleaseJob } from './admin.js';
 import { consumers, listenersDecayJob } from './consumers.js';
 import { publicRoutes } from './routes.js';
 import { reportRoutes } from './reports.js';
+import { shareRoutes } from './share.js';
 import { seed } from './seed.js';
 import { syncGenres } from './genres-sync.js';
 import { studioRoutes } from './studio.js';
@@ -19,6 +20,7 @@ async function routes(app: FastifyInstance, ctx: ServiceContext) {
   await adminRoutes(app, ctx);
   await podcastRoutes(app, ctx);
   await reportRoutes(app, ctx);
+  await shareRoutes(app, ctx);
 }
 
 const svc = createService({

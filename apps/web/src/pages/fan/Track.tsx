@@ -1,6 +1,5 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { MoreHorizontal } from 'lucide-react';
 import { api, fmt } from '@/lib/api';
 import type { Artist, Track as TrackT } from '@/lib/types';
 import { useShallow } from 'zustand/react/shallow';
@@ -9,6 +8,8 @@ import { LikeButton } from '@/layouts/PlayerBar';
 import { ActionBar, colorFor, DarkError, glow, PlayFab, TrackTable } from '@/components/fan';
 import { PageLoader } from '@/components/ui';
 import { useDict } from '@/lib/i18n';
+import { sized } from '@/lib/media';
+import { ShareButton } from '@/components/fan/ShareButton';
 
 export interface Lyrics {
   synced: boolean;
@@ -33,12 +34,12 @@ export default function Track() {
     <div className="min-h-full pb-12">
       <header className="px-4 pt-24 pb-8 md:px-8" style={{ background: glow(color, '77') }}>
         <div className="flex flex-col gap-6 md:flex-row md:items-end">
-          {t.release.cover_url && <img src={t.release.cover_url} alt="" className="size-48 rounded-none shadow-[0_4px_60px_rgba(0,0,0,0.5)] md:size-60" />}
+          {t.release.cover_url && <img src={sized(t.release.cover_url, 240)} alt="" className="size-48 rounded-none shadow-[0_4px_60px_rgba(0,0,0,0.5)] md:size-60" />}
           <div className="min-w-0">
             <p className="text-sm font-bold">{d.shared.song}</p>
             <h1 className={`my-3 font-black tracking-tighter break-words ${big}`}>{t.title}</h1>
             <p className="flex flex-wrap items-center gap-1.5 text-sm">
-              {artist.data?.image_url && <img src={artist.data.image_url} alt="" className="size-6 rounded-full" />}
+              {artist.data?.image_url && <img src={sized(artist.data.image_url, 24)} alt="" className="size-6 rounded-full" />}
               <Link to={`/app/artist/${t.artist.slug}`} className="font-bold hover:underline">
                 {t.artist.name}
               </Link>
@@ -57,7 +58,7 @@ export default function Track() {
       <ActionBar>
         <PlayFab size="lg" playKey={`track:${t.id}`} onClick={() => playQueue([trackToPlayable(t)])} />
         <LikeButton trackId={t.id} className="[&>svg]:size-8" />
-        <MoreHorizontal className="size-7 text-rave-muted" aria-hidden />
+        <ShareButton trackId={t.id} trackTitle={t.title} className="size-10" iconClassName="size-7" />
       </ActionBar>
       <div className="grid gap-10 px-4 md:px-8 lg:grid-cols-[3fr_2fr]">
         <section>
@@ -83,7 +84,7 @@ export default function Track() {
         {artist.data && (
           <aside>
             <Link to={`/app/artist/${artist.data.slug}`} className="flex items-center gap-4 rounded-none p-2 hover:bg-white/10">
-              {artist.data.image_url && <img src={artist.data.image_url} alt="" className="size-20 rounded-full object-cover" />}
+              {artist.data.image_url && <img src={sized(artist.data.image_url, 80)} alt="" className="size-20 rounded-full object-cover" />}
               <div>
                 <p className="text-xs font-bold">{d.shared.artist}</p>
                 <p className="font-bold hover:underline">{artist.data.name}</p>

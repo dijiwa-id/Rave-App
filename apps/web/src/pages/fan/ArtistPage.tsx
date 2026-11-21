@@ -15,6 +15,7 @@ import { cx, PageLoader, toast } from '@/components/ui';
 import { LivePill, liveHref, useLiveSettings, useLiveStreams } from '@/components/live/common';
 import { useModule } from '@/components/ModuleGate';
 import { dict, localeTag, useDict } from '@/lib/i18n';
+import { sized } from '@/lib/media';
 
 /** Nama merek platform (tidak diterjemahkan). */
 const PLATFORM_LABEL: Record<string, string> = {
@@ -46,7 +47,7 @@ function BandHeader({ a }: { a: Artist }) {
   return (
     <header className="fan-dark-island relative isolate flex h-[46vh] min-h-[360px] items-end overflow-hidden" style={{ clipPath: HEADER_TORN, backgroundColor: tint }}>
       {img ? (
-        <img src={img} alt="" className="absolute inset-0 -z-20 size-full object-cover grayscale contrast-[1.3] brightness-[1.05]" />
+        <img src={sized(img, 1280)} alt="" className="absolute inset-0 -z-20 size-full object-cover grayscale contrast-[1.3] brightness-[1.05]" />
       ) : (
         <span className="rave-groove absolute top-1/2 right-[-8%] -z-20 aspect-square w-[60%] -translate-y-1/2 opacity-80" aria-hidden />
       )}
@@ -231,7 +232,7 @@ export default function ArtistPage() {
           <section className="mb-10 max-w-3xl">
             <h2 className="mb-4 text-2xl font-bold">{d.shared.about}</h2>
             <div className="relative overflow-hidden rounded-none">
-              {a.image_url && <img src={a.image_url} alt="" className="h-64 w-full object-cover opacity-60" />}
+              {a.image_url && <img src={sized(a.image_url, 640)} alt="" className="h-64 w-full object-cover opacity-60" />}
               <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/90 to-transparent p-6">
                 <p className="font-bold">{d.shared.followers(fmt.num(a.followers))}</p>
                 <p className="mt-2 line-clamp-3 text-sm text-white/85">{a.bio}</p>
