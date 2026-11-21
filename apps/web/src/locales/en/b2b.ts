@@ -320,6 +320,13 @@ const b2b: Shape<typeof id> = {
   },
   onboarding: {
     back: 'Back to the app',
+    artistLead: 'One studio for releases, team, show calendar and payouts — free for independent artists and managements alike.',
+    promotorLead: 'Book artists using audience data, e-contracts and escrow-protected funds — from inquiry to audience check-in.',
+    artistFormSub: 'Choose an account type, then fill in a basic profile. You can change everything later.',
+    promotorFormSub: 'Create your organization first; identity verification follows in the next step.',
+    stepsLabel: 'Sign-up steps',
+    promotorSteps: ['Create organization', 'Verify identity', 'Start booking'],
+    privacyNote: 'Your data is protected under Indonesia’s PDP Law. ID/NIB data is stored encrypted and used only for verification.',
     artistCreatedRoster: 'Artist profile created & added to the management roster',
     artistCreated: 'Artist profile created',
     orgCreated: 'Organization created',
@@ -458,6 +465,8 @@ const b2b: Shape<typeof id> = {
     saveDraft: 'Save draft',
     back: 'Back to the app',
     onboardTitle: 'Become a podcaster on RAVE',
+    onboardLead: 'Publish podcasts and audio fiction to RAVE listeners without an artist profile. Upload audio or paste an embed from another platform.',
+    onboardFormSub: 'One name is all it takes — shows and episodes come next.',
     onboardPoints: [
       'Publish podcasts & serialized audio fiction for RAVE listeners.',
       'Upload your own audio, or embed episodes already on Spotify, YouTube, Apple Podcasts, SoundCloud.',

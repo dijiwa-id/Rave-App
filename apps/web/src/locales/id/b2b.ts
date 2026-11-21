@@ -319,6 +319,13 @@ const b2b = {
   },
   onboarding: {
     back: 'Kembali ke aplikasi',
+    artistLead: 'Satu studio untuk rilis, tim, kalender panggung, dan pembayaran — gratis untuk artis independen maupun manajemen.',
+    promotorLead: 'Booking artis berbasis data audiens, kontrak elektronik, dan dana aman di escrow — dari inquiry sampai check-in penonton.',
+    artistFormSub: 'Pilih jenis akun, lalu lengkapi profil dasar. Semua bisa diubah nanti.',
+    promotorFormSub: 'Buat organisasi terlebih dulu; verifikasi identitas menyusul di langkah berikutnya.',
+    stepsLabel: 'Langkah pendaftaran',
+    promotorSteps: ['Buat organisasi', 'Verifikasi identitas', 'Mulai booking'],
+    privacyNote: 'Data Anda dilindungi sesuai UU PDP. Data KTP/NIB disimpan terenkripsi dan hanya dipakai untuk verifikasi.',
     artistCreatedRoster: 'Profil artis dibuat & masuk roster manajemen',
     artistCreated: 'Profil artis dibuat',
     orgCreated: 'Organisasi dibuat',
@@ -457,6 +464,8 @@ const b2b = {
     saveDraft: 'Simpan draf',
     back: 'Kembali ke aplikasi',
     onboardTitle: 'Jadi podcaster di RAVE',
+    onboardLead: 'Terbitkan podcast dan audio fiksi ke pendengar RAVE tanpa perlu profil artis. Unggah audio atau tempel embed dari platform lain.',
+    onboardFormSub: 'Cukup satu nama untuk memulai — acara dan episode dibuat setelahnya.',
     onboardPoints: [
       'Terbitkan podcast & audio fiksi berseri untuk pendengar RAVE.',
       'Unggah audio sendiri, atau sematkan episode yang sudah ada di Spotify, YouTube, Apple Podcasts, SoundCloud.',
