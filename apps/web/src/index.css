@@ -1267,11 +1267,9 @@ h2 {
   width: 74%;
   aspect-ratio: 1;
   border-radius: 999px;
-  background:
-    radial-gradient(circle, transparent 0 17%, rgb(255 255 255 / 0.05) 17.5% 18%, transparent 18.5%),
-    repeating-radial-gradient(circle, #0d0c0e 0 2px, #1a181c 2px 3px),
-    #111;
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.55), inset 0 0 0 2px #050505;
+  /* tekstur vintage hyperrealistic (scripts/vinyl-textures.ts) */
+  background: url('/textures/vinyl-disc.webp') center / cover no-repeat, #100d0b;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.6), inset 0 0 0 1px #050403;
   transition: transform 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .shell-vinyl__disc::after {
@@ -1280,7 +1278,7 @@ h2 {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: conic-gradient(from 40deg, transparent 0 12%, rgb(255 255 255 / 0.1) 18%, transparent 26% 62%, rgb(255 255 255 / 0.08) 68%, transparent 76%);
+  background: conic-gradient(from 40deg, transparent 0 12%, rgb(255 232 200 / 0.13) 18%, transparent 26% 62%, rgb(255 232 200 / 0.09) 68%, transparent 76%);
 }
 .shell-vinyl__label {
   position: absolute;
@@ -1288,9 +1286,20 @@ h2 {
   border-radius: 999px;
   overflow: hidden;
   background: var(--disc-label, var(--color-rave-purple));
-  box-shadow: 0 0 0 3px var(--disc-label, var(--color-rave-purple));
+  box-shadow: 0 0 0 1.5px #0b0908, inset 0 0 12px rgb(40 20 5 / 0.45);
   animation: rave-spin 2.4s linear infinite;
   animation-play-state: paused;
+}
+/* kertas label menguning, foxing & bekas spindle — di atas cover, tidak menutupinya */
+.shell-vinyl__label::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  background: url('/textures/vinyl-label.webp') center / cover no-repeat;
+  mix-blend-mode: multiply;
+  opacity: 0.7;
 }
 .shell-vinyl__label::after {
   content: '';
@@ -1300,8 +1309,9 @@ h2 {
   width: 10%;
   height: 10%;
   translate: -50% -50%;
+  z-index: 2;
   border-radius: 999px;
-  background: #0b0a0c;
+  background: radial-gradient(circle, #050403 45%, #2a2520 62%, rgb(40 30 20 / 0.35) 100%);
 }
 .shell-vinyl[data-on='true'] .shell-vinyl__disc {
   transform: translateX(26%) rotate(0deg);

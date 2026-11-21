@@ -101,7 +101,8 @@ export function Field({ label, hint, error, children, theme = 'light' }: { label
 // ---------- Feedback ----------
 /** Piringan hitam (alur + label ungu + spindle) — dasar semua indikator muat RAVE. */
 const DISC_BG =
-  'radial-gradient(circle, #181818 0 7%, transparent 7.5%), radial-gradient(circle, #5B2A6E 0 33%, #0b0b0b 33.5% 36%, transparent 36.5%), repeating-radial-gradient(circle, #0d0d0d 0 1.5px, #1a1a1a 1.5px 2.6px)';
+  // label ungu memudar + tekstur piringan vintage (scripts/vinyl-textures.ts)
+  "radial-gradient(circle, #0a0807 0 7%, transparent 7.5%), radial-gradient(circle, #6a4572 0 31%, #4a2c52 33%, #0b0908 33.5% 34.5%, transparent 35%), url('/textures/vinyl-disc.webp') center / cover no-repeat, #100d0b";
 
 /** Indikator muat mini: piringan berputar (tanpa logo) — dipakai di tombol & daftar. */
 export function Spinner({ className = 'size-6' }: { className?: string }) {

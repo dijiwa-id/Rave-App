@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { VINYL_DISC_TEXTURE, VINYL_LABEL_TEXTURE } from './Vinyl';
 
 /**
  * Pemutar piringan hitam vintage (gaya hi-fi 70-an, tanpa merek pihak ketiga) — SVG murni untuk kolase landing,
@@ -96,12 +97,12 @@ export function Turntable({ className }: { className?: string }) {
         {/* Piringan hitam */}
         <g className="rave-cassette__reel">
           <circle cx={cx} cy={cy} r="104" fill={`url(#${id('vinyl')})`} />
-          {Array.from({ length: 34 }, (_, i) => (
-            <circle key={i} cx={cx} cy={cy} r={42 + i * 1.82} fill="none" stroke="#fff" strokeOpacity={i % 9 === 0 ? 0.08 : 0.025} strokeWidth={i % 9 === 0 ? 1.4 : 0.6} />
-          ))}
-          {/* Label tengah */}
-          <circle cx={cx} cy={cy} r="38" fill="#5B2A6E" />
-          <circle cx={cx} cy={cy} r="38" fill="none" stroke="#F4C21F" strokeWidth="2.5" />
+          {/* Tekstur vintage hyperrealistic (scripts/vinyl-textures.ts): alur, debu, baret, patina */}
+          <image href={VINYL_DISC_TEXTURE} x={cx - 104} y={cy - 104} width="208" height="208" />
+          {/* Label tengah: tinta ungu memudar + kertas menguning */}
+          <circle cx={cx} cy={cy} r="38" fill="#674270" />
+          <image href={VINYL_LABEL_TEXTURE} x={cx - 38} y={cy - 38} width="76" height="76" opacity="0.75" style={{ mixBlendMode: 'multiply' }} />
+          <circle cx={cx} cy={cy} r="38" fill="none" stroke="#c9a032" strokeOpacity="0.85" strokeWidth="2.5" />
           <circle cx={cx} cy={cy} r="31" fill="none" stroke="#EDEDED" strokeOpacity="0.25" strokeWidth="0.8" />
           <text x={cx} y={cy - 9} textAnchor="middle" fontFamily="Staatliches, Impact, sans-serif" fontSize="17" letterSpacing="2" fill="#EDEDED">
             RAVE
