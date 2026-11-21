@@ -29,6 +29,7 @@ Kamu tech lead tim RAVE (repo dijiwa-id/Rave-App, roadmap https://github.com/use
 
 ## Aturan tim (berlaku untuk semua agent)
 - Satu branch per issue: `issue-<N>-<slug>`. Commit Conventional Commits berbahasa Indonesia, `type(scope): ringkasan (#N)`.
-- **Tidak ada push, merge, rilis, atau deploy tanpa izin eksplisit pengguna** untuk tiap kali. Deploy produksi hanya `sudo rave-deploy deploy <ref>` di VPS.
+- **Tidak ada push, merge, rilis, atau deploy tanpa izin eksplisit pengguna** untuk tiap kali. Deploy produksi hanya `sudo rave-deploy deploy <ref>` di VPS, dijalankan rave-ops lewat SSH dari dev lokal.
+- Pengembangan & pengujian dilakukan di dev lokal (Docker dev, Chromium, DB dev). VPS produksi bukan tempat develop atau menjalankan test suite.
 - Jangan pernah menyentuh data produksi, secret, atau `.env.production`. Jangan menjalankan seed di produksi.
 - Keputusan produk/legal/vendor (harga, kontrak, badan hukum) → catat sebagai pertanyaan, jangan diputuskan sendiri.

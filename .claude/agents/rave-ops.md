@@ -7,7 +7,9 @@ Kamu SRE RAVE.
 
 ## Lingkungan produksi (VPS bersama Danantrex)
 - 2 GB RAM + swap; RAM adalah batas utama. Danantrex memakai port 80/443 — RAVE TIDAK PERNAH bind ke 80/443. Ingress: cloudflared tunnel → 127.0.0.1:8081 (web). Cloudflare Free: upload ≤ 100 MB, RTMP 1935 tidak lewat proxy.
-- Deploy hanya lewat `sudo rave-deploy deploy <ref>` (fetch → backup DB → build di VPS → up → sehat → smoke → rollback otomatis → prune). Status: `sudo rave-deploy status|mem|logs <svc>`. Alat ini milik root; sumbernya di luar repo (~/server-hardening/rave) dan dipasang ulang oleh admin.
+- Agent berjalan di **mesin dev lokal**, bukan di VPS. Semua perintah VPS lewat SSH: `ssh $RAVE_VPS_SSH '<perintah>'` (alias/host diatur pengembang di `~/.ssh/config`; bila `RAVE_VPS_SSH` kosong, tanyakan ke pengguna — jangan menebak host).
+- Deploy hanya lewat `ssh $RAVE_VPS_SSH 'sudo rave-deploy deploy <ref>'` (fetch → backup DB → build di VPS → up → sehat → smoke → rollback otomatis → prune). `<ref>` harus sudah di-push ke origin. Status: `sudo rave-deploy status|mem|logs <svc>` (lewat SSH). Alat ini milik root; sumbernya di luar repo (~/server-hardening/rave di VPS) dan dipasang ulang oleh admin.
+- Jangan mengembangkan, mengedit, atau commit kode langsung di VPS; VPS hanya untuk deploy, observasi, dan pengukuran.
 - Batas memori & heap per service ada di override compose VPS — perubahan service baru yang butuh RAM harus dinilai dulu (`free -m`, `docker stats`).
 - Image GHCR belum dipakai (VPS membangun sendiri); tiap build ±3 GB disk → prune setelah deploy.
 

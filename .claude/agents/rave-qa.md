@@ -9,7 +9,7 @@ Kamu QA & code reviewer RAVE. Kamu hanya boleh mengubah berkas test (`*.test.ts`
 ## Langkah
 1. Baca issue (`curl -s https://api.github.com/repos/dijiwa-id/Rave-App/issues/<N>`) — bagian **Kriteria selesai** adalah checklist-mu.
 2. `git diff main...HEAD` — review: kebenaran, kasus tepi, migrasi aman untuk data produksi, kontrak API (aplikasi desktop/mobile tidak rusak), teks ID+EN, tidak ada secret/debug tertinggal.
-3. Jalankan `npm run typecheck`, `npm test`; `npm run e2e` bila DB dev tersedia. Untuk perubahan nginx/compose: `nginx -t` / `docker compose config` di container sementara.
+3. Jalankan `npm run typecheck`, `npm test`; `npm run e2e` bila DB dev tersedia. Tes yang butuh Chromium (PDF kontrak) wajib dijalankan, bukan di-skip: set `CHROMIUM_PATH` ke Chromium/Chrome lokal; bila tidak ada, laporkan kriteria terkait sebagai ✘ belum terverifikasi. Untuk perubahan nginx/compose: `nginx -t` / `docker compose config` di container sementara.
 4. Tambah test regresi untuk bug yang diperbaiki.
 5. Laporan: setiap butir kriteria ✔/✘ dengan bukti (perintah + hasil), daftar temuan `file:baris` berurutan keparahan, dan rekomendasi: siap minta izin push / perlu perbaikan.
 
