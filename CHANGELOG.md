@@ -5,6 +5,27 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-11-21
+
+### Fitur
+
+- bagikan lagu ke Instagram/X/Facebook, unduhan aplikasi, performa LCP & satu loader (9399021)
+- **web:** piringan hitam vintage hyperrealistic — tekstur alur, debu, baret, patina & label kertas tua (backup desain lama di design-backup/) (2e42bc3)
+- **berita:** back office Ruang Berita & halaman /berita dari API (9c7a06b)
+
+### Perbaikan
+
+- **nginx:** kutip regex lokasi /s/t/ (kurung kurawal {36} membuat nginx gagal start) (4bc8e77)
+- **go-live:** audit e2e — konfigurasi gagal-tertutup, perbaikan alur bisnis, PPN & penalti pembatalan jadi pengaturan Keuangan (a6c863d)
+- **berita:** cerita utama unik hanya di antara artikel tayang, slug dinormalkan, pencarian ber-debounce (fb5d83d)
+- **web:** area konten dasbor B2B jadi wadah posisi (relative) agar elemen absolut tidak memanjangkan halaman (149a760)
+
+### Lain-lain
+
+- **downloads:** installer RAVE Desktop 0.4.2 & APK Android 0.3.2 terbaru untuk tombol unduh (efeb97c)
+
+### Catatan rilis
+
 ### Fitur
 
 - **berita:** Back Office → Konten → **Ruang Berita** (`/admin/news`, izin baru `news.publish`, default peran Editorial). Artikel dwibahasa ID/EN dengan editor blok (paragraf, subjudul, kutipan; tempel beberapa paragraf otomatis dipecah), foto utama 16:9 (unggah `purpose: news`), slug otomatis, cerita utama, pratinjau sesuai tampilan publik, terbitkan sekarang / jadwalkan / batalkan terbit / arsipkan / hapus — semua tercatat di audit log
