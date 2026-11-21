@@ -62,7 +62,7 @@ server {
   }
 
   # Tautan bagikan lagu pendek /s/t/<id> → halaman Open Graph di catalog (kartu pratinjau X/Facebook/WhatsApp).
-  location ~ ^/s/t/([0-9a-fA-F-]{36})$ {
+  location ~ "^/s/t/([0-9a-fA-F-]{36})$" {
     rewrite ^/s/t/(.*)$ /v1/catalog/share/t/$1 break;
     proxy_pass http://rave_gateway;
     proxy_http_version 1.1;

@@ -1,11 +1,11 @@
 # Deploy berikutnya — fitur yang BELUM ada di produksi
 
-Status server per 2026-11-21:
+Status server per 2026-11-22:
 
 | Server | Versi berjalan | Ketinggalan |
 |---|---|---|
 | **`rave.danantrex.my.id`** (dipakai aplikasi desktop & mobile terpasang) | **v0.3.1 · 61f8c4a** | v0.4.0, v0.4.1, v0.4.2 **dan** semua fitur di tabel "Isi" |
-| prod-local (`127.0.0.1:8088`) | v0.4.2 · 522c7a1 | hanya tabel "Isi" |
+| prod-local (`127.0.0.1:8088`) | **sudah dideploy** 2026-11-22 (efeb97c + perbaikan nginx) | — (rollback: image `0.4.2-pre-share-20261122`, dump `storage/predeploy/rave-prod-pre-share-20261122.sql.gz`) |
 
 Aplikasi desktop & mobile yang terpasang sudah memanggil endpoint baru (bagikan, unduhan, varian gambar, login
 Google native) dan menampilkan "belum tersedia" sampai server-nya diperbarui. Perbarui/hapus berkas ini setelah deploy.
@@ -33,7 +33,11 @@ Google native) dan menampilkan "belum tersedia" sampai server-nya diperbarui. Pe
 | Performa (LCP) | Varian gambar WebP `?w=` dari ffmpeg (cache `<UPLOAD_DIR>/variants`), preload gambar hero per rute, satu loader boot | image **catalog** (ffmpeg sudah ada); volume storage bertambah oleh cache varian (aman dihapus, dibuat ulang otomatis) |
 | Desain | Vinyl vintage hyperrealistic (tekstur `public/textures/`) | image **web** |
 
-## Langkah deploy (prod-local / VPS)
+## Langkah deploy (VPS `rave.danantrex.my.id`)
+
+Catatan dari deploy prod-local: lokasi nginx regex berkurung kurawal wajib dikutip (`location ~ "^/s/t/…{36}$"`) —
+sudah diperbaiki di template; validasi dulu dengan `nginx -t` bila mengubah template.
+
 
 ```bash
 git pull rave main                                   # di direktori server
