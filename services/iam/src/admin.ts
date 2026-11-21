@@ -2,8 +2,23 @@ import type { FastifyInstance } from 'fastify';
 import { ADMIN_ROLES } from '@rave/domain/settings';
 import { audit, badRequest, conflict, forbidden, nextCursor, notFound, pageParams, publish, requirePermission, requireRole, requireService, requireSuperAdmin, z, type ServiceContext } from '@rave/service-kit';
 import { clearMfa } from './mfa.js';
-import { buildMe, MEMBER_TYPES, type MemberType } from './core.js';
+import { anonymizeUser, buildMe, MEMBER_TYPES, type MemberType } from './core.js';
 import { kycOut } from './routes.js';
+
+/**
+ * Filter peran pengguna di dasbor admin (selaras dengan peran turunan di buildMe/deriveRoles):
+ * fan = pendengar murni (tanpa org & bukan admin); artis/manajemen/label/promotor/kreator = anggota org bertipe itu.
+ */
+const orgOf = (types: string) => `EXISTS (SELECT 1 FROM memberships m JOIN orgs o ON o.id = m.org_id WHERE m.user_id = users.id AND o.type IN (${types}))`;
+const ROLE_SQL: Record<string, string> = {
+  fan: `NOT EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = users.id) AND admin_role IS NULL AND NOT is_admin`,
+  artist: orgOf(`'ARTIST'`),
+  manager: orgOf(`'MANAGEMENT'`),
+  label: orgOf(`'LABEL'`),
+  promotor: orgOf(`'PROMOTOR','VENUE'`),
+  creator: orgOf(`'CREATOR'`),
+  admin: `(admin_role IS NOT NULL OR is_admin)`,
+};
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
@@ -78,12 +93,21 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
     });
 
     a.get('/v1/admin/iam/users', { preHandler: requirePermission('users.view') }, async (req) => {
-      const q = req.query as { q?: string; cursor?: string; limit?: string };
+      const q = req.query as { q?: string; cursor?: string; limit?: string; role?: string };
       const { limit, offset } = pageParams(q);
+      const role = q.role && q.role in ROLE_SQL ? q.role : null;
+      const search = `($1::text IS NULL OR email ILIKE '%'||$1||'%' OR display_name ILIKE '%'||$1||'%' OR full_name ILIKE '%'||$1||'%')`;
       const ids = await db.query(
-        `SELECT id FROM users WHERE deleted_at IS NULL AND ($1::text IS NULL OR email ILIKE '%'||$1||'%' OR display_name ILIKE '%'||$1||'%')
+        `SELECT id FROM users WHERE deleted_at IS NULL AND ${search} ${role ? `AND ${ROLE_SQL[role]}` : ''}
          ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
         [q.q || null, limit, offset],
+      );
+      // Jumlah per peran (mengikuti kata kunci pencarian) untuk chip filter di dasbor.
+      const counts = await db.one(
+        `SELECT count(*)::int AS all, ${Object.entries(ROLE_SQL)
+          .map(([k, cond]) => `count(*) FILTER (WHERE ${cond})::int AS ${k}`)
+          .join(', ')} FROM users WHERE deleted_at IS NULL AND ${search}`,
+        [q.q || null],
       );
       // Satu koneksi, berurutan: Promise.all ratusan buildMe menguras pool IAM (login & refresh ikut tertahan).
       const data = await db.tx(async (tx) => {
@@ -91,7 +115,72 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
         for (const r of ids) out.push(await buildMe(tx, r.id));
         return out;
       });
-      return { data, next_cursor: nextCursor(offset, limit, ids.length) };
+      return { data, next_cursor: nextCursor(offset, limit, ids.length), role_counts: counts };
+    });
+
+    // Detail satu pengguna: profil, identitas login, org, sesi, KYC, riwayat verifikasi, persetujuan, aktivitas terakhir.
+    a.get('/v1/admin/iam/users/:id', { preHandler: requirePermission('users.view') }, async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isUuid(id)) throw notFound('Pengguna');
+      const user = await buildMe(db.pool as any, id);
+      if (!user) throw notFound('Pengguna');
+      const [identities, orgs, sessions, kyc, verifications, consents, activity] = await Promise.all([
+        db.query(`SELECT provider, subject, created_at FROM identities WHERE user_id = $1 ORDER BY created_at`, [id]),
+        db.query(
+          `SELECT o.id, o.type, o.name, o.slug, o.city, o.verified, m.role, m.created_at AS joined_at,
+                  (SELECT count(*)::int FROM memberships x WHERE x.org_id = o.id) AS members
+             FROM memberships m JOIN orgs o ON o.id = m.org_id WHERE m.user_id = $1 ORDER BY m.created_at`,
+          [id],
+        ),
+        db.one(
+          `SELECT count(*) FILTER (WHERE revoked_at IS NULL AND rotated_at IS NULL AND expires_at > now())::int AS active,
+                  max(created_at) AS last_seen_at
+             FROM refresh_tokens WHERE user_id = $1`,
+          [id],
+        ),
+        db.one(`SELECT id, level, status, full_name, id_number_masked, reason, created_at, decided_at FROM kyc_submissions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, [id]),
+        db.query(`SELECT id, status, reason, created_at, decided_at FROM verification_requests WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10`, [id]),
+        db.query(`SELECT purpose, granted, updated_at FROM consents WHERE user_id = $1 ORDER BY purpose`, [id]),
+        db.query(
+          `SELECT id, actor_id, action, entity, entity_id, data, created_at FROM audit_logs
+            WHERE actor_id::text = $1 OR entity_id::text = $1 OR data->>'userId' = $1 ORDER BY created_at DESC LIMIT 20`,
+          [id],
+        ),
+      ]);
+      // Nama pelaku (admin/pengguna) untuk log aktivitas — bukan sekadar ID.
+      const actorIds = [...new Set(activity.map((r: any) => r.actor_id).filter((x: string | null) => x && isUuid(x)))];
+      const actors = actorIds.length ? await db.query(`SELECT id::text, display_name FROM users WHERE id = ANY($1::uuid[])`, [actorIds]) : [];
+      const actorName = new Map(actors.map((r: any) => [r.id, r.display_name]));
+      return {
+        user,
+        identities,
+        orgs,
+        sessions: { active: sessions?.active ?? 0, last_seen_at: sessions?.last_seen_at ?? null },
+        kyc: kyc ?? null,
+        verifications,
+        consents,
+        activity: activity.map((r: any) => ({ ...r, actor_name: r.actor_id ? (actorName.get(r.actor_id) ?? null) : null })),
+      };
+    });
+
+    // Hapus akun pengguna (Super Admin, UU PDP): anonimkan seperti hapus mandiri. Tidak untuk diri sendiri, admin aktif
+    // (cabut perannya dulu), atau OWNER organisasi (pindahkan kepemilikan dulu) — mencegah org tanpa pemilik.
+    a.delete('/v1/admin/iam/users/:id', { preHandler: requireSuperAdmin }, async (req) => {
+      const { id } = req.params as { id: string };
+      if (!isUuid(id)) throw notFound('Pengguna');
+      const b = z.object({ reason: z.string().trim().min(5, 'Alasan minimal 5 karakter').max(500) }).parse(req.body);
+      return db.tx(async (tx) => {
+        const u = (await tx.query(`SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`, [id])).rows[0];
+        if (!u) throw notFound('Pengguna');
+        if (u.id === req.user!.sub) throw forbidden('Tidak dapat menghapus akun sendiri dari back office');
+        if (u.admin_role || u.is_admin) throw conflict('Cabut peran admin pengguna ini terlebih dahulu');
+        const owned = (await tx.query(`SELECT o.name FROM memberships m JOIN orgs o ON o.id = m.org_id WHERE m.user_id = $1 AND m.role = 'OWNER'`, [id])).rows;
+        if (owned.length) throw conflict(`Pengguna adalah OWNER organisasi: ${owned.map((o) => o.name).join(', ')}. Pindahkan kepemilikan terlebih dahulu.`);
+        await tx.query(`DELETE FROM memberships WHERE user_id = $1`, [id]);
+        await anonymizeUser(tx, id);
+        await audit(tx, { actorId: req.user!.sub, action: 'user.delete.admin', entity: 'user', entityId: id, data: { reason: b.reason, email: u.email ? `${String(u.email).slice(0, 2)}***` : null } });
+        return { deleted: true };
+      });
     });
 
     // ---- Tim admin (Super Admin) ----

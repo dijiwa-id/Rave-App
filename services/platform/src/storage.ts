@@ -187,7 +187,7 @@ export function disk() {
 async function references(): Promise<Set<string> | null> {
   try {
     const all = await Promise.all(
-      (['catalog', 'library'] as const).map((svc) => callService<{ files: string[] }>('platform', svc, '/internal/media/references')),
+      (['catalog', 'library', 'iam'] as const).map((svc) => callService<{ files: string[] }>('platform', svc, '/internal/media/references')),
     );
     return new Set(all.flatMap((r) => r.files));
   } catch {

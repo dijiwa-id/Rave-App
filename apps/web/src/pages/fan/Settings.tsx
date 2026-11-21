@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AudioLines, Bell, ChevronDown, Copy, Download, KeyRound, Monitor, Moon, Sun, Globe, Library, MonitorPlay, RotateCcw, Search, ShieldCheck, SlidersHorizontal, TriangleAlert, User, X } from 'lucide-react';
+import { AudioLines, BadgeCheck, Bell, ChevronDown, Copy, Download, KeyRound, Monitor, Moon, Sun, Globe, Library, MonitorPlay, RotateCcw, Search, ShieldCheck, SlidersHorizontal, TriangleAlert, User, X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { api, fmt } from '@/lib/api';
 import type { Me, TokenResponse } from '@/lib/types';
@@ -10,6 +10,8 @@ import { usePlayer, type Quality } from '@/stores/player';
 import { EQ_PRESETS, presetOf, usePrefs, type EqPreset } from '@/stores/prefs';
 import { ChoiceChips, FanPage } from '@/components/fan';
 import { Equalizer } from '@/components/fan/Equalizer';
+import { VerificationPanel } from '@/components/fan/VerificationPanel';
+import { VerifiedBadge } from '@/components/ui/VerifiedBadge';
 import { switchLanguage } from '@/components/LanguageSwitch';
 import { Button, confirmDialog, cx, toast } from '@/components/ui';
 import { setting, usePlatformConfig } from '@/lib/platform';
@@ -35,8 +37,8 @@ const NOTIF_CHANNELS: NotifChannel[] = ['push', 'email', 'whatsapp'];
 const defaultPref = (category: NotifCategory): NotifPref => ({ category, push: true, email: category === 'booking' || category === 'payment', whatsapp: false, quiet_start: null, quiet_end: null });
 const CITIES = ['Jakarta', 'Bandung', 'Yogyakarta', 'Surabaya', 'Malang', 'Bali', 'Medan', 'Semarang', 'Makassar', 'Solo', 'Palembang', 'Lainnya'];
 
-type SectionId = 'account' | 'language' | 'audio' | 'eq' | 'library' | 'display' | 'notifications' | 'privacy' | 'security' | 'danger';
-const SECTION_ICON: Record<SectionId, any> = { account: User, language: Globe, audio: AudioLines, eq: SlidersHorizontal, library: Library, display: MonitorPlay, notifications: Bell, privacy: ShieldCheck, security: KeyRound, danger: TriangleAlert };
+type SectionId = 'account' | 'verify' | 'language' | 'audio' | 'eq' | 'library' | 'display' | 'notifications' | 'privacy' | 'security' | 'danger';
+const SECTION_ICON: Record<SectionId, any> = { account: User, verify: BadgeCheck, language: Globe, audio: AudioLines, eq: SlidersHorizontal, library: Library, display: MonitorPlay, notifications: Bell, privacy: ShieldCheck, security: KeyRound, danger: TriangleAlert };
 
 // ───────────────────────── primitif tata letak ─────────────────────────
 /** Kata kunci pencarian aktif; baris yang tidak cocok tidak dirender, bagian tanpa baris disembunyikan via CSS :has(). */
@@ -59,9 +61,11 @@ function Section({ id, title, children, tone }: { id: SectionId; title: string; 
 }
 
 /** Satu baris pengaturan: label + deskripsi di kiri, kontrol di kanan (bertumpuk di panel sempit). */
-function Row({ label, desc, children, keywords, stack, htmlFor }: { label: string; desc?: ReactNode; children?: ReactNode; keywords?: string; stack?: boolean; htmlFor?: string }) {
+function Row({ label, desc, children, keywords, stack, htmlFor, hideLabel }: { label: string; desc?: ReactNode; children?: ReactNode; keywords?: string; stack?: boolean; htmlFor?: string; hideLabel?: boolean }) {
   const q = useContext(QueryCtx);
   if (!matches(q, label, typeof desc === 'string' ? desc : undefined, keywords)) return null;
+  // Label tetap dipakai untuk pencarian, tetapi tidak digambar (isi baris sudah berjudul sendiri).
+  if (hideLabel) return <div className="settings-row settings-row--stack">{children}</div>;
   return (
     <div className={cx('settings-row', stack && 'settings-row--stack')}>
       <div className="min-w-0 flex-1">
@@ -419,7 +423,14 @@ export default function Settings() {
     () => [...(Object.keys(EQ_PRESETS) as EqPreset[]).map((k) => ({ value: k as EqPreset | 'custom', label: s.eqPresets[k] })), ...(preset ? [] : [{ value: 'custom' as const, label: s.eqCustom }])],
     [s, preset],
   );
-  const sections: SectionId[] = ['account', 'language', 'audio', 'eq', 'library', 'display', 'notifications', 'privacy', 'security', 'danger'];
+  const sections: SectionId[] = ['account', 'verify', 'language', 'audio', 'eq', 'library', 'display', 'notifications', 'privacy', 'security', 'danger'];
+  // Tautan langsung ke bagian (mis. notifikasi verifikasi → #set-verify).
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (!id.startsWith('set-')) return;
+    const t = setTimeout(() => document.getElementById(id)?.scrollIntoView({ block: 'start' }), 150);
+    return () => clearTimeout(t);
+  }, []);
   const jump = (id: SectionId) => document.getElementById(`set-${id}`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
   const [ql, qd] = s.qualityRow;
 
@@ -428,7 +439,15 @@ export default function Settings() {
       <QueryCtx.Provider value={q}>
         {/* Kepala halaman: judul + cari pengaturan */}
         <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-          <h1 className="text-4xl leading-none md:text-6xl">{s.title}</h1>
+          <div>
+            <h1 className="text-4xl leading-none md:text-6xl">{s.title}</h1>
+            {user && (
+              <p className="mt-2 flex items-center gap-1.5 font-bold text-rave-paper">
+                {user.display_name}
+                {user.verified && <VerifiedBadge size={18} />}
+              </p>
+            )}
+          </div>
           <label className="relative w-full max-w-xs">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-rave-muted" />
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={s.searchPlaceholder} aria-label={s.searchPlaceholder} className="settings-input pr-9 pl-9" />
@@ -497,6 +516,12 @@ export default function Settings() {
               </Row>
               <Row label={s.emailRow} desc={s.emailHint} keywords="email login">
                 <span className="font-label text-sm text-rave-paper">{user?.email}</span>
+              </Row>
+            </Section>
+
+            <Section id="verify" title={s.sections.verify}>
+              <Row hideLabel label={s.sections.verify} keywords="verified verifikasi badge centang nama lengkap tanggal lahir bio gender whatsapp email foto profil media sosial" stack>
+                <VerificationPanel />
               </Row>
             </Section>
 

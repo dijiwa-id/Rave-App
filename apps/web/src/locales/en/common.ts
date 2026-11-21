@@ -2,6 +2,7 @@ import type { Shape } from '@/lib/i18n';
 import type id from '../id/common';
 
 const common: Shape<typeof id> = {
+  verified: { label: 'Verified account', stamp: 'Verified' },
   embed: {
     via: (p: string) => `Played via ${p} — not counted as a RAVE stream`,
     badge: 'Embed',

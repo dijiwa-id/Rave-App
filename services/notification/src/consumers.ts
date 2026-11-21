@@ -201,6 +201,16 @@ export function consumers(ctx: ServiceContext): Consumers {
         body: p.level === 'BUSINESS' ? 'Akun bisnis Anda terverifikasi — booking & pencairan dana sudah aktif.' : 'Identitas Anda terverifikasi — booking & pencairan dana sudah aktif.',
       });
     },
+    'iam.verification.decided': async (e, tx) => {
+      const p = e.payload;
+      const copy =
+        p.outcome === 'APPROVED'
+          ? { title: 'Akunmu terverifikasi ✓', body: 'Badge Verified kini tampil di profilmu — tarik dana & event bertiket juga sudah terbuka.' }
+          : p.outcome === 'REJECTED'
+            ? { title: 'Verifikasi akun belum disetujui', body: p.reason ? `Alasan: ${p.reason}. Perbaiki datamu lalu ajukan lagi.` : 'Perbaiki datamu lalu ajukan lagi.' }
+            : { title: 'Verifikasi akun dicabut', body: p.reason ? `Alasan: ${p.reason}.` : 'Hubungi dukungan RAVE untuk informasi lebih lanjut.' };
+      await notifyUsers(tx, [p.userId], e.id, { category: 'system', ...copy, link: '/app/settings#set-verify' });
+    },
     'finance.escrow.released': async (e, tx) => {
       for (const l of e.payload.lines) {
         // partyId = org/user penerima; kirim ke anggota org bila ada, atau langsung ke user

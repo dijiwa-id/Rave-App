@@ -1462,7 +1462,7 @@ console.log('\n▶ Akses per peran (fan, artis, manajer, promotor, admin, Super 
   // B3 — KYC wajib untuk menarik dana & membuat event; KYC tidak bisa disetujui sendiri
   const nk = await login(`e2e-nokyc-${Date.now()}@rave.test`);
   const nkPayout = await call(nk.access_token, 'POST', '/v1/finance/payouts', { party_id: nk.user.id, amount: 60_000, bank_account: { bank: 'BCA', number: '1112223334', holder: 'Tanpa KYC' } }, true);
-  check('B3: penarikan tanpa KYC ditolak (403)', nkPayout.status === 403 && /KYC/.test(nkPayout.data?.detail ?? ''), [nkPayout.status, nkPayout.data?.detail]);
+  check('B3: penarikan tanpa verifikasi akun ditolak (403)', nkPayout.status === 403 && /Verifikasi akun/.test(nkPayout.data?.detail ?? ''), [nkPayout.status, nkPayout.data?.detail]);
   const nkOrg = await call(nk.access_token, 'POST', '/v1/orgs', { type: 'PROMOTOR', name: `E2E Promotor Tanpa KYC ${Date.now()}`, city: 'Jakarta' });
   const nk2 = await login(nk.user.email);
   const st0 = new Date(Date.now() + 50 * 86_400_000);
@@ -1471,12 +1471,74 @@ console.log('\n▶ Akses per peran (fan, artis, manajer, promotor, admin, Super 
     starts_at: st0.toISOString(), ends_at: new Date(st0.getTime() + 3 * 3600_000).toISOString(), ticket_types: [{ name: 'Reguler', price: 50_000, quota: 10, max_per_account: 2 }],
   });
   check('B3: membuat event bertiket tanpa KYC ditolak (403)', nkOrg.status === 201 && nkEvent.status === 403, [nkOrg.status, nkEvent.status, nkEvent.data?.detail ?? nkEvent.data?.errors]);
+  // KYC individu digabung ke verifikasi akun: endpoint lama menolak level INDIVIDUAL; KYB butuh akun terverifikasi.
   const ownKyc = await call(OPS, 'POST', '/v1/me/kyc', { level: 'INDIVIDUAL', full_name: 'Admin RAVE', id_number: '3174000011112222' });
-  const selfDecide = ownKyc.data?.id ? await call(OPS, 'POST', `/v1/admin/iam/kyc/${ownKyc.data.id}/decision`, { approve: true }) : { status: 0 };
-  check('B3: admin tidak bisa menyetujui KYC miliknya sendiri (403)', selfDecide.status === 403, [ownKyc.status, selfDecide.status]);
-  if (ownKyc.data?.id) await call(S, 'POST', `/v1/admin/iam/kyc/${ownKyc.data.id}/decision`, { approve: false, reason: 'Uji e2e — dibersihkan' });
+  check('satu verifikasi: KYC individu lama ditolak → arahkan ke Verifikasi akun (400)', ownKyc.status === 400 && /Verifikasi akun/.test(ownKyc.data?.detail ?? ''), [ownKyc.status, ownKyc.data?.detail]);
+  const kybUnverified = await call(nk2.access_token, 'POST', '/v1/me/kyc', { level: 'BUSINESS', org_id: nkOrg.data?.id, business_name: 'PT Uji Tanpa Verifikasi', nib: '1234567890123' });
+  check('satu verifikasi: KYB memerlukan akun terverifikasi dulu (409)', kybUnverified.status === 409, [kybUnverified.status, kybUnverified.data?.detail]);
   const noReason = await call(S, 'POST', `/v1/admin/iam/kyc/${crypto.randomUUID()}/decision`, { approve: false });
   check('B3: penolakan KYC wajib beralasan / pengajuan harus ada', noReason.status === 400 || noReason.status === 404, noReason.status);
+
+  // Verifikasi akun (badge Verified) — data lengkap + kontak OTP → ajukan → review admin users.verify → cabut
+  const vu = await login(`e2e-verify-${Date.now()}@rave.test`);
+  const V = vu.access_token;
+  const vEarly = await call(V, 'POST', '/v1/me/verification', {});
+  check('verifikasi: pengajuan dengan data belum lengkap ditolak (400)', vEarly.status === 400, vEarly.status);
+  const vYoung = await call(V, 'PATCH', '/v1/me', { birth_date: '2020-01-01' });
+  check('verifikasi: usia < 13 tahun ditolak (400)', vYoung.status === 400, vYoung.status);
+  const vPatch = await call(V, 'PATCH', '/v1/me', {
+    full_name: 'Uji Verifikasi E2E', birth_date: '1998-07-20', gender: 'undisclosed', bio: 'Pendengar setia skena indie lokal sejak SMA.',
+    socials: ['https://instagram.com/e2e.rave'], avatar_url: '/v1/catalog/media/e2e-avatar.jpg', city: 'Bandung', id_number: '3273 0120 0798 0001',
+  });
+  check('verifikasi: profil lengkap tersimpan (tanggal lahir tidak bergeser zona waktu)', vPatch.status === 200 && vPatch.data?.birth_date === '1998-07-20' && vPatch.data?.gender === 'undisclosed', [vPatch.status, vPatch.data?.birth_date]);
+  check('verifikasi: NIK disimpan terenkripsi — klien hanya menerima versi tersamar', vPatch.data?.id_number_masked === '************0001' && !JSON.stringify(vPatch.data).includes('3273012007980001'), vPatch.data?.id_number_masked);
+  const wa = `0812${String(Date.now()).slice(-8)}`;
+  const waOtp = await call(V, 'POST', '/v1/me/contact/otp', { channel: 'whatsapp', destination: wa });
+  const waBad = await call(V, 'POST', '/v1/me/contact/verify', { channel: 'whatsapp', destination: wa, code: waOtp.data?.dev_code === '000000' ? '111111' : '000000' });
+  check('verifikasi: kode OTP kontak salah ditolak (401)', waBad.status === 401, waBad.status);
+  const waOk = await call(V, 'POST', '/v1/me/contact/verify', { channel: 'whatsapp', destination: wa, code: waOtp.data?.dev_code });
+  check('verifikasi: WhatsApp tertaut lewat OTP', waOk.status === 200 && waOk.data?.phone === `+62${wa.slice(1)}`, [waOtp.status, waOk.status, waOk.data?.phone]);
+  const other = await login(`e2e-verify-other-${Date.now()}@rave.test`);
+  const waSteal = await call(other.access_token, 'POST', '/v1/me/contact/otp', { channel: 'whatsapp', destination: wa });
+  check('verifikasi: nomor milik akun lain tidak bisa ditautkan (409)', waSteal.status === 409, waSteal.status);
+  const vState = await call(V, 'GET', '/v1/me/verification');
+  check('verifikasi: daftar periksa lengkap', vState.data?.complete === true && vState.data?.status === 'NONE', vState.data);
+  const vReq = await call(V, 'POST', '/v1/me/verification', {});
+  check('verifikasi: pengajuan PENDING', vReq.status === 200 && vReq.data?.status === 'PENDING', [vReq.status, vReq.data]);
+  const vLocked = await call(V, 'PATCH', '/v1/me', { full_name: 'Nama Lain' });
+  check('verifikasi: nama lengkap terkunci selama review (409)', vLocked.status === 409, vLocked.status);
+  const vFan = await call(V, 'GET', '/v1/admin/iam/verifications');
+  check('verifikasi: antrean admin tertutup untuk fan (403)', vFan.status === 403, vFan.status);
+  const vNoReason = await call(OPS, 'POST', `/v1/admin/iam/verifications/${vReq.data?.id}/decision`, { approve: false });
+  check('verifikasi: penolakan wajib beralasan (400)', vNoReason.status === 400, vNoReason.status);
+  const vApprove = await call(OPS, 'POST', `/v1/admin/iam/verifications/${vReq.data?.id}/decision`, { approve: true });
+  const vMe = await call(V, 'GET', '/v1/me');
+  check('verifikasi: OPS menyetujui → badge aktif, tier tidak berubah', vApprove.status === 200 && vMe.data?.verified === true && vMe.data?.verification_status === 'VERIFIED' && vMe.data?.premium === false, [vApprove.status, vMe.data?.verified, vMe.data?.premium]);
+  check('satu verifikasi: persetujuan sekaligus KYC identitas (syarat tarik dana & event)', vMe.data?.kyc_status === 'VERIFIED', vMe.data?.kyc_status);
+  const vList = await call(S, 'GET', `/v1/admin/iam/users?verification=VERIFIED&q=${encodeURIComponent(vu.user.email)}`);
+  check('verifikasi: filter pengguna terverifikasi di dasbor admin', vList.data?.data?.length === 1 && vList.data.data[0].verified === true, vList.data?.data?.length);
+  const vNotif = await until(() => call(V, 'GET', '/v1/notifications'), (r) => r.data?.data?.some((n: any) => /terverifikasi/i.test(n.title)), 15000, 1000);
+  check('verifikasi: pengguna menerima notifikasi persetujuan', vNotif.data?.data?.some((n: any) => /terverifikasi/i.test(n.title)));
+  const vRevoke = await call(S, 'POST', `/v1/admin/iam/users/${vu.user.id}/verification/revoke`, { reason: 'Uji e2e pencabutan' });
+  check('verifikasi: admin mencabut verifikasi → badge & KYC identitas ikut dicabut', vRevoke.status === 200 && vRevoke.data?.verified === false && vRevoke.data?.kyc_status !== 'VERIFIED' && vRevoke.data?.verification_status !== 'VERIFIED', [vRevoke.status, vRevoke.data?.verified, vRevoke.data?.kyc_status]);
+
+  // Detail & hapus pengguna dari back office
+  const ud = await call(OPS, 'GET', `/v1/admin/iam/users/${vu.user.id}`);
+  check('detail pengguna: OPS (users.view) melihat profil, metode masuk & aktivitas', ud.status === 200 && ud.data?.user?.full_name === 'Uji Verifikasi E2E' && ud.data?.identities?.length === 2 && ud.data?.activity?.some((a: any) => a.action === 'verification.approved' && a.actor_name), [ud.status, ud.data?.identities?.length]);
+  const udOps = await call(OPS, 'DELETE', `/v1/admin/iam/users/${vu.user.id}`, { reason: 'uji hapus oleh OPS' });
+  check('hapus pengguna khusus Super Admin (OPS 403)', udOps.status === 403, udOps.status);
+  const udNoReason = await call(S, 'DELETE', `/v1/admin/iam/users/${vu.user.id}`, {});
+  check('hapus pengguna wajib beralasan (400)', udNoReason.status === 400, udNoReason.status);
+  const udOwner = await call(S, 'DELETE', `/v1/admin/iam/users/${promotor.user.id}`, { reason: 'uji hapus owner' });
+  check('OWNER organisasi tidak bisa dihapus (409)', udOwner.status === 409, [udOwner.status, udOwner.data?.detail]);
+  const udAdmin = await call(S, 'DELETE', `/v1/admin/iam/users/${admin.user.id}`, { reason: 'uji hapus admin' });
+  check('akun admin aktif tidak bisa dihapus (409)', udAdmin.status === 409, udAdmin.status);
+  const udDel = await call(S, 'DELETE', `/v1/admin/iam/users/${vu.user.id}`, { reason: 'Akun uji e2e, dibersihkan' });
+  const udMe = await call(V, 'GET', '/v1/me');
+  const udGone = await call(S, 'GET', `/v1/admin/iam/users/${vu.user.id}`);
+  check('Super Admin menghapus akun → data dianonimkan, tidak tampil lagi', udDel.status === 200 && udMe.status === 404 && udGone.status === 404, [udDel.status, udMe.status, udGone.status]);
+  const relog = await login(vu.user.email);
+  check('email akun terhapus bisa mendaftar ulang sebagai akun baru', !!relog.user?.id && relog.user.id !== vu.user.id && relog.user.verified === false, relog.user?.id);
 
   // Kurasi artwork — khusus Super Admin
   const artOps = await call(OPS, 'GET', '/v1/admin/artwork');

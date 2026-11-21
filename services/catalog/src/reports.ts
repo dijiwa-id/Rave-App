@@ -42,7 +42,7 @@ export async function reportRoutes(app: FastifyInstance, { db }: ServiceContext)
         ],
         rows: rows.map((r) => ({
           filename: r.filename,
-          type: r.kind === 'audio' ? 'Audio' : ({ release: 'Artwork', playlist: 'Sampul playlist', category: 'Gambar kategori' } as Record<string, string>)[r.purpose] ?? r.purpose,
+          type: r.kind === 'audio' ? 'Audio' : ({ release: 'Artwork', playlist: 'Sampul playlist', category: 'Gambar kategori', avatar: 'Foto profil' } as Record<string, string>)[r.purpose] ?? r.purpose,
           format: r.codec ? `${r.codec}${r.sample_rate ? ` · ${Math.round(Number(r.sample_rate) / 100) / 10} kHz` : ''}` : '—',
           size: Number(r.size),
           status: !r.completed ? 'UPLOADING' : r.kind === 'audio' ? String(r.transcode_status ?? 'none').toUpperCase() : 'READY',

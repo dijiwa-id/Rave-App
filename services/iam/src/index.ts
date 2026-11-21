@@ -4,6 +4,7 @@ import { adminRoutes } from './admin.js';
 import { reportRoutes } from './reports.js';
 import { seed } from './seed.js';
 import { oauthRoutes } from './oauth.js';
+import { verificationRoutes } from './verification.js';
 
 const svc = createService({
   name: 'iam',
@@ -14,6 +15,7 @@ const svc = createService({
     await routes(app, ctx);
     await oauthRoutes(app, ctx);
     await adminRoutes(app, ctx);
+    await verificationRoutes(app, ctx);
     await reportRoutes(app, ctx);
   },
   jobs: [

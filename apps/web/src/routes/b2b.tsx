@@ -148,6 +148,7 @@ export const b2bRoutes: RouteObject[] = [
               access(['live.moderate'], [{ path: 'live', element: named(adminLive, 'AdminLive') }]),
               access(['finance.view', 'finance.refund', 'finance.payout'], [{ path: 'finance', element: named(admin, 'AdminFinance') }]),
               access(['users.view'], [{ path: 'users', element: named(admin, 'AdminUsers') }]),
+              access(['users.verify'], [{ path: 'verifications', element: named(admin, 'AdminVerifications') }]),
               access(['audit.view'], [{ path: 'audit', element: named(admin, 'AdminAudit') }]),
               // Iklan tier Gratis (docs/API.md §11) — tab via ?tab=overview|campaigns|policy.
               access(['ads.manage', 'ads.review'], [{ path: 'ads', element: named(adminAds, 'AdminAds') }]),

@@ -597,6 +597,7 @@ export const ADMIN_PERMISSIONS = {
   'finance.refund': { label: 'Putuskan, kirim ulang & selesaikan refund', area: 'Keuangan' },
   'finance.payout': { label: 'Setujui / tolak penarikan dana (dual control)', area: 'Keuangan' },
   'users.view': { label: 'Lihat pengguna & organisasi', area: 'Pengguna' },
+  'users.verify': { label: 'Tinjau & cabut verifikasi akun (badge Verified)', area: 'Pengguna' },
   'audit.view': { label: 'Lihat audit log', area: 'Pengguna' },
 } as const;
 export type AdminPermission = keyof typeof ADMIN_PERMISSIONS;
@@ -607,11 +608,11 @@ export const CONFIGURABLE_ADMIN_ROLES = ADMIN_ROLES.filter((r) => r !== 'SUPER_A
 
 /** Default prinsip hak minimum: tiap peran hanya area kerjanya; pengeluaran uang (refund) hanya Finance. */
 export const DEFAULT_ROLE_PERMISSIONS: Record<Exclude<AdminRole, 'SUPER_ADMIN'>, AdminPermission[]> = {
-  OPS: ['qc.review', 'live.moderate', 'ads.review', 'ads.manage', 'kyc.review', 'dispute.resolve', 'finance.view', 'users.view', 'audit.view'],
+  OPS: ['qc.review', 'live.moderate', 'ads.review', 'ads.manage', 'kyc.review', 'dispute.resolve', 'finance.view', 'users.view', 'users.verify', 'audit.view'],
   CONTENT_QC: ['qc.review', 'live.moderate', 'catalog.curate', 'podcast.moderate', 'ads.review'],
   FINANCE: ['finance.view', 'finance.refund', 'finance.payout', 'kyc.review'],
   LEGAL: ['qc.review', 'kyc.review', 'dispute.resolve', 'audit.view'],
-  SUPPORT: ['users.view', 'finance.view'],
+  SUPPORT: ['users.view', 'users.verify', 'finance.view'],
   EDITORIAL: ['live.moderate', 'catalog.curate', 'library.curate', 'podcast.moderate', 'ads.manage'],
 };
 

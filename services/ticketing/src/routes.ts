@@ -148,7 +148,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       const m = assertOrg(req.user, b.org_id, ['OWNER', 'ADMIN', 'MEMBER']);
       if (m.type !== 'PROMOTOR' && m.type !== 'VENUE') throw forbidden('Hanya org promotor yang dapat membuat event');
       // Penjual tiket wajib KYC terverifikasi (mencegah event palsu menampung uang pembeli — audit go-live B3).
-      if (!req.user!.kyc) throw forbidden('Verifikasi KYC wajib sebelum membuat event bertiket. Ajukan di menu Tim & KYC.');
+      if (!req.user!.kyc) throw forbidden('Verifikasi akun wajib sebelum membuat event bertiket. Ajukan di Pengaturan → Verifikasi akun.');
       const id = uuidv7();
       await db.tx(async (tx) => {
         const slug = await uniqueEventSlug(tx, b.title, b.city);
@@ -215,7 +215,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       const e = await findEvent((req.params as any).id);
       if (!e) throw notFound('Event');
       assertStaff(req, e);
-      if (!req.user!.kyc) throw forbidden('Verifikasi KYC wajib sebelum menerbitkan event bertiket.');
+      if (!req.user!.kyc) throw forbidden('Verifikasi akun wajib sebelum menerbitkan event bertiket.');
       if (e.status !== 'DRAFT') throw conflict(`Event berstatus ${e.status}`);
       const n = await db.one(`SELECT count(*)::int AS n FROM ticket_types WHERE event_id = $1`, [e.id]);
       if (!n?.n) throw unprocessable('Tambahkan minimal satu kategori tiket sebelum publish');

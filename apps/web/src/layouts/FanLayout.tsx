@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { VerifiedBadge } from '@/components/ui/VerifiedBadge';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, ChevronDown, Moon, Sun, ChevronLeft, ChevronRight, Download, Heart, Home, LayoutGrid, Library, LogOut, Radio, Search, Sparkles, Ticket, User } from 'lucide-react';
@@ -102,12 +103,16 @@ function UserMenu() {
             {user?.avatar_url ? <img src={user.avatar_url} alt="" className="size-full object-cover" /> : <span className="font-display text-base leading-none text-rave-primary-text">{(user?.display_name ?? '?').slice(0, 1).toUpperCase()}</span>}
           </span>
           <span className="hidden max-w-32 truncate font-label text-[11px] font-bold tracking-[0.08em] uppercase sm:inline">{user?.display_name}</span>
+          {user?.verified && <VerifiedBadge size={14} className="hidden sm:inline-block" />}
           <ChevronDown className={cx('size-4 text-white/60 transition', open && 'rotate-180')} />
         </button>
         {open && (
           <div role="menu" className="absolute right-0 z-40 mt-3 w-64 border-2 border-rave-ink bg-[#1e1c1f] text-sm shadow-[6px_6px_0_#F4C21F]" onClick={() => setOpen(false)}>
             <div className="border-b-2 border-dashed border-white/15 px-3 py-3">
-              <p className="truncate font-bold text-rave-paper">{user?.display_name}</p>
+              <p className="flex items-center gap-1.5 truncate font-bold text-rave-paper">
+                <span className="truncate">{user?.display_name}</span>
+                {user?.verified && <VerifiedBadge size={15} />}
+              </p>
               <p className="truncate text-xs text-white/50">{user?.email}</p>
             </div>
             <div className="p-1">

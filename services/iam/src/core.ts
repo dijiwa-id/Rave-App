@@ -100,6 +100,92 @@ export function memberActive(u: { member_type?: string | null; member_until?: st
   return !u.member_until || new Date(u.member_until).getTime() > Date.now();
 }
 
+// ---- Verifikasi akun (badge "Verified") — tidak memengaruhi tier/fitur ----
+export const GENDERS = ['male', 'female', 'other', 'undisclosed'] as const;
+export const VERIFY_MIN_AGE = 13;
+export const BIO_MIN = 20;
+export const VERIFY_KEYS = ['full_name', 'birth_date', 'id_number', 'gender', 'bio', 'socials', 'avatar', 'city', 'email', 'phone'] as const;
+export type VerifyKey = (typeof VERIFY_KEYS)[number];
+export type VerificationStatus = 'NONE' | 'PENDING' | 'VERIFIED' | 'REJECTED';
+
+/** Umur (tahun penuh) dari tanggal lahir YYYY-MM-DD. */
+export function ageOf(birth: string | Date, now = new Date()): number {
+  const b = new Date(`${typeof birth === 'string' ? birth.slice(0, 10) : isoDate(birth)}T00:00:00Z`);
+  let a = now.getUTCFullYear() - b.getUTCFullYear();
+  if (now.getUTCMonth() < b.getUTCMonth() || (now.getUTCMonth() === b.getUTCMonth() && now.getUTCDate() < b.getUTCDate())) a--;
+  return a;
+}
+/** Kolom `date` → 'YYYY-MM-DD'. node-pg mengurai `date` sebagai tengah malam WAKTU LOKAL → pakai komponen lokal
+ *  (toISOString() akan menggeser sehari di zona UTC+). */
+export const isoDate = (d: unknown): string | null => {
+  if (d instanceof Date) return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return d ? String(d).slice(0, 10) : null;
+};
+
+/**
+ * Daftar periksa data wajib verifikasi. Email & WhatsApp dianggap terverifikasi bila terhubung sebagai identitas login
+ * (dibuktikan lewat OTP) — email juga sah bila akun masuk lewat Google/Apple/Facebook (email dari penyedia).
+ */
+export async function verificationChecklist(q: Q, u: any): Promise<Record<VerifyKey, boolean>> {
+  const ids = (await q.query(`SELECT provider, subject FROM identities WHERE user_id = $1`, [u.id])).rows as { provider: string; subject: string }[];
+  // NIK: tersimpan di profil, atau sudah tercatat lewat KYC lama yang disetujui.
+  const hasNik = !!u.id_number_enc || (await identityVerified(q, u.id));
+  const socials = Array.isArray(u.socials) ? (u.socials as string[]) : [];
+  const birth = isoDate(u.birth_date);
+  return {
+    full_name: (u.full_name ?? '').trim().length >= 3,
+    birth_date: !!birth && ageOf(birth) >= VERIFY_MIN_AGE,
+    id_number: hasNik,
+    gender: GENDERS.includes(u.gender),
+    bio: (u.bio ?? '').trim().length >= BIO_MIN,
+    socials: socials.some((x) => /^https?:\/\/\S+\.\S+/i.test(x)),
+    avatar: !!u.avatar_url,
+    city: !!(u.city ?? '').trim(),
+    email: !!u.email && ids.some((i) => (i.provider === 'email' && i.subject === u.email) || ['google', 'apple', 'facebook'].includes(i.provider)),
+    phone: !!u.phone && ids.some((i) => i.provider === 'whatsapp' && i.subject === u.phone),
+  };
+}
+
+/** Identitas sudah terverifikasi (KYC disetujui — dari verifikasi akun, KYC lama, atau KYB) → syarat tarik dana & event. */
+export async function identityVerified(q: Q, userId: string): Promise<boolean> {
+  return (await q.query(`SELECT 1 FROM kyc_submissions WHERE user_id = $1 AND status = 'VERIFIED' LIMIT 1`, [userId])).rows.length > 0;
+}
+
+/**
+ * Satu status verifikasi (verifikasi akun = KYC identitas): VERIFIED (disetujui; badge tampil bila `verified_at`, yaitu
+ * data diri lengkap) › PENDING (menunggu review) › REJECTED (pengajuan terakhir ditolak) › NONE.
+ * Pengguna dengan KYC lama yang disetujui otomatis VERIFIED — badge muncul setelah melengkapi data diri.
+ */
+export async function verificationStatus(q: Q, u: { id: string; verified_at?: unknown }): Promise<VerificationStatus> {
+  if (u.verified_at || (await identityVerified(q, u.id))) return 'VERIFIED';
+  const r = (await q.query(`SELECT status FROM verification_requests WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, [u.id])).rows[0];
+  return r?.status === 'PENDING' ? 'PENDING' : r?.status === 'REJECTED' ? 'REJECTED' : 'NONE';
+}
+
+/**
+ * Hapus akun (UU PDP): lepas semua identitas login, cabut sesi, anonimkan data pribadi (termasuk data verifikasi),
+ * hapus persetujuan, batalkan pengajuan verifikasi yang menunggu. Baris `users` tetap ada (deleted_at) agar riwayat
+ * transaksi/royalti tetap konsisten. Dipakai hapus mandiri (/v1/me) & hapus oleh Super Admin.
+ */
+export async function anonymizeUser(q: Q, id: string) {
+  await q.query(`DELETE FROM identities WHERE user_id = $1`, [id]);
+  await q.query(`UPDATE refresh_tokens SET revoked_at = coalesce(revoked_at, now()) WHERE user_id = $1`, [id]);
+  await q.query(
+    `UPDATE users SET email = NULL, phone = NULL, display_name = 'Akun dihapus', avatar_url = NULL, city = NULL, genres = '{}',
+       full_name = NULL, birth_date = NULL, gender = NULL, bio = NULL, socials = '[]'::jsonb, verified_at = NULL, verified_by = NULL,
+       id_number_enc = NULL, id_number_masked = NULL,
+       totp_secret_enc = NULL, totp_pending_enc = NULL, totp_enabled_at = NULL, totp_last_step = 0,
+       totp_failures = 0, totp_locked_until = NULL, mfa_enabled = false,
+       deleted_at = now(), updated_at = now()
+     WHERE id = $1`,
+    [id],
+  );
+  await q.query(`DELETE FROM consents WHERE user_id = $1`, [id]);
+  await q.query(`DELETE FROM mfa_recovery_codes WHERE user_id = $1`, [id]);
+  await q.query(`DELETE FROM mfa_challenges WHERE user_id = $1`, [id]);
+  await q.query(`UPDATE verification_requests SET status = 'CANCELLED', decided_at = now() WHERE user_id = $1 AND status = 'PENDING'`, [id]);
+}
+
 export async function buildMe(q: Q, userId: string) {
   const u = (await q.query(`SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL`, [userId])).rows[0];
   if (!u) return null;
@@ -111,6 +197,18 @@ export async function buildMe(q: Q, userId: string) {
     display_name: u.display_name,
     avatar_url: u.avatar_url,
     city: u.city,
+    /** Data profil lengkap (verifikasi akun). */
+    full_name: (u.full_name as string | null) ?? null,
+    birth_date: isoDate(u.birth_date),
+    gender: (u.gender as (typeof GENDERS)[number] | null) ?? null,
+    bio: (u.bio as string | null) ?? null,
+    socials: (Array.isArray(u.socials) ? u.socials : []) as string[],
+    /** NIK tersamar (nilai asli terenkripsi, tidak pernah dikirim ke klien). */
+    id_number_masked: (u.id_number_masked as string | null) ?? (await q.query(`SELECT id_number_masked FROM kyc_submissions WHERE user_id = $1 AND status = 'VERIFIED' ORDER BY created_at DESC LIMIT 1`, [u.id])).rows[0]?.id_number_masked ?? null,
+    /** Badge "Verified" — penanda identitas saja, tidak mengubah tier/fitur. */
+    verified: !!u.verified_at,
+    verified_at: (u.verified_at as string | null) ?? null,
+    verification_status: await verificationStatus(q, u),
     /** Bahasa antarmuka pilihan ('id' | 'en'); null = ikuti perangkat / default platform. */
     locale: (u.locale as 'id' | 'en' | null) ?? null,
     /** Tema aplikasi dengar pilihan pengguna ('light' | 'dark' | 'system'); null = default platform (appearance.player_theme). */

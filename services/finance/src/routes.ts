@@ -330,7 +330,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       const u = req.user!;
       if (p.party_id !== u.sub) assertOrg(u, p.party_id, ['OWNER', 'FINANCE']);
       // KYC terverifikasi wajib sebelum menarik dana (anti pencucian uang & pengambilalihan akun — audit go-live B3).
-      if (!u.kyc) throw forbidden('Verifikasi KYC wajib sebelum menarik dana. Ajukan di menu Tim & KYC.');
+      if (!u.kyc) throw forbidden('Verifikasi akun wajib sebelum menarik dana. Ajukan di Pengaturan → Verifikasi akun.');
       const minAmount = settings.num('payout.min_amount_idr');
       if (p.amount < minAmount) throw badRequest(`Minimal penarikan ${rupiah(minAmount)}`);
       return idempotent(db, req, reply, 'payout', async (c) => {

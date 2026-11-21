@@ -22,8 +22,14 @@ import {
   type ServiceContext,
 } from '@rave/service-kit';
 import {
+  ageOf,
+  anonymizeUser,
+  identityVerified,
   buildMe,
   decrypt,
+  isoDate,
+  GENDERS,
+  VERIFY_MIN_AGE,
   encrypt,
   issueTokens,
   mask,
@@ -40,6 +46,7 @@ import {
 import { consumeLoginCode } from './oauth.js';
 import { checkSecondFactor, clearMfa, completeLogin, MFA_MAX_ATTEMPTS, recoveryRemaining, replaceRecoveryCodes, USER_MFA_COLS } from './mfa.js';
 import { newTotpSecret, otpauthUri, TOTP_LOCK_MIN, verifyTotp } from './totp.js';
+import { issueOtp } from './otp.js';
 
 const otpBody = z.object({ channel: z.enum(['email', 'whatsapp']), destination: z.string().min(5).max(200) });
 const tokenBody = z.discriminatedUnion('grant_type', [
@@ -107,45 +114,10 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     );
     if (existing?.suspended_at) throw forbidden('Akun ini ditangguhkan. Hubungi dukungan RAVE.');
     if (!existing && !settings.bool('general.registrations_open')) throw forbidden('Pendaftaran akun baru sedang ditutup');
-    const windowMin = settings.num('security.otp_window_minutes');
-    const code = otpCode();
-    // Hitung + terbitkan di bawah kunci per tujuan: permintaan paralel tidak bisa melewati batas per jendela.
-    await db.tx(async (tx) => {
-      await tx.query(`SELECT pg_advisory_xact_lock(hashtext('otp:' || $1::text))`, [dest]);
-      const recent = (await tx.query(`SELECT count(*)::int AS n FROM otp_codes WHERE destination = $1 AND created_at > now() - make_interval(mins => $2)`, [dest, windowMin])).rows[0];
-      // Khusus dev (NODE_ENV ≠ production): Super Admin tidak terkena batas OTP per jendela (mis. 15 menit) agar uji
-      // Back Office tidak terkunci. Batas salah tebak kode (OTP_MAX_ATTEMPTS) & rate limit gateway tetap berlaku.
-      const devSuperAdmin = config.isDev && existing?.admin_role === 'SUPER_ADMIN';
-      if (!devSuperAdmin && (recent?.n ?? 0) >= settings.num('security.otp_max_per_window'))
-        throw new HttpError(429, 'Too Many Requests', `Terlalu banyak permintaan OTP. Coba lagi dalam ${windowMin} menit.`);
-      await tx.query(`INSERT INTO otp_codes (destination, channel, code_hash, expires_at) VALUES ($1,$2,$3, now() + make_interval(secs => $4))`, [
-        dest,
-        b.channel,
-        sha256(`${dest}:${code}`),
-        OTP_TTL_SEC,
-      ]);
-    });
-    // Kirim lewat adapter email / WhatsApp Business API (§11.9, EMAIL_PROVIDER / WHATSAPP_PROVIDER). Kode tidak pernah dicatat ke log.
-    try {
-      const mins = Math.round(OTP_TTL_SEC / 60);
-      if (provider === 'email') {
-        const m = brandedEmail({
-          heading: 'Kode masuk RAVE',
-          lines: [`Masukkan kode berikut untuk masuk ke RAVE. Berlaku ${mins} menit.`, 'Jangan bagikan kode ini kepada siapa pun, termasuk tim RAVE.'],
-          code,
-          footer: 'Tidak merasa meminta kode? Abaikan email ini — akunmu tetap aman.',
-        });
-        await sendEmail({ to: dest, subject: `${code} adalah kode masuk RAVE`, ...m, tag: 'otp' });
-      } else {
-        await sendWhatsApp({ to: dest, text: `${code} adalah kode masuk RAVE. Berlaku ${mins} menit. Jangan bagikan kode ini.`, otpCode: code });
-      }
-    } catch (e) {
-      req.log.error({ dest: mask(dest), channel: provider, err: (e as Error).message }, 'OTP gagal dikirim');
-      // Kode yang tidak terkirim dihapus agar tidak memakan kuota permintaan OTP pengguna.
-      await db.query(`DELETE FROM otp_codes WHERE destination = $1 AND consumed_at IS NULL AND code_hash = $2`, [dest, sha256(`${dest}:${code}`)]);
-      throw new HttpError(e instanceof DeliveryError && !e.retryable ? 502 : 503, e instanceof DeliveryError && !e.retryable ? 'Bad Gateway' : 'Service Unavailable', 'Kode belum dapat dikirim. Coba lagi sebentar lagi.');
-    }
-    req.log.info({ dest: mask(dest), channel: b.channel }, 'OTP diterbitkan');
+    // Khusus dev (NODE_ENV ≠ production): Super Admin tidak terkena batas OTP per jendela (mis. 15 menit) agar uji
+    // Back Office tidak terkunci. Batas salah tebak kode (OTP_MAX_ATTEMPTS) & rate limit gateway tetap berlaku.
+    const devSuperAdmin = config.isDev && existing?.admin_role === 'SUPER_ADMIN';
+    const code = await issueOtp(db, req.log, { dest, channel: b.channel, purpose: 'login', bypassLimit: devSuperAdmin });
     return { sent: true, expires_in: OTP_TTL_SEC, ...(config.isDev ? { dev_code: code } : {}) };
   });
 
@@ -319,12 +291,84 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
       const b = z
         .object({
           display_name: z.string().min(1).max(80).optional(),
-          avatar_url: z.string().url().nullable().optional(),
+          // URL http(s) atau berkas unggahan RAVE (/v1/catalog/media/…, purpose 'avatar').
+          avatar_url: z
+            .string()
+            .max(500)
+            .regex(/^(https?:\/\/\S+|\/v1\/catalog\/media\/[\w.-]+)$/, 'URL foto profil tidak valid')
+            .nullable()
+            .optional(),
           city: z.string().max(80).nullable().optional(),
           locale: z.enum(['id', 'en']).nullable().optional(),
           theme: z.enum(['light', 'dark', 'system']).nullable().optional(),
+          // Data profil lengkap (verifikasi akun) — semua opsional & dapat dikosongkan (null).
+          full_name: z.string().trim().min(3).max(120).nullable().optional(),
+          birth_date: z
+            .string()
+            .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal lahir YYYY-MM-DD')
+            .refine((d) => !Number.isNaN(Date.parse(d)) && ageOf(d) >= VERIFY_MIN_AGE && ageOf(d) <= 120, `Usia minimal ${VERIFY_MIN_AGE} tahun`)
+            .nullable()
+            .optional(),
+          gender: z.enum(GENDERS).nullable().optional(),
+          // NIK (KTP) 16 digit — disimpan terenkripsi; hanya versi tersamar yang dikembalikan.
+          id_number: z
+            .string()
+            .transform((v) => v.replace(/\s/g, ''))
+            .pipe(z.string().regex(/^\d{16}$/, 'NIK harus 16 digit angka'))
+            .nullable()
+            .optional(),
+          bio: z.string().trim().max(280).nullable().optional(),
+          socials: z
+            .array(z.string().trim().max(200).regex(/^https?:\/\/\S+\.\S+/i, 'Tautan media sosial harus diawali http(s)://'))
+            .max(5)
+            .optional(),
         })
         .parse(req.body);
+      // Nama lengkap & tanggal lahir terkunci selama terverifikasi / menunggu review (data yang ditinjau admin).
+      if (b.id_number !== undefined) {
+        // NIK terkunci selama menunggu review / setelah identitas terverifikasi (data KYC yang sudah diperiksa admin).
+        const cur = await db.one(`SELECT verified_at FROM users WHERE id = $1`, [req.user!.sub]);
+        if (cur?.verified_at || (await identityVerified(pool, req.user!.sub))) throw conflict('NIK tidak dapat diubah setelah identitas terverifikasi. Hubungi dukungan RAVE.');
+        if (await db.one(`SELECT 1 FROM verification_requests WHERE user_id = $1 AND status = 'PENDING'`, [req.user!.sub]))
+          throw conflict('Batalkan pengajuan verifikasi dulu untuk mengubah NIK.');
+        await db.query(`UPDATE users SET id_number_enc = $2, id_number_masked = $3 WHERE id = $1`, [
+          req.user!.sub,
+          b.id_number ? encrypt(b.id_number) : null,
+          b.id_number ? mask(b.id_number) : null,
+        ]);
+      }
+      if (b.full_name !== undefined || b.birth_date !== undefined) {
+        const cur = await db.one(`SELECT full_name, birth_date, verified_at FROM users WHERE id = $1`, [req.user!.sub]);
+        const curBirth = isoDate(cur?.birth_date);
+        const changes = (b.full_name !== undefined && b.full_name !== cur?.full_name) || (b.birth_date !== undefined && b.birth_date !== curBirth);
+        if (changes) {
+          if (cur?.verified_at) throw conflict('Nama lengkap & tanggal lahir tidak dapat diubah selama akun terverifikasi. Hubungi dukungan RAVE.');
+          if (await db.one(`SELECT 1 FROM verification_requests WHERE user_id = $1 AND status = 'PENDING'`, [req.user!.sub]))
+            throw conflict('Batalkan pengajuan verifikasi dulu untuk mengubah nama lengkap / tanggal lahir.');
+        }
+      }
+      await db.query(
+        `UPDATE users SET
+           full_name = CASE WHEN $2::boolean THEN $3 ELSE full_name END,
+           birth_date = CASE WHEN $4::boolean THEN $5::date ELSE birth_date END,
+           gender = CASE WHEN $6::boolean THEN $7 ELSE gender END,
+           bio = CASE WHEN $8::boolean THEN $9 ELSE bio END,
+           socials = CASE WHEN $10::boolean THEN $11::jsonb ELSE socials END
+         WHERE id = $1`,
+        [
+          req.user!.sub,
+          'full_name' in b,
+          b.full_name ?? null,
+          'birth_date' in b,
+          b.birth_date ?? null,
+          'gender' in b,
+          b.gender ?? null,
+          'bio' in b,
+          b.bio || null,
+          'socials' in b,
+          JSON.stringify(b.socials ?? []),
+        ],
+      );
       await db.query(
         `UPDATE users SET display_name = coalesce($2, display_name),
            avatar_url = CASE WHEN $3::boolean THEN $4 ELSE avatar_url END,
@@ -436,15 +480,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     authed.delete('/v1/me', async (req) => {
       const id = req.user!.sub;
       await db.tx(async (tx) => {
-        await tx.query(`DELETE FROM identities WHERE user_id = $1`, [id]);
-        await tx.query(`UPDATE refresh_tokens SET revoked_at = coalesce(revoked_at, now()) WHERE user_id = $1`, [id]);
-        await tx.query(
-          `UPDATE users SET email = NULL, phone = NULL, display_name = 'Akun dihapus', avatar_url = NULL, city = NULL, genres = '{}',
-           deleted_at = now() WHERE id = $1`,
-          [id],
-        );
-        await clearMfa(tx, id);
-        await tx.query(`DELETE FROM consents WHERE user_id = $1`, [id]);
+        await anonymizeUser(tx, id);
         await audit(tx, { actorId: id, action: 'user.delete', entity: 'user', entityId: id, ip: ip(req) });
       });
       return { deleted: true };
@@ -467,29 +503,35 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     });
 
     // ---------------- KYC (REQ-IAM-04) ----------------
+    // KYC individu digabung ke "Verifikasi akun" (/v1/me/verification). Endpoint ini kini khusus KYB organisasi:
+    // memakai nama lengkap & NIK dari profil yang sudah terverifikasi (tidak diisi ulang) + nama usaha & NIB.
     authed.post('/v1/me/kyc', async (req) => {
       const b = z
         .object({
           level: z.enum(['INDIVIDUAL', 'BUSINESS']),
-          full_name: z.string().min(3).max(120),
-          id_number: z.string().min(8).max(32),
           org_id: z.string().uuid().optional().nullable(),
-          business_name: z.string().max(160).optional().nullable(),
-          nib: z.string().max(40).optional().nullable(),
+          business_name: z.string().trim().min(2).max(160).optional().nullable(),
+          nib: z.string().trim().min(5).max(40).optional().nullable(),
         })
+        .passthrough()
         .parse(req.body);
-      if (b.level === 'BUSINESS' && (!b.org_id || !b.nib)) throw badRequest('KYB memerlukan org_id dan NIB');
-      if (b.org_id && !['OWNER', 'ADMIN'].includes((await dbOrgRole(pool, b.org_id, req.user!.sub)) ?? '')) throw forbidden('Hanya OWNER/ADMIN org');
+      if (b.level === 'INDIVIDUAL') throw badRequest('Verifikasi identitas kini lewat Verifikasi akun (Pengaturan → Verifikasi akun).');
+      if (!b.org_id || !b.nib || !b.business_name) throw badRequest('KYB memerlukan organisasi, nama usaha, dan NIB');
+      if (!['OWNER', 'ADMIN'].includes((await dbOrgRole(pool, b.org_id, req.user!.sub)) ?? '')) throw forbidden('Hanya OWNER/ADMIN org');
       const pending = await db.one(`SELECT id FROM kyc_submissions WHERE user_id = $1 AND status = 'PENDING'`, [req.user!.sub]);
-      if (pending) throw conflict('Masih ada pengajuan KYC yang menunggu review');
+      if (pending) throw conflict('Masih ada pengajuan KYB yang menunggu review');
+      const u = await db.one(`SELECT full_name, id_number_enc, id_number_masked, verified_at FROM users WHERE id = $1`, [req.user!.sub]);
+      // Identitas penanggung jawab = verifikasi akun (atau KYC lama yang disetujui).
+      const prior = await db.one(`SELECT full_name, id_number_enc, id_number_masked FROM kyc_submissions WHERE user_id = $1 AND status = 'VERIFIED' ORDER BY created_at DESC LIMIT 1`, [req.user!.sub]);
+      const person = u?.verified_at && u.id_number_enc ? u : prior;
+      if (!person?.id_number_enc || !person.full_name) throw conflict('Verifikasi akunmu dulu (Pengaturan → Verifikasi akun) — KYB memakai identitas penanggung jawab yang sudah terverifikasi.');
       return db.tx(async (tx) => {
         const id = uuidv7();
-        const idn = b.id_number.replace(/\s/g, '');
         const r = (
           await tx.query(
             `INSERT INTO kyc_submissions (id, user_id, org_id, level, full_name, id_number_enc, id_number_masked, business_name, nib)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-            [id, req.user!.sub, b.org_id ?? null, b.level, b.full_name, encrypt(idn), mask(idn), b.business_name ?? null, b.nib ?? null],
+             VALUES ($1,$2,$3,'BUSINESS',$4,$5,$6,$7,$8) RETURNING *`,
+            [id, req.user!.sub, b.org_id, person.full_name, person.id_number_enc, person.id_number_masked, b.business_name, b.nib],
           )
         ).rows[0];
         await audit(tx, { actorId: req.user!.sub, action: 'kyc.submit', entity: 'kyc', entityId: id, ip: ip(req) });

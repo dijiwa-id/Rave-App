@@ -689,7 +689,8 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
           /** playlist = sampul playlist pengguna (fan); category = gambar kategori Jelajahi (Super Admin). Gambar saja, ≤ 8 MB, ≥ 300 px. */
           /** podcast = audio episode (≤ upload.podcast_max_mb) atau sampul acara (≥ upload.cover_min_px). */
           /** ad = audio/gambar kampanye iklan (izin ads.manage) — audio lossy ringan (MP3/AAC/OGG/Opus), gambar ≥ 300 px, ≤ 8 MB. */
-          purpose: z.enum(['release', 'playlist', 'category', 'podcast', 'ad']).default('release'),
+          /** avatar = foto profil pengguna (verifikasi akun) — gambar saja, ≤ 8 MB, ≥ 300 px. */
+          purpose: z.enum(['release', 'playlist', 'category', 'podcast', 'ad', 'avatar']).default('release'),
           filename: z.string().min(1).max(200),
           // Boleh kosong: browser sering tidak mengenali .flac/.aiff → MIME ditentukan dari ekstensi di bawah.
           content_type: z.string().max(100),

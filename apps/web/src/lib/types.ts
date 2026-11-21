@@ -17,6 +17,18 @@ export interface Me {
   display_name: string;
   avatar_url: string | null;
   city: string | null;
+  /** Data profil lengkap (verifikasi akun). */
+  full_name?: string | null;
+  birth_date?: string | null;
+  gender?: 'male' | 'female' | 'other' | 'undisclosed' | null;
+  bio?: string | null;
+  socials?: string[];
+  /** NIK tersamar (nilai asli terenkripsi di server). */
+  id_number_masked?: string | null;
+  /** Badge "Verified" — penanda identitas saja, tidak mengubah tier/fitur. */
+  verified?: boolean;
+  verified_at?: string | null;
+  verification_status?: VerificationStatus;
   /** Bahasa antarmuka pilihan; null = ikuti perangkat / default platform. */
   locale?: 'id' | 'en' | null;
   /** Tema aplikasi dengar pilihan pengguna; null = default platform (appearance.player_theme). */
@@ -40,6 +52,14 @@ export interface Me {
   created_at: string;
 }
 export type MemberType = 'FREE' | 'INDIVIDUAL' | 'STUDENT' | 'DUO';
+export type VerificationStatus = 'NONE' | 'PENDING' | 'VERIFIED' | 'REJECTED';
+export interface VerificationState {
+  status: VerificationStatus;
+  verified_at: string | null;
+  checklist: Record<'full_name' | 'birth_date' | 'id_number' | 'gender' | 'bio' | 'socials' | 'avatar' | 'city' | 'email' | 'phone', boolean>;
+  complete: boolean;
+  request: { id: string; status: string; reason: string | null; created_at: string; decided_at: string | null } | null;
+}
 export interface TokenResponse {
   access_token: string;
   refresh_token: string;

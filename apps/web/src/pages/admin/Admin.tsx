@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, type ReactNode } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, ArrowRight, Headphones, Images, ListMusic, Shapes, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow } from 'lucide-react';
+import { Activity, ArrowRight, BadgeCheck, Briefcase, Mic2, Podcast, Ticket, Headphones, Images, ListMusic, Shapes, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow } from 'lucide-react';
 import { ADMIN_PERMISSIONS, ADMIN_ROLE_LABEL, type AdminPermission, type AdminRole } from '@rave/domain/settings';
 import { can, isSuperAdmin, useAuth } from '@/stores/auth';
 import { B2BLayout, type B2BNavItem } from '@/layouts/B2BLayout';
@@ -13,6 +13,7 @@ import type { AdminPayoutRow, AdminRefundRow, Dispute, Me, MemberType, PayoutSta
 import { Badge, Button, Card, cx, Field, Input, Modal, PageHeader, Select, Stat, Textarea, toast } from '@/components/ui';
 import { Empty, QueryState, Table } from '@/components/b2b/common';
 import { ReleaseStatusBadge } from '../studio/Releases';
+import { VerifiedBadge } from '@/components/ui/VerifiedBadge';
 
 type AdminNavItem = B2BNavItem & { perms?: AdminPermission[]; superOnly?: boolean };
 
@@ -56,6 +57,7 @@ export function AdminLayout() {
     { to: '/admin/finance', label: n.finance, icon: Scale, perms: ['finance.view', 'finance.refund', 'finance.payout'], section: area('finance.view') },
     // Seksi Pengguna
     { to: '/admin/users', label: n.users, icon: Users, perms: ['users.view'], section: area('users.view') },
+    { to: '/admin/verifications', label: n.verifications, icon: BadgeCheck, perms: ['users.verify'] },
     { to: '/admin/audit', label: n.audit, icon: FileClock, perms: ['audit.view'] },
     // Platform — tata kelola (khusus Super Admin, tidak dapat didelegasikan).
     { to: '/admin/platform', label: n.platformDashboard, icon: Gauge, end: true, section: n.platformSection, superOnly: true },
@@ -1063,6 +1065,7 @@ function MemberModal({ user, onClose }: { user: Me | null; onClose: () => void }
       await api(`/v1/admin/iam/users/${user.id}`, { method: 'PATCH', body: { member_type: type, member_until, reason: reason.trim() } });
       toast.success(t.saved(user.display_name, t.member[type]));
       qc.invalidateQueries({ queryKey: ['admin-users'] });
+      qc.invalidateQueries({ queryKey: ['admin-user', user.id] });
       setOpened(null);
       onClose();
     } catch (e) {
@@ -1120,13 +1123,338 @@ function MemberModal({ user, onClose }: { user: Me | null; onClose: () => void }
   );
 }
 
+type UserDetailData = {
+  user: Me & { suspended_at?: string | null; onboarded?: boolean };
+  identities: { provider: string; subject: string; created_at: string }[];
+  orgs: { id: string; type: string; name: string; slug: string; city: string | null; verified: boolean; role: string; joined_at: string; members: number }[];
+  sessions: { active: number; last_seen_at: string | null };
+  kyc: { level: string; status: string; full_name: string; id_number_masked: string; reason: string | null; created_at: string } | null;
+  verifications: { id: string; status: string; reason: string | null; created_at: string; decided_at: string | null }[];
+  consents: { purpose: string; granted: boolean; updated_at: string }[];
+  activity: { id: string; actor_id: string | null; actor_name: string | null; action: string; entity: string; entity_id: string | null; data: unknown; created_at: string }[];
+};
+
+/** Baris label–nilai ringkas di panel detail pengguna. */
+function KV({ k, children }: { k: string; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-[9.5rem_minmax(0,1fr)] gap-3 py-1.5 text-sm">
+      <dt className="text-b2b-muted">{k}</dt>
+      <dd className="min-w-0 break-words">{children ?? '—'}</dd>
+    </div>
+  );
+}
+function DetailSection({ title, children, tone }: { title: string; children: ReactNode; tone?: 'danger' }) {
+  return (
+    <section className={cx('border-2 p-4', tone === 'danger' ? 'border-red-500/40 bg-red-500/[0.04]' : 'border-b2b-line bg-b2b-card')}>
+      <h3 className={cx('mb-2 font-label text-[11px] font-bold tracking-[0.12em] uppercase', tone === 'danger' ? 'text-red-600' : 'text-b2b-muted')}>{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * Detail pengguna (izin users.view): profil lengkap, akun & akses, metode masuk, organisasi, riwayat verifikasi,
+ * persetujuan data, aktivitas terakhir. Aksi: ubah member · tangguhkan/pulihkan · hapus akun (Super Admin),
+ * cabut verifikasi (users.verify). Semua aksi beralasan & tercatat di audit log.
+ */
+function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose: () => void; onEditMember: (u: Me) => void }) {
+  const d = useDict('admin');
+  const t = d.users;
+  const f = t.fields;
+  const me = useAuth((x) => x.user);
+  const sup = isSuperAdmin(me);
+  const canVerify = can(me, 'users.verify');
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['admin-user', id], enabled: !!id, queryFn: () => api<UserDetailData>(`/v1/admin/iam/users/${id}`) });
+  const [reason, setReason] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [opened, setOpened] = useState<string | null>(null);
+  if (id && opened !== id) {
+    setOpened(id);
+    setReason('');
+    setConfirm('');
+  }
+  const close = () => {
+    setOpened(null);
+    onClose();
+  };
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['admin-user', id] });
+    void qc.invalidateQueries({ queryKey: ['admin-users'] });
+    void qc.invalidateQueries({ queryKey: ['admin-verifications'] });
+  };
+  const data = q.data;
+  const u = data?.user;
+
+  async function act(fn: () => Promise<unknown>, ok: string) {
+    setBusy(true);
+    try {
+      await fn();
+      toast.success(ok);
+      refresh();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const suspend = () => {
+    if (!u) return;
+    const r = prompt(u.suspended_at ? t.unsuspendPrompt : t.suspendPrompt);
+    if (!r) return;
+    void act(() => api(`/v1/admin/iam/users/${u.id}`, { method: 'PATCH', body: { suspended: !u.suspended_at, reason: r.trim() } }), u.suspended_at ? t.unsuspendedOk : t.suspendedOk);
+  };
+  const revokeVerify = () => {
+    if (!u) return;
+    const r = prompt(d.verifications.revokePrompt);
+    if (!r) return;
+    void act(() => api(`/v1/admin/iam/users/${u.id}/verification/revoke`, { body: { reason: r.trim() } }), d.verifications.revoked);
+  };
+  async function remove() {
+    if (!u) return;
+    setBusy(true);
+    try {
+      await api(`/v1/admin/iam/users/${u.id}`, { method: 'DELETE', body: { reason: reason.trim() } });
+      toast.success(t.deleted(u.display_name));
+      void qc.invalidateQueries({ queryKey: ['admin-users'] });
+      close();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ownerOf = data?.orgs.filter((o) => o.role === 'OWNER').map((o) => o.name) ?? [];
+  const blocked = !u ? null : u.id === me?.id ? t.deleteBlockedSelf : u.admin_role ? t.deleteBlockedAdmin : ownerOf.length ? t.deleteBlockedOwner(ownerOf.join(', ')) : null;
+  const confirmKey = u?.email ?? u?.id ?? '';
+
+  return (
+    <Modal open={!!id} onClose={close} title={t.detailTitle} wide="xl">
+      <QueryState q={q}>
+        {u && data && (
+          <div className="space-y-4">
+            {/* Kepala: avatar, nama + badge, kontak, status, aksi cepat */}
+            <div className="flex flex-wrap items-start gap-4">
+              <span className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full border-2 border-b2b-ink bg-rave-purple">
+                {u.avatar_url ? <img src={u.avatar_url} alt="" className="size-full object-cover" /> : <span className="font-display text-2xl text-rave-primary">{u.display_name.slice(0, 1).toUpperCase()}</span>}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="flex flex-wrap items-center gap-2 text-xl font-bold">
+                  {u.display_name}
+                  {u.verified && <VerifiedBadge size={20} />}
+                  <Badge tone={u.suspended_at ? 'red' : 'green'}>{u.suspended_at ? t.suspended : t.active}</Badge>
+                </p>
+                <p className="text-sm text-b2b-muted">
+                  {u.email ?? '—'} · {u.phone ?? '—'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(u.id);
+                    toast.success(t.copied);
+                  }}
+                  title={t.copyId}
+                  className="mt-1 font-mono text-[11px] text-b2b-muted hover:text-b2b-ink"
+                >
+                  {u.id}
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {sup && (
+                  <Button size="sm" variant="outline-ink" onClick={() => onEditMember(u)}>
+                    {t.editMember}
+                  </Button>
+                )}
+                {canVerify && u.verified && (
+                  <Button size="sm" variant="outline-ink" loading={busy} onClick={revokeVerify}>
+                    {t.revokeVerify}
+                  </Button>
+                )}
+                {sup && u.id !== me?.id && (
+                  <Button size="sm" variant={u.suspended_at ? 'ink' : 'outline-ink'} loading={busy} onClick={suspend}>
+                    {u.suspended_at ? t.unsuspend : t.suspend}
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <DetailSection title={t.sections.profile}>
+                <dl>
+                  <KV k={f.fullName}>{u.full_name}</KV>
+                  <KV k={f.birthDate}>{u.birth_date ? fmt.date(u.birth_date) : null}</KV>
+                  <KV k={f.gender}>{u.gender ? (t.genders[u.gender] ?? u.gender) : null}</KV>
+                  <KV k={f.city}>{u.city}</KV>
+                  <KV k={f.bio}>{u.bio}</KV>
+                  <KV k={f.socials}>
+                    {u.socials?.length
+                      ? u.socials.map((s) => (
+                          <a key={s} href={s} target="_blank" rel="noreferrer noopener" className="block truncate font-semibold text-rave-accent hover:underline">
+                            {s.replace(/^https?:\/\/(www\.)?/, '')}
+                          </a>
+                        ))
+                      : null}
+                  </KV>
+                </dl>
+              </DetailSection>
+              <DetailSection title={t.sections.account}>
+                <dl>
+                  <KV k={f.member}>
+                    <MemberBadge u={u} />
+                  </KV>
+                  <KV k={f.verification}>
+                    <VerificationBadge status={u.verification_status ?? 'NONE'} />
+                  </KV>
+                  <KV k={f.nik}>{u.id_number_masked ? <span className="font-mono text-xs">{u.id_number_masked}</span> : null}</KV>
+                  <KV k={f.roles}>
+                    <span className="flex flex-wrap gap-1">
+                      {u.roles.map((r) => (
+                        <Badge key={r}>{r}</Badge>
+                      ))}
+                    </span>
+                  </KV>
+                  <KV k={f.adminRole}>{u.admin_role ? (ADMIN_ROLE_LABEL[u.admin_role as AdminRole] ?? u.admin_role) : null}</KV>
+                  <KV k={f.onboarded}>{u.onboarded ? t.yes : t.no}</KV>
+                  <KV k={f.joined}>{fmt.dateTime(u.created_at)}</KV>
+                  <KV k={f.lastSeen}>{data.sessions.last_seen_at ? fmt.dateTime(data.sessions.last_seen_at) : null}</KV>
+                  <KV k={f.sessions}>{data.sessions.active}</KV>
+                </dl>
+              </DetailSection>
+              <DetailSection title={t.sections.logins}>
+                {data.identities.length ? (
+                  <ul className="space-y-1.5 text-sm">
+                    {data.identities.map((i) => (
+                      <li key={i.provider + i.subject} className="flex items-center justify-between gap-3">
+                        <span className="font-semibold">{t.providers[i.provider] ?? i.provider}</span>
+                        <span className="truncate font-mono text-xs text-b2b-muted">{['email', 'whatsapp'].includes(i.provider) ? i.subject : `${i.subject.slice(0, 6)}…`}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-b2b-muted">{t.empty}</p>
+                )}
+              </DetailSection>
+              <DetailSection title={t.sections.orgs}>
+                {data.orgs.length ? (
+                  <ul className="space-y-2 text-sm">
+                    {data.orgs.map((o) => (
+                      <li key={o.id} className="flex items-center justify-between gap-3">
+                        <span className="min-w-0">
+                          <span className="font-semibold">{o.name}</span> {o.verified && <VerifiedBadge size={12} />}
+                          <span className="block text-xs text-b2b-muted">
+                            {o.type} · {o.city ?? '—'} · {t.members(o.members)}
+                          </span>
+                        </span>
+                        <Badge tone={o.role === 'OWNER' ? 'purple' : 'neutral'}>{o.role}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-b2b-muted">{t.empty}</p>
+                )}
+              </DetailSection>
+              <DetailSection title={t.sections.verifications}>
+                {data.verifications.length ? (
+                  <ul className="space-y-1.5 text-sm">
+                    {data.verifications.map((v) => (
+                      <li key={v.id} className="flex items-start justify-between gap-3">
+                        <span className="text-xs text-b2b-muted">
+                          {fmt.dateTime(v.created_at)}
+                          {v.reason && <span className="block text-b2b-ink">“{v.reason}”</span>}
+                        </span>
+                        <Badge tone={v.status === 'APPROVED' ? 'green' : v.status === 'PENDING' ? 'blue' : v.status === 'CANCELLED' ? 'neutral' : 'red'}>{d.verifications.status[v.status] ?? v.status}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-b2b-muted">{t.empty}</p>
+                )}
+              </DetailSection>
+              <DetailSection title={t.sections.consents}>
+                {data.consents.length ? (
+                  <ul className="space-y-1 text-sm">
+                    {data.consents.map((c) => (
+                      <li key={c.purpose} className="flex justify-between gap-3">
+                        <span>{c.purpose}</span>
+                        <Badge tone={c.granted ? 'green' : 'neutral'}>{c.granted ? 'ON' : 'OFF'}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-b2b-muted">{t.empty}</p>
+                )}
+              </DetailSection>
+            </div>
+
+            <DetailSection title={t.sections.activity}>
+              {data.activity.length ? (
+                <ul className="divide-y divide-b2b-line text-sm">
+                  {data.activity.map((a) => (
+                    <li key={a.id} className="flex items-baseline justify-between gap-4 py-1.5">
+                      <span className="font-mono text-xs font-semibold">{a.action}</span>
+                      <span className="text-xs whitespace-nowrap text-b2b-muted">
+                        {a.actor_name ?? (a.actor_id ? `${a.actor_id.slice(0, 8)}…` : 'system')} · {fmt.dateTime(a.created_at)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-b2b-muted">{t.empty}</p>
+              )}
+            </DetailSection>
+
+            {sup && (
+              <DetailSection title={t.sections.danger} tone="danger">
+                <p className="text-sm">{t.deleteBody}</p>
+                {blocked ? (
+                  <p className="mt-3 border-l-4 border-red-500 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-700">{blocked}</p>
+                ) : (
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <Field label={t.reason} hint={t.reasonHint}>
+                      <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t.reasonPlaceholder} />
+                    </Field>
+                    <Field label={t.deleteConfirmLabel(confirmKey)}>
+                      <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" spellCheck={false} />
+                    </Field>
+                    <div className="flex justify-end md:col-span-2">
+                      <Button variant="danger" loading={busy} disabled={reason.trim().length < 5 || confirm.trim().toLowerCase() !== confirmKey.toLowerCase()} onClick={remove}>
+                        {t.deleteCta}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </DetailSection>
+            )}
+          </div>
+        )}
+      </QueryState>
+    </Modal>
+  );
+}
+
+const ROLE_FILTERS = ['all', 'fan', 'artist', 'manager', 'label', 'promotor', 'creator', 'admin'] as const;
+type RoleFilter = (typeof ROLE_FILTERS)[number];
+const ROLE_ICON: Record<RoleFilter, typeof Users> = { all: Users, fan: Headphones, artist: Mic2, manager: Briefcase, label: Disc3, promotor: Ticket, creator: Podcast, admin: ShieldCheck };
+
 export function AdminUsers() {
   const t = useDict('admin').users;
   const sup = isSuperAdmin(useAuth((s) => s.user));
   const [qstr, setQ] = useState('');
   const [applied, setApplied] = useState('');
   const [editing, setEditing] = useState<Me | null>(null);
-  const q = useQuery({ queryKey: ['admin-users', applied], queryFn: () => api<{ data: Me[] }>('/v1/admin/iam/users', { query: { q: applied || undefined } }) });
+  const [detail, setDetail] = useState<string | null>(null);
+  // Filter peran disimpan di URL (?role=) → bisa dibagikan & bertahan saat kembali ke halaman.
+  const [params, setParams] = useSearchParams();
+  const role = ROLE_FILTERS.includes(params.get('role') as RoleFilter) ? (params.get('role') as RoleFilter) : 'all';
+  const setRole = (r: RoleFilter) => setParams((p) => { const n = new URLSearchParams(p); if (r === 'all') n.delete('role'); else n.set('role', r); return n; }, { replace: true });
+  const q = useQuery({
+    queryKey: ['admin-users', applied, role],
+    queryFn: () => api<{ data: Me[]; role_counts?: Record<RoleFilter, number> }>('/v1/admin/iam/users', { query: { q: applied || undefined, role: role === 'all' ? undefined : role } }),
+    placeholderData: (prev) => prev,
+  });
+  const counts = q.data?.role_counts;
   return (
     <div>
       <PageHeader title={t.title} />
@@ -1142,11 +1470,43 @@ export function AdminUsers() {
           {t.search}
         </Button>
       </form>
-      <QueryState q={q}>
-        <Table head={sup ? [...t.head] : t.head.slice(0, -1)}>
+      {/* Chip peran: ikon + jumlah (mengikuti kata kunci); peran kosong diredupkan, tetap bisa dipilih. */}
+      <div role="radiogroup" aria-label={t.roleFilter} className="-mt-1 mb-4 flex flex-wrap gap-2">
+        {ROLE_FILTERS.map((r) => {
+          const Icon = ROLE_ICON[r];
+          const n = counts?.[r];
+          const on = role === r;
+          return (
+            <button
+              key={r}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              title={t.roleHints[r]}
+              onClick={() => setRole(r)}
+              className={cx(
+                'inline-flex h-9 items-center gap-2 border-2 px-3 text-[13px] font-bold transition',
+                on ? 'border-b2b-ink bg-b2b-ink text-b2b-on-ink shadow-[3px_3px_0_#F4C21F]' : 'border-b2b-line bg-b2b-card text-b2b-ink hover:border-b2b-ink',
+                !on && n === 0 && 'opacity-50',
+              )}
+            >
+              <Icon className="size-4" />
+              {t.roleChips[r]}
+              {n != null && <span className={cx('min-w-5 px-1 font-label text-[11px] tabular-nums', on ? 'bg-rave-primary text-rave-ink' : 'bg-b2b-ink/10')}>{n}</span>}
+            </button>
+          );
+        })}
+      </div>
+      <QueryState q={q} empty={q.data && !q.data.data.length ? <Empty title={t.emptyRole} /> : undefined}>
+        <Table head={[...t.head]}>
           {q.data?.data.map((u) => (
             <tr key={u.id}>
-              <td className="px-4 py-3 font-bold">{u.display_name}</td>
+              <td className="px-4 py-3 font-bold">
+                <button type="button" onClick={() => setDetail(u.id)} className="inline-flex items-center gap-1.5 text-left hover:underline">
+                  {u.display_name}
+                  {u.verified && <VerifiedBadge size={15} />}
+                </button>
+              </td>
               <td className="px-4 py-3">{u.email}</td>
               <td className="px-4 py-3">
                 <MemberBadge u={u} />
@@ -1160,21 +1520,178 @@ export function AdminUsers() {
               </td>
               <td className="px-4 py-3 text-xs">{u.orgs?.map((o) => `${o.name} (${o.role})`).join(', ') || '—'}</td>
               <td className="px-4 py-3">
-                <Badge tone={u.kyc_status === 'VERIFIED' ? 'green' : u.kyc_status === 'PENDING' ? 'amber' : 'neutral'}>{u.kyc_status}</Badge>
+                <VerificationBadge status={u.verification_status ?? 'NONE'} />
               </td>
               <td className="px-4 py-3">{fmt.date(u.created_at)}</td>
-              {sup && (
-                <td className="px-4 py-3 text-right whitespace-nowrap">
-                  <Button size="sm" variant="outline-ink" onClick={() => setEditing(u)}>
-                    {t.editMember}
+              <td className="px-4 py-3 text-right whitespace-nowrap">
+                <div className="flex justify-end gap-2">
+                  <Button size="sm" variant="ink" onClick={() => setDetail(u.id)}>
+                    {t.detail}
                   </Button>
-                </td>
-              )}
+                  {sup && (
+                    <Button size="sm" variant="outline-ink" onClick={() => setEditing(u)}>
+                      {t.editMember}
+                    </Button>
+                  )}
+                </div>
+              </td>
             </tr>
           ))}
         </Table>
       </QueryState>
+      <UserDetail id={detail} onClose={() => setDetail(null)} onEditMember={(u) => setEditing(u)} />
       <MemberModal user={editing} onClose={() => setEditing(null)} />
+    </div>
+  );
+}
+
+/** Status verifikasi akun di tabel admin: badge stiker untuk Terverifikasi, pil warna untuk lainnya. */
+function VerificationBadge({ status }: { status: string }) {
+  const t = useDict('admin').users;
+  if (status === 'VERIFIED')
+    return (
+      <Badge tone="amber" className="!border-rave-ink/40 !bg-rave-primary/25 !text-b2b-ink">
+        <VerifiedBadge size={13} /> {t.verification.VERIFIED}
+      </Badge>
+    );
+  return <Badge tone={status === 'PENDING' ? 'blue' : status === 'REJECTED' ? 'red' : 'neutral'}>{t.verification[status] ?? status}</Badge>;
+}
+
+type VerificationRow = {
+  id: string;
+  user_id: string;
+  status: string;
+  reason: string | null;
+  created_at: string;
+  decided_at: string | null;
+  display_name: string;
+  email: string | null;
+  verified: boolean;
+  snapshot: { id_number_masked?: string | null; full_name?: string; birth_date?: string; gender?: string; bio?: string; socials?: string[]; avatar_url?: string | null; city?: string; email?: string; phone?: string };
+};
+
+/** Antrean verifikasi akun (izin users.verify): tinjau data yang diajukan, setujui / tolak (beralasan), cabut badge. */
+export function AdminVerifications() {
+  const d = useDict('admin');
+  const t = d.verifications;
+  const [status, setStatus] = useState('PENDING');
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['admin-verifications', status], queryFn: () => api<{ data: VerificationRow[] }>('/v1/admin/iam/verifications', { query: { status } }) });
+  const age = (b?: string) => {
+    if (!b) return null;
+    const n = new Date(), x = new Date(b);
+    return n.getFullYear() - x.getFullYear() - (n.getMonth() < x.getMonth() || (n.getMonth() === x.getMonth() && n.getDate() < x.getDate()) ? 1 : 0);
+  };
+  const reload = () => {
+    void qc.invalidateQueries({ queryKey: ['admin-verifications'] });
+    void qc.invalidateQueries({ queryKey: ['admin-users'] });
+  };
+  async function decide(id: string, approve: boolean) {
+    const reason = approve ? undefined : (prompt(t.rejectPrompt) ?? undefined);
+    if (!approve && !reason) return;
+    try {
+      await api(`/v1/admin/iam/verifications/${id}/decision`, { body: { approve, reason } });
+      toast.success(approve ? t.approved : t.rejected);
+      reload();
+    } catch (e) {
+      toast.error(e);
+    }
+  }
+  async function revoke(userId: string) {
+    const reason = prompt(t.revokePrompt);
+    if (!reason) return;
+    try {
+      await api(`/v1/admin/iam/users/${userId}/verification/revoke`, { body: { reason } });
+      toast.success(t.revoked);
+      reload();
+    } catch (e) {
+      toast.error(e);
+    }
+  }
+  return (
+    <div>
+      <PageHeader
+        title={t.title}
+        subtitle={t.subtitle}
+        actions={
+          <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-44">
+            {['PENDING', 'APPROVED', 'REJECTED', 'REVOKED', 'CANCELLED'].map((st) => (
+              <option key={st} value={st}>
+                {t.status[st]}
+              </option>
+            ))}
+          </Select>
+        }
+      />
+      <QueryState q={q} empty={q.data && !q.data.data.length ? <Empty title={t.empty} /> : undefined}>
+        <Table head={[...t.head]}>
+          {q.data?.data.map((v) => {
+            const sn = v.snapshot ?? {};
+            const a = age(sn.birth_date);
+            return (
+              <tr key={v.id} className="align-top">
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <span className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-full border-2 border-b2b-ink bg-rave-purple">
+                      {sn.avatar_url ? <img src={sn.avatar_url} alt="" className="size-full object-cover" /> : <span className="font-display text-lg text-rave-primary">{(v.display_name ?? '?').slice(0, 1)}</span>}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-1.5 font-bold">
+                        {v.display_name}
+                        {v.verified && <VerifiedBadge size={14} />}
+                      </p>
+                      <p className="text-xs text-b2b-muted">{v.email}</p>
+                    </div>
+                  </div>
+                </td>
+                <td className="max-w-sm px-4 py-3 text-xs leading-relaxed">
+                  <p className="text-sm font-bold">{sn.full_name}</p>
+                  <p>
+                    {sn.birth_date ? `${fmt.date(sn.birth_date)}${a != null ? ` · ${t.age(a)}` : ''}` : '—'} · {sn.gender ? (t.genders[sn.gender] ?? sn.gender) : '—'} · {sn.city ?? '—'}
+                  </p>
+                  {sn.bio && <p className="mt-1 text-b2b-muted italic">“{sn.bio}”</p>}
+                  {!!sn.socials?.length && (
+                    <p className="mt-1 flex flex-wrap gap-x-2">
+                      {sn.socials.map((url) => (
+                        <a key={url} href={url} target="_blank" rel="noreferrer noopener" className="truncate font-semibold text-rave-accent underline-offset-2 hover:underline">
+                          {url.replace(/^https?:\/\/(www\.)?/, '')}
+                        </a>
+                      ))}
+                    </p>
+                  )}
+                </td>
+                <td className="px-4 py-3 font-mono text-xs">
+                  <p>{sn.email ?? '—'}</p>
+                  <p>{sn.phone ?? '—'}</p>
+                  {sn.id_number_masked && <p className="mt-1 text-b2b-muted">NIK {sn.id_number_masked}</p>}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">{fmt.dateTime(v.created_at)}</td>
+                <td className="px-4 py-3">
+                  <Badge tone={v.status === 'APPROVED' ? 'green' : v.status === 'PENDING' ? 'blue' : v.status === 'CANCELLED' ? 'neutral' : 'red'}>{t.status[v.status] ?? v.status}</Badge>
+                  {v.reason && <p className="mt-1 max-w-48 text-xs text-b2b-muted">{v.reason}</p>}
+                </td>
+                <td className="px-4 py-3 text-right whitespace-nowrap">
+                  {v.status === 'PENDING' && (
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="ink" onClick={() => decide(v.id, true)}>
+                        {t.approve}
+                      </Button>
+                      <Button size="sm" variant="outline-ink" onClick={() => decide(v.id, false)}>
+                        {t.reject}
+                      </Button>
+                    </div>
+                  )}
+                  {v.status === 'APPROVED' && v.verified && (
+                    <Button size="sm" variant="outline-ink" onClick={() => revoke(v.user_id)}>
+                      {t.revoke}
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </Table>
+      </QueryState>
     </div>
   );
 }

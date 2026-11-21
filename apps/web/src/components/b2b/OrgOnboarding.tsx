@@ -7,6 +7,7 @@ import type { Me } from '@/lib/types';
 import { managementOrgs, promotorOrgs, useAuth } from '@/stores/auth';
 import { Badge, Button, Field, Input, Select, toast } from '@/components/ui';
 import { JoinCardTitle, JoinChoice, JoinShell } from './JoinShell';
+import { VerifiedBadge } from '@/components/ui/VerifiedBadge';
 import { CITIES, GENRES, genreName } from './common';
 import { PendingSplits } from './PendingSplits';
 import { useDict } from '@/lib/i18n';
@@ -151,7 +152,11 @@ export function OrgOnboarding({ kind }: { kind: 'artist' | 'promotor' }) {
   );
 }
 
-/** KYC (REQ-IAM-04): wajib sebelum mengirim inquiry/offer atau menerima pembayaran. */
+/**
+ * Verifikasi (REQ-IAM-04) — satu verifikasi: identitas pengguna diverifikasi lewat Pengaturan → Verifikasi akun
+ * (sekaligus KYC; syarat inquiry, pembayaran & pencairan). Untuk OWNER/ADMIN org tersedia KYB opsional (nama usaha + NIB)
+ * yang memakai identitas penanggung jawab dari verifikasi akun.
+ */
 export function KycForm({
   compact,
   bare,
@@ -169,17 +174,18 @@ export function KycForm({
   const d = useDict('b2b').onboarding;
   const nextLink = nextLinkProp === undefined ? { to: '/promotor', label: d.nextPromotor } : nextLinkProp;
   const kyc = useQuery({ queryKey: ['kyc'], queryFn: () => api<any>('/v1/me/kyc') });
-  // KYB butuh org tempat user OWNER/ADMIN: org yang diberikan pemanggil (Studio), atau org promotor pertama.
   const org = orgId ? user?.orgs.find((o) => o.id === orgId) : promotorOrgs(user)[0];
   const canBusiness = !!org && ['OWNER', 'ADMIN'].includes(org.role);
-  const [f, setF] = useState({ level: (canBusiness ? 'BUSINESS' : 'INDIVIDUAL') as 'INDIVIDUAL' | 'BUSINESS', full_name: user?.display_name ?? '', id_number: '', business_name: org?.name ?? '', nib: '' });
+  const [f, setF] = useState({ business_name: org?.name ?? '', nib: '' });
   const [busy, setBusy] = useState(false);
-  const status = kyc.data?.status ?? user?.kyc_status ?? 'NONE';
+  const verified = (user?.verification_status ?? (user?.kyc_status === 'VERIFIED' ? 'VERIFIED' : 'NONE')) === 'VERIFIED';
+  const last = kyc.data as { level?: string; status?: string; org_id?: string | null; reason?: string | null } | null | undefined;
+  const kyb = last?.level === 'BUSINESS' && (!org || last.org_id === org.id) ? last : null;
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     try {
-      await api('/v1/me/kyc', { body: { ...f, org_id: f.level === 'BUSINESS' ? org?.id : undefined } });
+      await api('/v1/me/kyc', { body: { level: 'BUSINESS', org_id: org?.id, business_name: f.business_name, nib: f.nib } });
       await kyc.refetch();
       await refreshMe();
       toast.success(d.kycSent);
@@ -189,62 +195,60 @@ export function KycForm({
       setBusy(false);
     }
   }
-  if (status === 'VERIFIED' || status === 'PENDING')
-    return (
-      <div className={card}>
-        <ShieldCheck className="size-8 text-emerald-600" />
-        <h2 className="mt-3 text-lg font-extrabold">{d.identity}</h2>
-        <Badge tone={status === 'VERIFIED' ? 'green' : 'amber'} className="mt-2">
-          {status === 'VERIFIED' ? d.verified : d.pendingReview}
-        </Badge>
-        <p className="mt-3 text-sm text-b2b-muted">
-          {status === 'VERIFIED' ? d.verifiedBody : d.pendingBody}
-        </p>
-        {!compact && nextLink && (
-          <Link to={nextLink.to} onClick={() => void refreshMe()} className="mt-4 inline-block text-sm font-bold underline">
-            {nextLink.label}
-          </Link>
-        )}
-      </div>
-    );
   return (
-    <form onSubmit={submit} className={`space-y-4 ${card}`}>
-      <h2 className="text-lg font-extrabold">{d.kycTitle}</h2>
-      <p className="text-sm text-b2b-muted">{d.kycNote}</p>
-      {status === 'REJECTED' && <Badge tone="red">{d.rejected(kyc.data?.reason ?? d.checkData)}</Badge>}
-      <div className="grid grid-cols-2 gap-2">
-        {(['BUSINESS', 'INDIVIDUAL'] as const).map((l) => (
-          <button
-            type="button"
-            key={l}
-            disabled={l === 'BUSINESS' && !canBusiness}
-            title={l === 'BUSINESS' && !canBusiness ? d.kybOnly : undefined}
-            onClick={() => setF({ ...f, level: l })}
-            className={`rounded-none border-2 p-3 text-sm font-bold transition disabled:opacity-40 ${f.level === l ? 'border-b2b-ink bg-b2b-ink text-b2b-on-ink shadow-[inset_0_-3px_0_var(--color-rave-primary)]' : 'border-b2b-line hover:border-b2b-ink/50'}`}
-          >
-            {l === 'BUSINESS' ? d.business : d.individual}
-          </button>
-        ))}
+    <div className="space-y-4">
+      {/* 1 — Verifikasi akun (identitas) */}
+      <div className={card}>
+        <ShieldCheck className={verified ? 'size-8 text-emerald-600' : 'size-8 text-b2b-muted'} />
+        <h2 className="mt-3 flex items-center gap-2 text-lg font-extrabold">
+          {d.accountVerify}
+          {user?.verified && <VerifiedBadge size={18} />}
+        </h2>
+        <Badge tone={verified ? 'green' : user?.verification_status === 'PENDING' ? 'amber' : user?.verification_status === 'REJECTED' ? 'red' : 'neutral'} className="mt-2">
+          {verified ? d.verified : user?.verification_status === 'PENDING' ? d.pendingReview : user?.verification_status === 'REJECTED' ? d.rejected(d.checkData) : '—'}
+        </Badge>
+        <p className="mt-3 text-sm text-b2b-muted">{verified ? d.accountVerified : d.accountVerifyBody}</p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          {!verified && (
+            <Link to="/app/settings#set-verify" className="inline-flex items-center gap-2 border-2 border-b2b-ink bg-b2b-ink px-4 py-2 text-sm font-bold text-b2b-on-ink">
+              {d.accountVerifyCta}
+            </Link>
+          )}
+          {verified && !compact && nextLink && (
+            <Link to={nextLink.to} onClick={() => void refreshMe()} className="inline-block text-sm font-bold underline">
+              {nextLink.label}
+            </Link>
+          )}
+        </div>
       </div>
-      <Field label={d.fullName}>
-        <Input required value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} />
-      </Field>
-      <Field label={d.nik}>
-        <Input required inputMode="numeric" pattern="\d{16}" title={d.nikTitle} value={f.id_number} onChange={(e) => setF({ ...f, id_number: e.target.value })} />
-      </Field>
-      {f.level === 'BUSINESS' && (
-        <>
-          <Field label={d.businessName}>
-            <Input required value={f.business_name} onChange={(e) => setF({ ...f, business_name: e.target.value })} />
-          </Field>
-          <Field label={d.nib}>
-            <Input required value={f.nib} onChange={(e) => setF({ ...f, nib: e.target.value })} />
-          </Field>
-        </>
+
+      {/* 2 — KYB organisasi (opsional, setelah akun terverifikasi) */}
+      {verified && canBusiness && org && (
+        kyb?.status === 'VERIFIED' || kyb?.status === 'PENDING' ? (
+          <div className="rounded-none border border-b2b-line bg-b2b-card p-6">
+            <h2 className="text-lg font-extrabold">{d.kybTitle}</h2>
+            <Badge tone={kyb.status === 'VERIFIED' ? 'green' : 'amber'} className="mt-2">
+              {kyb.status === 'VERIFIED' ? d.verified : d.pendingReview}
+            </Badge>
+            <p className="mt-3 text-sm text-b2b-muted">{kyb.status === 'VERIFIED' ? d.kybVerified(org.name) : d.kybPending}</p>
+          </div>
+        ) : (
+          <form onSubmit={submit} className="space-y-4 rounded-none border border-b2b-line bg-b2b-card p-6">
+            <h2 className="text-lg font-extrabold">{d.kybTitle}</h2>
+            <p className="text-sm text-b2b-muted">{d.kybNote(org.name)}</p>
+            {kyb?.status === 'REJECTED' && <Badge tone="red">{d.rejected(kyb.reason ?? d.checkData)}</Badge>}
+            <Field label={d.businessName}>
+              <Input required value={f.business_name} onChange={(e) => setF({ ...f, business_name: e.target.value })} />
+            </Field>
+            <Field label={d.nib}>
+              <Input required value={f.nib} onChange={(e) => setF({ ...f, nib: e.target.value })} />
+            </Field>
+            <Button variant="ink" type="submit" loading={busy} className="w-full">
+              {d.submitKyb}
+            </Button>
+          </form>
+        )
       )}
-      <Button variant="ink" type="submit" loading={busy} className="w-full">
-        {d.submitKyc}
-      </Button>
-    </form>
+    </div>
   );
 }

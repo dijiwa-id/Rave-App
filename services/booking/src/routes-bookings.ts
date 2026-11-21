@@ -190,7 +190,7 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
     const p = inquirySchema.parse(req.body);
     const u = req.user!;
     if (!isPromotorMember(u, p.promotor_org_id)) throw forbidden('Anda bukan anggota organisasi promotor ini');
-    if (!u.kyc) throw forbidden('Verifikasi KYC/KYB wajib sebelum mengirim inquiry (REQ-IAM-04)');
+    if (!u.kyc) throw forbidden('Verifikasi akun wajib sebelum mengirim inquiry (REQ-IAM-04)');
     if (p.event_date <= todayWib()) throw badRequest('Tanggal acara harus di masa depan');
     return idempotent(db, req, reply, 'inquiry', async (c) => {
       const a = (await c.query(`SELECT * FROM artists WHERE id=$1`, [p.artist_id])).rows[0];

@@ -1,5 +1,6 @@
 // Kamus Bahasa Indonesia — namespace "common" (UI bersama, layout, pemutar, lib & store).
 const common = {
+  verified: { label: 'Akun terverifikasi', stamp: 'Verified' },
   embed: {
     via: (p: string) => `Diputar lewat ${p} — tidak dihitung sebagai stream RAVE`,
     badge: 'Embed',
