@@ -2,6 +2,7 @@ import { createService, config } from '@rave/service-kit';
 import { consumers } from './consumers.js';
 import { expiryJob, payoutJob, refundDispatchJob, releaseJob, sandboxRefundSettleJob } from './jobs.js';
 import { paymentSettings } from './providers.js';
+import { proLifecycleJob, proRoutes } from './pro.js';
 import { reportRoutes } from './reports.js';
 import { routes } from './routes.js';
 import { seed } from './seed.js';
@@ -14,9 +15,10 @@ const svc = createService({
   routes: async (app, ctx) => {
     await routes(app, ctx);
     await reportRoutes(app, ctx);
+    await proRoutes(app, ctx);
   },
   consumers,
-  jobs: [releaseJob, payoutJob, expiryJob, refundDispatchJob, sandboxRefundSettleJob],
+  jobs: [releaseJob, payoutJob, expiryJob, refundDispatchJob, sandboxRefundSettleJob, proLifecycleJob],
   stats: async ({ db }) => (await db.one(
     `SELECT (SELECT coalesce(sum(held - released - refunded), 0) FROM escrow_holds)::bigint AS escrow_held,
               (SELECT count(*) FROM invoices WHERE status = 'PENDING')::int AS invoices_pending,

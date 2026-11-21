@@ -2,6 +2,7 @@ import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { LedgerAccounts, allocate, pct, ticketRefundAmount, withholdingTax, type PaymentPurpose } from '@rave/domain';
 import { badRequest, config, conflict, notFound, publish, settings, unauthorized, uuidv7, type Client } from '@rave/service-kit';
 import { C, D, creditBalance, payableAccount, post } from './ledger.js';
+import { PRO_PRODUCT, applyPaidProOrder, proPaymentDecision, proRevenueLines } from './pro.js';
 
 export const ESCROW_BANK = LedgerAccounts.escrowBank('mitra-sandbox');
 
@@ -117,6 +118,15 @@ export async function processPgEvent(c: Client, provider: string, ev: PgEvent) {
     }
   }
 
+  // RAVE Pro: pesanan yang sudah dibatalkan/diganti/lunas tidak boleh mengubah langganan — dana dikembalikan penuh.
+  if (inv.purpose === 'SUBSCRIPTION' && inv.metadata?.product === PRO_PRODUCT) {
+    const decision = await proPaymentDecision(c, inv);
+    if (!decision.apply) {
+      await refundUnappliedPayment(c, inv, ev, decision.reason);
+      return { duplicate: false };
+    }
+  }
+
   const lines = [D(ESCROW_BANK, inv.amount)];
   let holdRef = inv.reference_id;
   if (inv.purpose === 'BOOKING_DP' || inv.purpose === 'BOOKING_SETTLEMENT') {
@@ -127,6 +137,9 @@ export async function processPgEvent(c: Client, provider: string, ev: PgEvent) {
     holdRef = `event:${eventId}`;
     lines.push(C(LedgerAccounts.escrowEvent(eventId), inv.escrow_amount));
     if (inv.fee_amount) lines.push(C(LedgerAccounts.ticketFee(), inv.fee_amount));
+  } else if (inv.purpose === 'SUBSCRIPTION' && inv.metadata?.product === PRO_PRODUCT) {
+    // RAVE Pro: pendapatan langganan (DPP) dan PPN keluaran dipisah.
+    for (const l of proRevenueLines(inv)) lines.push(C(l.account, l.amount));
   } else {
     lines.push(C(`revenue:${inv.purpose.toLowerCase()}`, inv.amount));
   }
@@ -141,6 +154,8 @@ export async function processPgEvent(c: Client, provider: string, ev: PgEvent) {
          status = CASE WHEN escrow_holds.status = 'REFUNDED' THEN 'HELD' ELSE escrow_holds.status END, updated_at=now()`,
       [holdRef, inv.metadata?.promotor_org_id ?? null, inv.escrow_amount],
     );
+  } else if (inv.purpose === 'SUBSCRIPTION' && inv.metadata?.product === PRO_PRODUCT) {
+    await applyPaidProOrder(c, inv);
   } else if (inv.escrow_amount > 0) {
     await c.query(
       `UPDATE escrow_holds SET held = held + $2, status = CASE WHEN held + $2 >= fee THEN 'PAID_IN_FULL' ELSE 'DP_RECEIVED' END, updated_at=now() WHERE reference_id=$1`,

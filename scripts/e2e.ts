@@ -1607,6 +1607,121 @@ console.log('\n▶ Akses per peran (fan, artis, manajer, promotor, admin, Super 
   check('B1: promotor menerima notifikasi refund booking', pNotif.data?.data?.some((n: any) => n.title === 'Dana booking dikembalikan'));
   const reconB1 = await call(S, 'GET', '/v1/admin/finance/reconciliation');
   check('ledger seimbang setelah force majeure & refund booking', reconB1.data?.balanced === true, reconB1.data && { d: reconB1.data.total_debit, c: reconB1.data.total_credit });
+
+  // ---- RAVE Pro: langganan B2B organisasi (BRD §4.1, REQ-PAY-03) ----
+  console.log('\n▶ RAVE Pro (langganan B2B)');
+  {
+    const promOrg = SEED.orgs.pensiPromotor;
+    const mgmtOrg = ((await call(M, 'GET', '/v1/me')).data?.orgs ?? []).find((o: any) => o.type === 'MANAGEMENT')?.id as string;
+    // Bersihkan sisa run sebelumnya (dev DB non-isolasi).
+    for (const o of [promOrg, mgmtOrg]) {
+      const st0 = await call(S, 'GET', `/v1/admin/pro/orgs/${o}`);
+      if (st0.data?.subscription?.entitled) await call(S, 'POST', `/v1/admin/pro/orgs/${o}/revoke`, { reason: 'reset e2e RAVE Pro' });
+    }
+    const plans = await call(null, 'GET', '/v1/pro/plans?org_type=PROMOTOR');
+    const proPlan = plans.data?.plans?.find((p: any) => p.plan === 'PRO');
+    check('katalog paket publik: Starter & Pro untuk promotor, take rate Pro 3% + 5%', plans.status === 200 && plans.data?.enabled === true && plans.data.plans.length === 2 && proPlan?.monthly > 0 && plans.data.take_rate.pro.promotor_service_fee_pct === 3 && plans.data.take_rate.pro.artist_commission_pct === 5, plans.data);
+    const mgmtPlans = await call(null, 'GET', '/v1/pro/plans?org_type=MANAGEMENT');
+    check('paket Label (multi-roster) ditawarkan ke manajemen', mgmtPlans.data?.plans?.some((p: any) => p.plan === 'LABEL'), mgmtPlans.data?.plans?.map((p: any) => p.plan));
+    const outsider = await call(ART, 'GET', `/v1/pro/orgs/${promOrg}`);
+    check('status RAVE Pro org tertutup untuk non-anggota (403)', outsider.status === 403, outsider.status);
+    const insNo = await call(P, 'GET', `/v1/booking/pro/insights?org_id=${promOrg}`);
+    check('Insight Pro tanpa langganan → 402 PRO_REQUIRED', insNo.status === 402 && insNo.data?.code === 'PRO_REQUIRED', [insNo.status, insNo.data]);
+    const q1 = await call(P, 'POST', `/v1/pro/orgs/${promOrg}/quote`, { plan: 'PRO', cycle: 'MONTHLY' });
+    const ppn = Math.round((proPlan.monthly * Math.round(plans.data.ppn_pct * 100)) / 10000);
+    check('quote: harga dasar + PPN', q1.data?.subtotal === proPlan.monthly && q1.data?.ppn === ppn && q1.data?.total === proPlan.monthly + ppn && q1.data?.mode === 'NEW', q1.data);
+    const co = await call(P, 'POST', `/v1/pro/orgs/${promOrg}/checkout`, { plan: 'PRO', cycle: 'MONTHLY' });
+    const co2 = await call(P, 'POST', `/v1/pro/orgs/${promOrg}/checkout`, { plan: 'PRO', cycle: 'MONTHLY' });
+    check('checkout → invoice SUBSCRIPTION (idempoten untuk klik ganda)', co.status === 201 && co.data?.invoice?.purpose === 'SUBSCRIPTION' && co.data.invoice.amount == q1.data?.total && co2.status === 200 && co2.data?.invoice?.id === co.data.invoice.id, [co.status, co2.status, co.data?.invoice]);
+    const badPlan = await call(P, 'POST', `/v1/pro/orgs/${promOrg}/checkout`, { plan: 'LABEL', cycle: 'MONTHLY' });
+    check('paket Label ditolak untuk promotor (422)', badPlan.status === 422, badPlan.status);
+    const coAgain = await call(P, 'POST', `/v1/pro/orgs/${promOrg}/checkout`, { plan: 'PRO', cycle: 'MONTHLY' });
+    await call(P, 'POST', `/v1/finance/invoices/${coAgain.data?.invoice?.id}/simulate-pay`, { method: 'VA' }, true);
+    const act = await until(() => call(P, 'GET', `/v1/pro/orgs/${promOrg}`), (r) => r.data?.subscription?.entitled === true, 20000, 1000);
+    check('pembayaran → RAVE Pro aktif (paket Pro, bulanan, perpanjangan otomatis)', act.data?.subscription?.status === 'ACTIVE' && act.data.subscription.plan === 'PRO' && act.data.subscription.auto_renew === true && act.data?.orders?.[0]?.status === 'PAID', act.data?.subscription);
+    const meP = await until(() => call(P, 'GET', '/v1/me'), (r) => r.data?.orgs?.find((o: any) => o.id === promOrg)?.pro?.plan === 'PRO', 20000, 1000);
+    check('profil /v1/me: org promotor membawa status Pro', meP.data?.orgs?.find((o: any) => o.id === promOrg)?.pro?.plan === 'PRO', meP.data?.orgs);
+    const reconPro = await call(S, 'GET', '/v1/admin/finance/reconciliation');
+    check('ledger seimbang setelah pembayaran langganan (pendapatan + PPN keluaran)', reconPro.data?.balanced === true, reconPro.data && { d: reconPro.data.total_debit, c: reconPro.data.total_credit });
+
+    // Take rate Pro pada booking baru: service fee promotor 3% (manajemen tidak Pro → komisi artis tetap standar).
+    // Tanggal unik per run (DB dev dipakai ulang; slot kalender run sebelumnya tidak bentrok).
+    const dPro = new Date(Date.now() + (200 + (Math.floor(Date.now() / 60_000) % 150)) * 86_400_000).toISOString().slice(0, 10);
+    const iqPro = await call(P, 'POST', '/v1/booking/inquiries', { ...inqBody, event_name: 'E2E Pro Take Rate', event_date: dPro, hold: true }, true);
+    await call(M, 'POST', `/v1/booking/bookings/${iqPro.data?.id}/offers`, { fee: 10_000_000, dp_pct: 50, settlement_days_before: 7, message: 'offer Pro' }, true);
+    const bPro = await until(() => call(P, 'GET', `/v1/booking/bookings/${iqPro.data?.id}`), (r) => r.data?.take_rate?.promotor_pro === true, 20000, 1000);
+    check('booking promotor Pro: service fee 3% (Rp300.000 dari Rp10 jt)', bPro.data?.take_rate?.promotor_service_fee_pct === 3 && bPro.data?.invoice?.service_fee === 300_000 && bPro.data?.take_rate?.locked === false, [bPro.data?.take_rate, bPro.data?.invoice]);
+    const bProM = await call(M, 'GET', `/v1/booking/bookings/${iqPro.data?.id}`);
+    check('sisi manajemen: komisi artis standar 7%, status Pro promotor tidak terlihat', bProM.data?.take_rate?.artist_commission_pct === 7 && bProM.data?.take_rate?.promotor_pro === undefined, bProM.data?.take_rate);
+    const accPro = await call(P, 'POST', `/v1/booking/bookings/${iqPro.data?.id}/accept`);
+    const bLock = await call(P, 'GET', `/v1/booking/bookings/${iqPro.data?.id}`);
+    check('kontrak terbit → take rate Pro dikunci di booking', accPro.data?.status === 'CONTRACT_SENT' && bLock.data?.take_rate?.locked === true && bLock.data?.take_rate?.promotor_service_fee_pct === 3, [accPro.data?.status, bLock.data?.take_rate]);
+
+    const ins = await call(P, 'GET', `/v1/booking/pro/insights?org_id=${promOrg}&days=90`);
+    check('Insight Pro: KPI booking, tren bulanan, kota & roster', ins.status === 200 && ins.data?.kpis?.inquiries >= 1 && Array.isArray(ins.data?.monthly) && Array.isArray(ins.data?.by_city) && ins.data?.features?.csv_export === true, [ins.status, ins.data?.kpis]);
+    const csv = await fetch(`${BASE}/v1/booking/pro/insights.csv?org_id=${promOrg}`, { headers: { authorization: `Bearer ${P}` } });
+    const csvText = await csv.text();
+    check('Insight Pro: ekspor CSV (paket Pro)', csv.status === 200 && csvText.startsWith('id,created,status') && csvText.includes('E2E Pro Take Rate'), [csv.status, csvText.slice(0, 80)]);
+
+    const qUp = await call(P, 'POST', `/v1/pro/orgs/${promOrg}/quote`, { plan: 'PRO', cycle: 'YEARLY' });
+    check('upgrade ke tahunan: kredit prorata sisa periode', qUp.data?.mode === 'UPGRADE' && qUp.data?.credit > 0 && qUp.data?.credit <= proPlan.monthly, qUp.data);
+    const down = await call(P, 'POST', `/v1/pro/orgs/${promOrg}/checkout`, { plan: 'STARTER', cycle: 'MONTHLY' });
+    check('downgrade dijadwalkan ke perpanjangan berikutnya (tanpa tagihan)', down.status === 200 && down.data?.scheduled === true && down.data?.subscription?.next_plan === 'STARTER' && down.data?.subscription?.plan === 'PRO', down.data?.subscription);
+    const undo = await call(P, 'DELETE', `/v1/pro/orgs/${promOrg}/scheduled-change`);
+    check('jadwal downgrade dibatalkan', undo.data?.subscription?.next_plan === null, undo.data?.subscription);
+    const cancel = await call(P, 'POST', `/v1/pro/orgs/${promOrg}/cancel`, { reason: 'uji e2e' });
+    check('berhenti berlangganan: tetap aktif sampai akhir periode', cancel.data?.subscription?.cancel_at_period_end === true && cancel.data?.subscription?.entitled === true, cancel.data?.subscription);
+    const resume = await call(P, 'POST', `/v1/pro/orgs/${promOrg}/resume`);
+    check('lanjutkan langganan: perpanjangan otomatis aktif kembali', resume.data?.subscription?.auto_renew === true, resume.data?.subscription);
+    const nPro = await until(() => call(P, 'GET', '/v1/notifications'), (r) => r.data?.data?.some((n: any) => n.title === 'RAVE Pro paket Pro aktif'), 15000, 1000);
+    check('pemilik org menerima notifikasi RAVE Pro aktif', nPro.data?.data?.some((n: any) => n.title === 'RAVE Pro paket Pro aktif'));
+
+    // A1 — tagihan lama yang sudah diganti tetap dilunasi (halaman bayar masih terbuka): langganan tidak berubah, dana dikembalikan.
+    {
+      const pgSecret = process.env.PG_WEBHOOK_SECRET ?? 'dev-pg-webhook-secret';
+      const pgSign = (raw: string) => {
+        const t = Math.floor(Date.now() / 1000);
+        return `t=${t},v1=${createHmac('sha256', pgSecret).update(`${t}.${raw}`).digest('hex')}`;
+      };
+      const payLate = (inv: any) => {
+        const raw = JSON.stringify({ event_id: `e2e_pro_${Date.now()}_${Math.random()}`, intent_id: inv.id, status: 'PAID', amount: inv.amount, paid_at: new Date().toISOString(), method: 'VA' });
+        return fetch(`${BASE}/v1/webhooks/pg/sandbox`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-pg-signature': pgSign(raw) }, body: raw });
+      };
+      const cA = await call(M, 'POST', `/v1/pro/orgs/${mgmtOrg}/checkout`, { plan: 'PRO', cycle: 'MONTHLY' });
+      const cB = await call(M, 'POST', `/v1/pro/orgs/${mgmtOrg}/checkout`, { plan: 'LABEL', cycle: 'MONTHLY' });
+      check('checkout baru membatalkan tagihan lama', cA.status === 201 && cB.status === 201 && cA.data?.invoice?.id !== cB.data?.invoice?.id, [cA.status, cB.status]);
+      const late = await payLate(cA.data?.invoice);
+      const stLate = await call(M, 'GET', `/v1/pro/orgs/${mgmtOrg}`);
+      const rfLate = await until(() => call(S, 'GET', `/v1/admin/finance/refunds?reference_id=${encodeURIComponent(cA.data?.invoice?.reference_id)}`), (r) => r.data?.data?.length > 0, 15000, 1000);
+      check('A1: tagihan yang sudah diganti lalu dibayar → langganan tidak berubah, dana dikembalikan penuh', late.status === 200 && !stLate.data?.subscription?.entitled && stLate.data?.pending_order?.id === cB.data?.order?.id && Number(rfLate.data?.data?.[0]?.amount) === Number(cA.data?.invoice?.amount), [late.status, stLate.data?.subscription, rfLate.data?.data?.[0]]);
+      await call(M, 'POST', `/v1/finance/invoices/${cB.data?.invoice?.id}/simulate-pay`, { method: 'VA' }, true);
+      const actB = await until(() => call(M, 'GET', `/v1/pro/orgs/${mgmtOrg}`), (r) => r.data?.subscription?.entitled === true, 15000, 1000);
+      const dbl = await payLate(cB.data?.invoice);
+      const rfDbl = await until(() => call(S, 'GET', `/v1/admin/finance/refunds?reference_id=${encodeURIComponent(cB.data?.invoice?.reference_id)}`), (r) => r.status === 200, 3000, 500);
+      check('A1: webhook ganda untuk tagihan yang sudah lunas diabaikan (tanpa refund, langganan tetap)', actB.data?.subscription?.plan === 'LABEL' && dbl.status === 200 && !(rfDbl.data?.data?.length > 0), [actB.data?.subscription?.plan, dbl.status, rfDbl.data?.data?.length]);
+      const reconA1 = await call(S, 'GET', '/v1/admin/finance/reconciliation');
+      check('ledger seimbang setelah pembayaran terlambat & refund langganan', reconA1.data?.balanced === true, reconA1.data && { d: reconA1.data.total_debit, c: reconA1.data.total_credit });
+      await call(S, 'POST', `/v1/admin/pro/orgs/${mgmtOrg}/revoke`, { reason: 'reset sebelum uji komplimen' });
+    }
+
+    // Back Office
+    const adm = await call(OPS, 'GET', '/v1/admin/pro/subscriptions');
+    check('Back Office: daftar langganan & MRR (finance.view)', adm.status === 200 && adm.data?.summary?.active >= 1 && adm.data?.summary?.mrr >= proPlan.monthly, [adm.status, adm.data?.summary]);
+    const grantOps = await call(OPS, 'POST', `/v1/admin/pro/orgs/${mgmtOrg}/grant`, { plan: 'LABEL', months: 3, reason: 'mitra label e2e' });
+    check('beri paket komplimen butuh izin billing.manage (OPS 403)', grantOps.status === 403, grantOps.status);
+    const grant = await call(S, 'POST', `/v1/admin/pro/orgs/${mgmtOrg}/grant`, { plan: 'LABEL', months: 3, reason: 'mitra label e2e' });
+    check('Super Admin memberi paket Label komplimen 3 bulan', grant.status === 200 && grant.data?.subscription?.source === 'COMPLIMENTARY' && grant.data?.subscription?.plan === 'LABEL', [grant.status, grant.data?.subscription]);
+    const grantPaid = await call(S, 'POST', `/v1/admin/pro/orgs/${promOrg}/grant`, { plan: 'PRO', months: 1, reason: 'tidak boleh menimpa' });
+    check('paket komplimen tidak menimpa langganan berbayar (409)', grantPaid.status === 409, grantPaid.status);
+    const bArt = await until(() => call(M, 'GET', `/v1/booking/bookings/${iqPro.data?.id}`), (r) => r.status === 200, 3000, 500);
+    check('booking berkontrak tetap memakai tarif terkunci walau manajemen kini Pro', bArt.data?.take_rate?.artist_commission_pct === 7 && bArt.data?.take_rate?.locked === true, bArt.data?.take_rate);
+    const rep = await call(S, 'GET', '/v1/admin/reports/pro');
+    check('laporan layanan RAVE Pro (MRR, aktif, tabel langganan)', rep.status === 200 && rep.data?.kpis?.[0]?.value >= proPlan.monthly && rep.data?.table?.rows?.length >= 2, [rep.status, rep.data?.kpis]);
+    for (const o of [promOrg, mgmtOrg]) await call(S, 'POST', `/v1/admin/pro/orgs/${o}/revoke`, { reason: 'bersihkan data uji e2e' });
+    const after = await call(P, 'GET', `/v1/pro/orgs/${promOrg}`);
+    check('pencabutan admin → hak Pro berakhir', after.data?.subscription?.entitled === false && after.data?.subscription?.status === 'CANCELLED', after.data?.subscription);
+    await call(P, 'POST', `/v1/booking/bookings/${iqPro.data?.id}/cancel`, { reason: 'bersihkan data uji e2e' }).catch(() => null);
+  }
 }
 
 console.log(`\n${failed ? '\x1b[31m' : '\x1b[32m'}${passed} lulus, ${failed} gagal\x1b[0m\n`);

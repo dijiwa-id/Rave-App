@@ -78,6 +78,15 @@ export interface DomainEvents {
   'finance.refund.completed': { refundId: string; invoiceId: string; purpose: PaymentPurpose; referenceId: string; amount: number; payerUserId: string; reason: string };
   'finance.refund.failed': { invoiceId: string | null; purpose: PaymentPurpose; referenceId: string; reason: string; error: string };
 
+  /** Status RAVE Pro organisasi berubah (aktif/upgrade/masa tenggang/berakhir/dibatalkan). `entitled` = hak Pro berlaku. */
+  'finance.pro.changed': {
+    orgId: string; plan: 'STARTER' | 'PRO' | 'LABEL' | null; status: 'ACTIVE' | 'PAST_DUE' | 'EXPIRED' | 'CANCELLED';
+    entitled: boolean; periodEnd: string | null; graceUntil: string | null; cancelAtPeriodEnd: boolean;
+    reason: 'ACTIVATED' | 'RENEWED' | 'UPGRADED' | 'GRACE' | 'EXPIRED' | 'CANCEL_SCHEDULED' | 'RESUMED' | 'COMPLIMENTARY' | 'REVOKED' | 'PLAN_SCHEDULED';
+  };
+  /** Tagihan perpanjangan RAVE Pro diterbitkan (pengingat ke pemilik organisasi). */
+  'finance.pro.renewal_due': { orgId: string; plan: 'STARTER' | 'PRO' | 'LABEL'; invoiceId: string; amount: number; dueAt: string; periodEnd: string };
+
   // Live streaming
   'live.stream.started': { streamId: string; orgId: string; artistId: string | null; title: string };
   'live.stream.ended': { streamId: string; reason: string; durationS: number; peakViewers: number };

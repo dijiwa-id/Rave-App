@@ -1,4 +1,4 @@
-import { CalendarRange, FileSignature, Inbox, LayoutDashboard, Receipt, ScanLine, Search, Star, Users, Radio } from 'lucide-react';
+import { CalendarRange, Crown, FileSignature, Inbox, LayoutDashboard, LineChart, Receipt, ScanLine, Search, Star, Users, Radio } from 'lucide-react';
 import { B2BLayout, type B2BNavItem } from '@/layouts/B2BLayout';
 import { promotorOrgs, useAuth } from '@/stores/auth';
 import { OrgSwitcher, useB2BContext, useCurrentPromotor } from '@/components/b2b/common';
@@ -6,7 +6,7 @@ import { OrgOnboarding } from '@/components/b2b/OrgOnboarding';
 import { useModule } from '@/components/ModuleGate';
 import { useDict } from '@/lib/i18n';
 
-type NavKey = 'dashboard' | 'discover' | 'bookings' | 'contracts' | 'invoices' | 'events' | 'checkin' | 'live' | 'ratings' | 'team';
+type NavKey = 'dashboard' | 'discover' | 'bookings' | 'contracts' | 'invoices' | 'events' | 'checkin' | 'live' | 'ratings' | 'insights' | 'team' | 'pro';
 type Item = Omit<B2BNavItem, 'label'> & { key: NavKey; module?: 'booking' | 'ticketing' | 'live' };
 const NAV: Item[] = [
   { to: '/promotor', key: 'dashboard', icon: LayoutDashboard, end: true },
@@ -18,7 +18,9 @@ const NAV: Item[] = [
   { to: '/promotor/checkin', key: 'checkin', icon: ScanLine, module: 'ticketing' },
   { to: '/promotor/live', key: 'live', icon: Radio, module: 'live' },
   { to: '/promotor/ratings', key: 'ratings', icon: Star, module: 'booking' },
+  { to: '/promotor/insights', key: 'insights', icon: LineChart, module: 'booking' },
   { to: '/promotor/team', key: 'team', icon: Users },
+  { to: '/promotor/pro', key: 'pro', icon: Crown },
 ];
 
 export default function PromotorLayout() {
@@ -34,7 +36,7 @@ export default function PromotorLayout() {
     <B2BLayout
       product="Promotor Hub"
       accent="#F4C21F"
-      nav={NAV.filter((n) => !n.module || on[n.module]).map(({ key, module: _m, ...n }) => ({ ...n, label: d.nav[key] }))}
+      nav={NAV.filter((n) => !n.module || on[n.module]).map(({ key, module: _m, ...n }) => ({ ...n, label: d.nav[key], ...(key === 'pro' && current?.pro ? { badge: 'PRO' } : {}) }))}
       context={<OrgSwitcher label={d.orgSwitcher} orgs={orgs} value={current?.id} onChange={(id) => set({ promotorOrgId: id })} />}
     />
   );

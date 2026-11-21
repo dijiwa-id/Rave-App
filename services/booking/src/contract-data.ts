@@ -12,7 +12,7 @@ import {
   type ValueBasis,
 } from '@rave/domain';
 import { settings, type Client } from '@rave/service-kit';
-import { commissionPolicy, todayWib, type BookingRow } from './common.js';
+import { bookingCommission, todayWib, type BookingRow } from './common.js';
 import { managementOrgId } from './repo.js';
 
 export const SPK_TEMPLATE_ID = 'spk';
@@ -78,7 +78,7 @@ export interface ContractData {
     technical_version: number | null;
     notes: string | null;
   };
-  commission: { promotor_service_fee_pct: number; artist_commission_pct: number };
+  commission: { promotor_service_fee_pct: number; artist_commission_pct: number; pro?: { promotor: boolean; artist: boolean } };
 }
 
 const HOSPITALITY_KEYS = ['hospitality', 'personnel'];
@@ -114,11 +114,11 @@ function dueText(t: PaymentTerm, days: number): string {
 const SIGN_GRACE_DAYS = 3;
 
 /** Termin bawaan dari kesepakatan negosiasi (DP% + pelunasan H-n). */
-export function defaultTerms(b: BookingRow, fee: number, mgmtPct: number | null): ContractTerms {
+export function defaultTerms(b: BookingRow, fee: number, mgmtPct: number | null, artistCommissionPct: number): ContractTerms {
   const dp = b.dp_pct;
   const payment_terms: PaymentTerm[] = [{ label: 'Down Payment (DP)', pct: dp, due: { type: 'ON_SIGN' } }];
   if (dp < 100) payment_terms.push({ label: 'Pelunasan', pct: 100 - dp, due: { type: 'DAYS_BEFORE_EVENT', days: b.settlement_days_before } });
-  const platform_pct = commissionPolicy().artistCommissionPct;
+  const platform_pct = artistCommissionPct;
   const management_pct = mgmtPct ?? 0;
   return {
     fee,
@@ -165,7 +165,8 @@ export async function buildContractData(
   const management = await legalOf(c, mgmtId, 'MANAGEMENT', epk?.contact?.name ?? `Manajemen ${artist?.name ?? ''}`.trim(), epk?.contact?.name);
   const mgmtPct = mgmtId ? (await c.query(`SELECT mgmt_fee_pct FROM legal_profiles WHERE org_id=$1 AND kind='MANAGEMENT'`, [mgmtId])).rows[0]?.mgmt_fee_pct : null;
 
-  const terms = opts.terms ?? defaultTerms(b, fee, mgmtPct == null ? null : Number(mgmtPct));
+  const policy = await bookingCommission(c, b);
+  const terms = opts.terms ?? defaultTerms(b, fee, mgmtPct == null ? null : Number(mgmtPct), policy.artistCommissionPct);
   assertTermsValid(terms);
 
   // Rider berversi (terbaru per jenis); fallback EPK.
@@ -179,7 +180,7 @@ export async function buildContractData(
 
   const payee: TaxPayee = 'company'; // penerima fee adalah badan manajemen (PPh 23); artis perorangan menerima lewat split internal
   const tax = computeContractTax(fee, terms.value_basis, payee, { pph21Pct: settings.num('contract.pph21_pct'), pph23Pct: settings.num('contract.pph23_pct') });
-  const inv = bookingInvoice(tax.gross, terms.payment_terms[0].pct, commissionPolicy());
+  const inv = bookingInvoice(tax.gross, terms.payment_terms[0].pct, policy);
   const threshold = settings.num('contract.emeterai_threshold');
 
   const signDate = todayWib();
@@ -228,6 +229,6 @@ export async function buildContractData(
       technical_version: tech?.version ?? null,
       notes: opts.riderNotes ?? null,
     },
-    commission: { promotor_service_fee_pct: commissionPolicy().promotorServiceFeePct, artist_commission_pct: commissionPolicy().artistCommissionPct },
+    commission: { promotor_service_fee_pct: policy.promotorServiceFeePct, artist_commission_pct: terms.fee_split.platform_pct, pro: policy.pro },
   };
 }

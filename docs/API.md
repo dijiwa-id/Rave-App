@@ -351,6 +351,24 @@ Internal: `POST /internal/invoices` `{ purpose, reference_id, amount, payer_user
 - Pencairan: komisi artis 7% → `revenue:commission:offair`; sisa dialokasikan per split (largest remainder), PPh dipotong per baris → `liability:tax_withholding:pph`, neto → `liability:payable:<party>:offair`.
 
 
+### 6a. RAVE Pro — langganan B2B organisasi (BRD §4.1, REQ-PAY-03)
+
+Pemilik data: **finance** (`pro_subscriptions`, `pro_orders`). Domain murni: `packages/domain/src/pro.ts` (harga, PPN, prorata, matriks fitur, siklus hidup).
+
+| Endpoint | Akses | Keterangan |
+|---|---|---|
+| `GET /v1/pro/plans?org_type=` | publik | Katalog paket: harga bulanan/tahunan (sebelum PPN), PPN, diskon tahunan, take rate standar vs Pro, batas roster |
+| `GET /v1/pro/orgs/:orgId` | anggota org | Langganan, pesanan menunggu (+invoice), riwayat tagihan, katalog |
+| `POST /v1/pro/orgs/:orgId/quote` `{plan, cycle}` | anggota org | Harga + kredit prorata + PPN; `mode` = `NEW`/`UPGRADE`/`SCHEDULE`/`CURRENT` |
+| `POST /v1/pro/orgs/:orgId/checkout` `{plan, cycle}` | OWNER/ADMIN | Baru/upgrade → invoice `SUBSCRIPTION` (idempoten untuk paket sama); downgrade/ganti ke bulanan → `{scheduled: true}` |
+| `POST /v1/pro/orgs/:orgId/cancel` · `/resume` · `DELETE …/scheduled-change` | OWNER/ADMIN | Berhenti di akhir periode / lanjutkan / batalkan jadwal |
+| `GET /v1/admin/pro/subscriptions?status=&q=` · `GET /v1/admin/pro/orgs/:orgId` | `finance.view` / `billing.manage` | Ringkasan (MRR, aktif per paket, masa tenggang, churn) + daftar |
+| `POST /v1/admin/pro/orgs/:orgId/grant` `{plan, months, reason}` · `/revoke` `{reason}` | `billing.manage` | Paket komplimen (tidak menimpa langganan berbayar) / cabut |
+| `GET /v1/admin/reports/pro` | Super Admin | Laporan layanan |
+| `GET /v1/booking/pro/insights?org_id=&days=` · `/insights.csv` | anggota org Pro | Insight Pro; tanpa langganan → **402** `code: PRO_REQUIRED`; CSV paket Pro & Label |
+
+Aturan: pembayaran → `finance.pro.changed` (booking: proyeksi take rate; iam: `orgs[].pro` & batas roster; notification). Take rate Pro dihitung per pihak dan **dikunci di booking saat kontrak dibuat** (`bookings.commission_*`). Job `pro-lifecycle` (tiap menit): tagihan perpanjangan `subscription.pro_renewal_invoice_days` hari sebelum akhir periode (`finance.pro.renewal_due`), masa tenggang `subscription.pro_grace_days`, lalu `EXPIRED`. Jurnal: kas → `revenue:subscription:pro` + `liability:tax:ppn_out`. Batas roster manajemen tanpa Pro / per paket → **402** `PRO_REQUIRED` di `POST /v1/orgs/:id/manage-artist`.
+
 ## 7. Ticketing (REQ-EVT-01, REQ-TIX-01..05)
 
 | Method & Path | Aktor | Body / Query | Respons |

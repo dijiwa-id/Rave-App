@@ -1,4 +1,4 @@
-import { BarChart3, CalendarDays, Disc3, FileSignature, Headphones, Inbox, LayoutDashboard, Mic2, Tags, UserRound, Users, Wallet, Radio } from 'lucide-react';
+import { BarChart3, CalendarDays, Crown, Disc3, FileSignature, Headphones, Inbox, LayoutDashboard, LineChart, Mic2, Tags, UserRound, Users, Wallet, Radio } from 'lucide-react';
 import { B2BLayout, type B2BNavItem } from '@/layouts/B2BLayout';
 import { artistOrgs, useAuth } from '@/stores/auth';
 import { OrgSwitcher, useB2BContext, useCurrentArtist } from '@/components/b2b/common';
@@ -7,7 +7,7 @@ import { useModule } from '@/components/ModuleGate';
 import { useDict } from '@/lib/i18n';
 import { setting, usePlatformConfig } from '@/lib/platform';
 
-type NavKey = 'dashboard' | 'releases' | 'profile' | 'analytics' | 'epk' | 'rateCard' | 'calendar' | 'live' | 'podcasts' | 'bookings' | 'contracts' | 'finance' | 'team';
+type NavKey = 'dashboard' | 'releases' | 'profile' | 'analytics' | 'epk' | 'rateCard' | 'calendar' | 'live' | 'podcasts' | 'bookings' | 'contracts' | 'insights' | 'finance' | 'team' | 'pro';
 type Item = Omit<B2BNavItem, 'label'> & { key: NavKey; module?: 'booking' | 'live' | 'podcasts' };
 const NAV: Item[] = [
   { to: '/studio', key: 'dashboard', icon: LayoutDashboard, end: true },
@@ -21,8 +21,10 @@ const NAV: Item[] = [
   { to: '/studio/podcasts', key: 'podcasts', icon: Headphones, module: 'podcasts' },
   { to: '/studio/bookings', key: 'bookings', icon: Inbox, module: 'booking' },
   { to: '/studio/contracts', key: 'contracts', icon: FileSignature, module: 'booking' },
+  { to: '/studio/insights', key: 'insights', icon: LineChart, module: 'booking' },
   { to: '/studio/finance', key: 'finance', icon: Wallet },
   { to: '/studio/team', key: 'team', icon: Users },
+  { to: '/studio/pro', key: 'pro', icon: Crown },
 ];
 
 export default function StudioLayout() {
@@ -42,7 +44,7 @@ export default function StudioLayout() {
     <B2BLayout
       product="Artist Studio"
       accent="#5B2A6E"
-      nav={NAV.filter((n) => !n.module || on[n.module]).map(({ key, module: _m, ...n }) => ({ ...n, label: d.nav[key] }))}
+      nav={NAV.filter((n) => !n.module || on[n.module]).map(({ key, module: _m, ...n }) => ({ ...n, label: d.nav[key], ...(key === 'pro' && current?.pro ? { badge: 'PRO' } : {}) }))}
       context={<OrgSwitcher label={d.artistSwitcher} orgs={orgs} value={current?.id} onChange={(id) => set({ artistOrgId: id })} />}
     />
   );

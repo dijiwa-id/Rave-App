@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { bookingInvoice, formatIdr } from '@rave/domain';
+import { bookingInvoice, formatIdr, type CommissionPolicy } from '@rave/domain';
 import { commissionPolicy, type BookingRow } from './common.js';
 
 export const TEMPLATE_VERSION = 'booking-v1';
@@ -12,6 +12,8 @@ interface Ctx {
   promotorName: string;
   rider: Record<string, any>;
   riderNotes: string | null;
+  /** Take rate booking ini (RAVE Pro bila berlaku); default tarif standar. */
+  policy?: CommissionPolicy;
 }
 
 const CATEGORY: Record<string, string> = {
@@ -25,8 +27,8 @@ const CATEGORY: Record<string, string> = {
 };
 
 /** Templat kontrak booking berversi — memuat klausul wajib BRD §8.7 & matriks pembatalan §7.3. */
-export function renderContract({ b, fee, artistName, artistCity, promotorName, rider, riderNotes }: Ctx): { body: string; sha256: string } {
-  const inv = bookingInvoice(fee, b.dp_pct, commissionPolicy());
+export function renderContract({ b, fee, artistName, artistCity, promotorName, rider, riderNotes, policy }: Ctx): { body: string; sha256: string } {
+  const inv = bookingInvoice(fee, b.dp_pct, policy ?? commissionPolicy());
   const r = rider ?? {};
   const body = `# PERJANJIAN PERTUNJUKAN (BOOKING) — RAVE
 Templat: \`${TEMPLATE_VERSION}\` · Nomor booking: \`${b.id}\`

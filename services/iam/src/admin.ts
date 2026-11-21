@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { ADMIN_ROLES } from '@rave/domain/settings';
 import { audit, badRequest, conflict, forbidden, nextCursor, notFound, pageParams, publish, requirePermission, requireRole, requireService, requireSuperAdmin, z, type ServiceContext } from '@rave/service-kit';
 import { clearMfa } from './mfa.js';
-import { anonymizeUser, buildMe, MEMBER_TYPES, type MemberType } from './core.js';
+import { anonymizeUser, buildMe, MEMBER_TYPES, orgOut, type MemberType } from './core.js';
 import { kycOut } from './routes.js';
 
 /**
@@ -90,6 +90,18 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
         await audit(tx, { actorId: req.user!.sub, action: `kyc.${status.toLowerCase()}`, entity: 'kyc', entityId: id, data: { reason: b.reason } });
         return kycOut(r);
       });
+    });
+
+    // Cari organisasi (Back Office: pengguna & organisasi, langganan RAVE Pro).
+    a.get('/v1/admin/iam/orgs', { preHandler: requirePermission(['users.view', 'billing.manage']) }, async (req) => {
+      const q = req.query as { q?: string; type?: string };
+      const rows = await db.query(
+        `SELECT o.*, (SELECT count(*) FROM memberships m WHERE m.org_id = o.id)::int AS members FROM orgs o
+          WHERE ($1::text IS NULL OR o.name ILIKE '%'||$1||'%' OR o.slug ILIKE '%'||$1||'%') AND ($2::text IS NULL OR o.type = $2)
+          ORDER BY o.verified DESC, o.created_at DESC LIMIT 50`,
+        [q.q?.trim() || null, q.type && /^[A-Z]{3,12}$/.test(q.type) ? q.type : null],
+      );
+      return { data: rows.map((o) => ({ ...orgOut(o), members: o.members })) };
     });
 
     a.get('/v1/admin/iam/users', { preHandler: requirePermission('users.view') }, async (req) => {

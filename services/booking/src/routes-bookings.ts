@@ -29,7 +29,7 @@ import {
   type ServiceContext,
   unprocessable,
 } from '@rave/service-kit';
-import { FAST_CLOCK, RATING_REVEAL_DAYS, commissionPolicy, daysUntil, isPromotorMember, partyOf, requireParty, todayWib, type BookingRow, type Party } from './common.js';
+import { FAST_CLOCK, RATING_REVEAL_DAYS, bookingCommission, daysUntil, isPromotorMember, partyOf, requireParty, todayWib, type BookingRow, type Party } from './common.js';
 import { renderContract } from './contract.js';
 import { SPK_TEMPLATE_VERSION, buildContractData } from './contract-data.js';
 import { enqueueContractJob } from './contract-jobs.js';
@@ -82,6 +82,7 @@ export async function bookingView(db: Db | Client, id: string, u: AuthUser | nul
     ? await q(`SELECT party, signer_name, signed_at FROM signatures WHERE contract_id=$1 ORDER BY signed_at`, [contract.id])
     : [];
   const fee = r.agreed_fee ?? r.latest_fee;
+  const policy = await bookingCommission({ query: (sql: string, p?: unknown[]) => q(sql, p ?? []).then((rows: any[]) => ({ rows })) }, r);
   // Kontak pihak lawan disamarkan sampai BOOKED (REQ-B2B-08)
   const reveal = contactRevealed(r.status) || party === 'admin';
   const other = party === 'promotor' ? (epk[0]?.contact ?? {}) : (r.promotor_contact ?? {});
@@ -105,7 +106,13 @@ export async function bookingView(db: Db | Client, id: string, u: AuthUser | nul
     contract: contract
       ? { id: contract.id, booking_id: id, template_version: contract.template_version, body_markdown: contract.body_markdown, sha256: contract.sha256, status: contract.status, version: contract.version, contract_no: contract.contract_no, require_artist_ack: contract.require_artist_ack, pdf_ready: !!(contract.final_key || contract.draft_key), created_at: contract.created_at, signed_at: contract.signed_at }
       : null,
-    invoice: fee ? invoiceDto(bookingInvoice(fee, r.dp_pct, commissionPolicy())) : null,
+    invoice: fee ? invoiceDto(bookingInvoice(fee, r.dp_pct, policy)) : null,
+    // Take rate booking ini — pihak lawan tidak melihat status langganan pihak lain, hanya tarif yang dikenakan ke dirinya.
+    take_rate: {
+      ...(party !== 'management' ? { promotor_service_fee_pct: policy.promotorServiceFeePct, promotor_pro: policy.pro.promotor } : {}),
+      ...(party !== 'promotor' ? { artist_commission_pct: policy.artistCommissionPct, artist_pro: policy.pro.artist } : {}),
+      locked: policy.locked,
+    },
     contact,
     my_party: party,
     signatures,
@@ -170,7 +177,12 @@ async function ensureContract(c: Client, b: BookingRow, who: { actorId?: string;
     promotorName: data.promotor.legal_name,
     rider: { ...data.rider.hospitality, ...data.rider.technical },
     riderNotes: data.rider.notes,
+    policy: { promotorServiceFeePct: data.commission.promotor_service_fee_pct, artistCommissionPct: data.commission.artist_commission_pct },
   });
+  // Kunci take rate (RAVE Pro bila berlaku) sesuai yang tercetak di kontrak — dipakai invoice, escrow & pencairan.
+  await c.query(`UPDATE bookings SET commission_promotor_pct=$2, commission_artist_pct=$3, commission_pro=$4 WHERE id=$1`, [
+    b.id, data.commission.promotor_service_fee_pct, data.commission.artist_commission_pct, JSON.stringify(data.commission.pro ?? { promotor: false, artist: false }),
+  ]);
   const id = uuidv7();
   await c.query(
     `INSERT INTO contracts (id, booking_id, template_version, body_markdown, sha256, version, contract_no, template_id, terms, data_snapshot, require_artist_ack, expires_at, status)

@@ -46,7 +46,7 @@ export const RAVE_SERVICES: RaveService[] = [
   { id: 'ads', type: 'money', icon: Megaphone, status: 'ready', groups: ['ads'], nav: false },
   { id: 'payout', report: true, type: 'money', icon: Wallet, status: 'ready', groups: ['payout'] },
   { id: 'subscription', report: true, type: 'money', icon: Crown, status: 'soon', groups: ['subscription'], keys: (k) => !isPro(k) && !isDownload(k) },
-  { id: 'pro', report: true, type: 'money', icon: BadgeCheck, status: 'soon', groups: ['subscription'], keys: isPro },
+  { id: 'pro', report: true, type: 'money', icon: BadgeCheck, status: 'ready', groups: ['subscription'], keys: isPro },
 ];
 
 export const serviceHref = (s: RaveService | string) => `/admin/platform/services/${typeof s === 'string' ? s : s.id}`;

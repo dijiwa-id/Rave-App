@@ -9,6 +9,8 @@ export interface OrgClaim {
   name: string;
   role: 'OWNER' | 'ADMIN' | 'FINANCE' | 'MEMBER' | 'VIEWER';
   artist_id: string | null;
+  /** Hak RAVE Pro org (null = tidak berlangganan). PAST_DUE = masa tenggang, hak masih berlaku. */
+  pro?: { plan: ProPlan; status: 'ACTIVE' | 'PAST_DUE'; until: string | null } | null;
 }
 export interface Me {
   id: string;
@@ -407,6 +409,8 @@ export interface Booking extends BookingSummary {
   timeline: { from_status: string | null; to_status: string; actor: string; note: string | null; created_at: string }[];
   contract: Contract | null;
   invoice: { service_fee: number; dp: number; settlement: number; total_promotor: number; artist_commission: number } | null;
+  /** Take rate booking ini — hanya bagian yang dikenakan ke pihak pembaca; `locked` = dikunci kontrak. */
+  take_rate?: { promotor_service_fee_pct?: number; promotor_pro?: boolean; artist_commission_pct?: number; artist_pro?: boolean; locked: boolean };
   contact: { name: string; email: string; phone: string };
   my_party: 'promotor' | 'management' | 'admin';
   signatures: { party: string; signer_name: string; signed_at: string }[];
@@ -876,4 +880,133 @@ export interface AdSimulateResult {
   slots: number;
   trace: { rule: string; pass: boolean; detail: string }[];
   eligible_campaigns: { id: string; name: string; advertiser: string; is_house: boolean; reason: string | null }[];
+}
+
+// ---------- RAVE Pro (langganan B2B organisasi) ----------
+export type ProPlan = 'STARTER' | 'PRO' | 'LABEL';
+export type BillingCycle = 'MONTHLY' | 'YEARLY';
+export interface ProFeatures {
+  reducedTakeRate: boolean;
+  insights: boolean;
+  insightsMaxDays: number;
+  csvExport: boolean;
+  counterpartBreakdown: boolean;
+  proBadge: boolean;
+  prioritySupport: boolean;
+  dedicatedManager: boolean;
+}
+export interface ProCatalog {
+  enabled: boolean;
+  currency: 'IDR';
+  ppn_pct: number;
+  yearly_discount_pct: number;
+  grace_days: number;
+  renewal_invoice_days: number;
+  take_rate: {
+    standard: { promotor_service_fee_pct: number; artist_commission_pct: number };
+    pro: { promotor_service_fee_pct: number; artist_commission_pct: number };
+  };
+  free_roster: number;
+  plans: { plan: ProPlan; label: string; monthly: number; yearly: number; roster_limit: number; features: ProFeatures }[];
+}
+export interface ProSubscription {
+  org_id: string;
+  org_name: string;
+  org_type: OrgType;
+  plan: ProPlan;
+  plan_label: string;
+  cycle: BillingCycle;
+  status: 'ACTIVE' | 'PAST_DUE' | 'EXPIRED' | 'CANCELLED';
+  source: 'PAID' | 'COMPLIMENTARY';
+  entitled: boolean;
+  current_period_start: string;
+  current_period_end: string;
+  grace_until: string | null;
+  auto_renew: boolean;
+  cancel_at_period_end: boolean;
+  next_plan: ProPlan | null;
+  next_cycle: BillingCycle | null;
+  started_at: string;
+  features: ProFeatures | null;
+}
+export interface ProOrder {
+  id: string;
+  kind: 'NEW' | 'RENEWAL' | 'UPGRADE' | 'COMPLIMENTARY';
+  plan: ProPlan;
+  cycle: BillingCycle;
+  status: 'PENDING' | 'PAID' | 'EXPIRED' | 'VOID';
+  subtotal: number;
+  credit: number;
+  ppn_pct: number;
+  ppn: number;
+  total: number;
+  period_start: string | null;
+  period_end: string | null;
+  created_at: string;
+  paid_at: string | null;
+  note: string | null;
+  invoice: Invoice | null;
+}
+export interface ProOrgState {
+  org_id: string;
+  eligible: boolean;
+  can_manage: boolean;
+  subscription: ProSubscription | null;
+  pending_order: ProOrder | null;
+  orders: ProOrder[];
+  catalog: ProCatalog;
+}
+export interface ProQuote {
+  plan: ProPlan;
+  cycle: BillingCycle;
+  subtotal: number;
+  credit: number;
+  ppn_pct: number;
+  ppn: number;
+  total: number;
+  mode: 'NEW' | 'UPGRADE' | 'SCHEDULE' | 'CURRENT';
+}
+export interface ProInsights {
+  org: { id: string; name: string; type: OrgType; plan: ProPlan; plan_label: string };
+  side: 'promotor' | 'artist';
+  days: number;
+  max_days: number;
+  features: { csv_export: boolean; partners: boolean };
+  kpis: {
+    inquiries: number;
+    won: number;
+    lost: number;
+    open: number;
+    cancelled: number;
+    disputed: number;
+    win_rate_pct: number | null;
+    gmv: number;
+    avg_fee: number;
+    avg_budget: number;
+    pipeline: number;
+    median_days_to_sign: number | null;
+    take_rate_saved: number;
+  };
+  monthly: { month: string; inquiries: number; won: number; gmv: number }[];
+  by_city: { city: string; inquiries: number; won: number; gmv: number }[];
+  by_category: { category: string; inquiries: number; won: number; avg_fee: number }[];
+  roster: { artist_id: string; name: string; inquiries: number; won: number; gmv: number; avg_fee: number; win_rate_pct: number | null }[];
+  partners: { org_id: string; name: string; inquiries: number; won: number; gmv: number; cancelled: number }[] | null;
+  generated_at: string;
+}
+export interface AdminProRow extends ProSubscription {
+  paid_orders: number;
+  lifetime_value: number;
+  paid_subtotal: number;
+  cancel_reason: string | null;
+}
+export interface AdminProSummary {
+  active: number;
+  past_due: number;
+  complimentary: number;
+  ending_soon: number;
+  churn_30d: number;
+  mrr: number;
+  revenue_30d: number;
+  by_plan: Record<ProPlan, number>;
 }

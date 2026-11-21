@@ -48,7 +48,10 @@ const promotor = {
   events: () => import('@/pages/promotor/Events'),
   checkin: () => import('@/pages/promotor/Checkin'),
 };
+// RAVE Pro (langganan B2B) & Insight Pro — dipakai Studio & Promotor Hub (org dari pemilih layout).
+const pro = { page: () => import('@/pages/pro/RavePro'), insights: () => import('@/pages/pro/ProInsights') };
 const admin = () => import('@/pages/admin/Admin');
+const adminPro = () => import('@/pages/admin/AdminPro');
 const adminLive = () => import('@/pages/admin/AdminLive');
 const adminAds = () => import('@/pages/admin/AdminAds');
 const adminEditorial = () => import('@/pages/admin/AdminEditorial');
@@ -91,7 +94,9 @@ export const b2bRoutes: RouteObject[] = [
             { path: 'bookings', element: named(studio.bookings, 'StudioBookings') },
             { path: 'bookings/:id', element: named(studio.bookings, 'StudioBookingPage') },
             { path: 'contracts', element: named(studio.bookings, 'StudioContracts') },
+            { path: 'insights', element: named(pro.insights, 'StudioInsights') },
           ]),
+          { path: 'pro', element: named(pro.page, 'StudioPro') },
           { path: 'finance', element: named(studio.finance, 'default') },
           { path: 'team', element: named(studio.team, 'default') },
           { path: 'live', element: named(live, 'StudioLive') },
@@ -120,7 +125,9 @@ export const b2bRoutes: RouteObject[] = [
             { path: 'contracts', element: named(promotor.bookings, 'PromotorContracts') },
             { path: 'invoices', element: named(promotor.bookings, 'PromotorInvoices') },
             { path: 'ratings', element: named(promotor.bookings, 'PromotorRatings') },
+            { path: 'insights', element: named(pro.insights, 'PromotorInsights') },
           ]),
+          { path: 'pro', element: named(pro.page, 'PromotorPro') },
           { path: 'team', element: named(promotor.bookings, 'PromotorTeam') },
           gated('ticketing', [
             { path: 'events', element: named(promotor.events, 'PromotorEvents') },
@@ -147,6 +154,7 @@ export const b2bRoutes: RouteObject[] = [
               access(['dispute.resolve'], [{ path: 'disputes', element: named(admin, 'AdminDisputes') }]),
               access(['live.moderate'], [{ path: 'live', element: named(adminLive, 'AdminLive') }]),
               access(['finance.view', 'finance.refund', 'finance.payout'], [{ path: 'finance', element: named(admin, 'AdminFinance') }]),
+              access(['finance.view', 'billing.manage'], [{ path: 'pro', element: named(adminPro, 'AdminPro') }]),
               access(['users.view'], [{ path: 'users', element: named(admin, 'AdminUsers') }]),
               access(['users.verify'], [{ path: 'verifications', element: named(admin, 'AdminVerifications') }]),
               access(['audit.view'], [{ path: 'audit', element: named(admin, 'AdminAudit') }]),

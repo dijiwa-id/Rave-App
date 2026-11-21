@@ -4,7 +4,7 @@ import { requireSuperAdmin, type ServiceContext } from '@rave/service-kit';
 
 const ACTIVE = `member_type <> 'FREE' AND (member_until IS NULL OR member_until > now())`;
 
-/** Laporan Langganan Premium & RAVE Pro (Super Admin). Jenis member diubah di Pengguna → Pengguna. */
+/** Laporan Langganan Premium (Super Admin). Jenis member diubah di Pengguna → Pengguna. */
 export async function reportRoutes(app: FastifyInstance, { db }: ServiceContext) {
   app.get('/v1/admin/reports/subscription', { preHandler: requireSuperAdmin }, async (): Promise<ServiceReport> => {
     const k = await db.one(
@@ -46,34 +46,5 @@ export async function reportRoutes(app: FastifyInstance, { db }: ServiceContext)
       generated_at: new Date().toISOString(),
     };
   });
-
-  // RAVE Pro belum bisa dibeli: tampilkan calon pelanggan (organisasi promotor, artis, manajemen, label).
-  app.get('/v1/admin/reports/pro', { preHandler: requireSuperAdmin }, async (): Promise<ServiceReport> => {
-    const k = await db.one(
-      `SELECT count(*) FILTER (WHERE type IN ('PROMOTOR','VENUE'))::int AS promotors, count(*) FILTER (WHERE type = 'ARTIST')::int AS artists,
-              count(*) FILTER (WHERE type IN ('MANAGEMENT','LABEL'))::int AS mgmt, count(*) FILTER (WHERE verified)::int AS verified FROM orgs`,
-    );
-    const rows = await db.query(`SELECT name, type, city, verified, created_at FROM orgs ORDER BY verified DESC, created_at DESC LIMIT 50`);
-    return {
-      kpis: [
-        { label: L('Promotor & venue', 'Promoters & venues'), value: k?.promotors ?? 0, format: 'num' },
-        { label: L('Artis', 'Artists'), value: k?.artists ?? 0, format: 'num' },
-        { label: L('Manajemen & label', 'Management & labels'), value: k?.mgmt ?? 0, format: 'num' },
-        { label: L('Terverifikasi (KYB)', 'Verified (KYB)'), value: k?.verified ?? 0, format: 'num', tone: 'good' },
-      ],
-      table: {
-        title: L('Calon pelanggan RAVE Pro (organisasi)', 'Prospective RAVE Pro customers (organizations)'),
-        columns: [
-          { key: 'name', label: L('Organisasi', 'Organization') },
-          { key: 'type', label: L('Jenis', 'Type'), format: 'status' },
-          { key: 'city', label: L('Kota', 'City') },
-          { key: 'verified', label: L('Terverifikasi', 'Verified'), format: 'status' },
-          { key: 'created_at', label: L('Bergabung', 'Joined'), format: 'date' },
-        ],
-        rows: rows.map((r) => ({ ...r, verified: r.verified ? 'YES' : 'NO' })),
-        empty: L('Belum ada organisasi', 'No organizations yet'),
-      },
-      generated_at: new Date().toISOString(),
-    };
-  });
+  // Laporan RAVE Pro dilayani finance (pemilik data langganan): GET /v1/admin/reports/pro.
 }

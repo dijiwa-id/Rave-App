@@ -35,6 +35,7 @@ import {
   mask,
   normalizeDestination,
   orgOut,
+  orgPro,
   otpCode,
   OTP_MAX_ATTEMPTS,
   OTP_TTL_SEC,
@@ -43,6 +44,7 @@ import {
   sha256,
   type Q,
 } from './core.js';
+import { PLAN_LABEL, rosterLimit, type ProPlan } from '@rave/domain';
 import { consumeLoginCode } from './oauth.js';
 import { checkSecondFactor, clearMfa, completeLogin, MFA_MAX_ATTEMPTS, recoveryRemaining, replaceRecoveryCodes, USER_MFA_COLS } from './mfa.js';
 import { newTotpSecret, otpauthUri, TOTP_LOCK_MIN, verifyTotp } from './totp.js';
@@ -657,6 +659,18 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
           if ((await dbOrgRole(tx, id, req.user!.sub)) !== 'OWNER') throw forbidden('Hanya OWNER manajemen');
           if (!['OWNER', 'ADMIN'].includes((await dbOrgRole(tx, b.artist_org_id, req.user!.sub)) ?? ''))
             throw forbidden('Persetujuan OWNER/ADMIN org artis diperlukan');
+        }
+        // Multi-roster (RAVE Pro, BRD §4.1): batas artis kelolaan mengikuti paket; tanpa Pro memakai batas gratis.
+        const exists = (await tx.query(`SELECT 1 FROM management_artists WHERE management_org_id=$1 AND artist_org_id=$2`, [id, b.artist_org_id])).rowCount;
+        if (!exists) {
+          await tx.query(`SELECT pg_advisory_xact_lock(hashtext('roster'), hashtext($1))`, [id]);
+          const pro = orgPro(mgmt);
+          const limit = rosterLimit((pro?.plan as ProPlan) ?? null, (k) => settings.num(k));
+          const n = Number((await tx.query(`SELECT count(*) AS n FROM management_artists WHERE management_org_id=$1 AND (valid_to IS NULL OR valid_to >= current_date)`, [id])).rows[0].n);
+          if (limit > 0 && n >= limit)
+            throw new HttpError(402, 'Payment Required', pro
+              ? `Roster paket RAVE Pro ${PLAN_LABEL[pro.plan as ProPlan]} penuh (${limit} artis). Upgrade paket untuk menambah artis.`
+              : `Tanpa RAVE Pro, manajemen dapat mengelola hingga ${limit} artis. Berlangganan RAVE Pro untuk multi-roster.`, { code: 'PRO_REQUIRED', limit, current: n });
         }
         await tx.query(`INSERT INTO management_artists (management_org_id, artist_org_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [id, b.artist_org_id]);
         await publishManagerAccess(tx, id, b.artist_org_id);

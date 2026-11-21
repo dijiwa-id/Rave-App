@@ -18,6 +18,15 @@ const svc = createService({
     await verificationRoutes(app, ctx);
     await reportRoutes(app, ctx);
   },
+  // RAVE Pro: proyeksi status langganan org dari finance (badge, gating klien, batas roster).
+  consumers: () => ({
+    'finance.pro.changed': async (e, tx) => {
+      const p = e.payload;
+      await tx.query(`UPDATE orgs SET pro_plan=$2, pro_status=$3, pro_until=$4 WHERE id=$1`, [
+        p.orgId, p.entitled ? p.plan : null, p.entitled ? p.status : null, p.entitled ? (p.graceUntil ?? p.periodEnd) : null,
+      ]);
+    },
+  }),
   jobs: [
     {
       name: 'otp-cleanup',

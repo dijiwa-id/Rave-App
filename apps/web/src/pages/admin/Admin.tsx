@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, ArrowRight, BadgeCheck, Briefcase, Mic2, Podcast, Ticket, Headphones, Images, ListMusic, Shapes, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow } from 'lucide-react';
+import { Activity, ArrowRight, BadgeCheck, Briefcase, Crown, Mic2, Podcast, Ticket, Headphones, Images, ListMusic, Shapes, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow } from 'lucide-react';
 import { ADMIN_PERMISSIONS, ADMIN_ROLE_LABEL, type AdminPermission, type AdminRole } from '@rave/domain/settings';
 import { can, isSuperAdmin, useAuth } from '@/stores/auth';
 import { B2BLayout, type B2BNavItem } from '@/layouts/B2BLayout';
@@ -55,6 +55,7 @@ export function AdminLayout() {
     { to: '/admin/disputes', label: n.disputes, icon: Gavel, perms: ['dispute.resolve'] },
     // Seksi Keuangan
     { to: '/admin/finance', label: n.finance, icon: Scale, perms: ['finance.view', 'finance.refund', 'finance.payout'], section: area('finance.view') },
+    { to: '/admin/pro', label: n.pro, icon: Crown, perms: ['finance.view', 'billing.manage'] },
     // Seksi Pengguna
     { to: '/admin/users', label: n.users, icon: Users, perms: ['users.view'], section: area('users.view') },
     { to: '/admin/verifications', label: n.verifications, icon: BadgeCheck, perms: ['users.verify'] },

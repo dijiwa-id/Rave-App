@@ -5,6 +5,13 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+### Fitur
+
+- **pro:** RAVE Pro — langganan B2B organisasi (BRD §4.1, REQ-PAY-03): paket Starter/Pro/Label bulanan & tahunan, checkout lewat invoice SUBSCRIPTION (sandbox/Midtrans), PPN keluaran terpisah di ledger, upgrade prorata, downgrade terjadwal, berhenti/lanjutkan, tagihan perpanjangan otomatis, masa tenggang & kedaluwarsa
+- **booking:** take rate Pro per booking (promotor 3%, artis 5% bila org artis/manajemennya Pro), dikunci di kontrak; Insight Pro (konversi, GMV, pipeline, waktu ke kontrak, kota, kategori, roster, mitra) + ekspor CSV
+- **iam:** status Pro di profil org (`/v1/me`), batas roster multi-roster per paket, pencarian org Back Office
+- **web:** halaman RAVE Pro & Insight Pro di Artist Studio dan Promotor Hub, rincian tarif Pro di booking, Back Office → RAVE Pro (MRR, paket komplimen, pencabutan), layanan RAVE Pro di Super Admin siap dipakai
+
 ## [0.3.1] — 2026-11-21
 
 ### Fitur

@@ -1,6 +1,6 @@
 import { bookingInvoice } from '@rave/domain';
 import type { Consumers, ServiceContext } from '@rave/service-kit';
-import { commissionPolicy } from './common.js';
+import { bookingCommission } from './common.js';
 import { loadBooking, transition } from './repo.js';
 
 export function consumers({ log }: ServiceContext): Consumers {
@@ -20,6 +20,11 @@ export function consumers({ log }: ServiceContext): Consumers {
       await tx.query(`INSERT INTO orgs (id, type, name) VALUES ($1,$2,$3) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name`, [p.orgId, p.type, p.name]);
       if (p.artistId) await tx.query(`UPDATE artists SET org_id=$2 WHERE id=$1 AND org_id IS NULL`, [p.artistId, p.orgId]);
     },
+    // RAVE Pro (finance): proyeksi status langganan untuk take rate booking yang belum berkontrak.
+    'finance.pro.changed': async (e, tx) => {
+      const p = e.payload;
+      await tx.query(`UPDATE orgs SET pro_plan=$2, pro_until=$3 WHERE id=$1`, [p.orgId, p.entitled ? p.plan : null, p.entitled ? (p.graceUntil ?? p.periodEnd) : null]);
+    },
     'iam.kyc.verified': async (e, tx) => {
       if (e.payload.orgId) await tx.query(`UPDATE orgs SET verified=true WHERE id=$1`, [e.payload.orgId]);
     },
@@ -30,7 +35,7 @@ export function consumers({ log }: ServiceContext): Consumers {
       if (p.purpose !== 'BOOKING_DP' && p.purpose !== 'BOOKING_SETTLEMENT') return;
       const b = await loadBooking(tx, p.referenceId, true).catch(() => null);
       if (!b) return log.warn({ ref: p.referenceId }, 'payment untuk booking tak dikenal');
-      const inv = bookingInvoice(b.agreed_fee ?? 0, b.dp_pct, commissionPolicy());
+      const inv = bookingInvoice(b.agreed_fee ?? 0, b.dp_pct, await bookingCommission(tx, b));
       if (p.purpose === 'BOOKING_DP') {
         if (b.status !== 'SIGNED') return log.warn({ id: b.id, status: b.status }, 'DP diterima di luar status SIGNED');
         await transition(tx, b, 'BOOKED', 'system', { note: 'DP diterima escrow — kontak dibuka', set: { dp_paid: inv.dp } });

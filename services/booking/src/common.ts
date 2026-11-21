@@ -1,5 +1,5 @@
 import pg from 'pg';
-import type { CommissionPolicy } from '@rave/domain';
+import { commissionFor, type CommissionPolicy } from '@rave/domain';
 import { config, forbidden, isAdmin, managedArtistIds, settings, type AuthUser } from '@rave/service-kit';
 
 // Kolom DATE dikembalikan sebagai string 'YYYY-MM-DD' (bukan Date lokal yang bergeser zona).
@@ -14,11 +14,50 @@ export const FAST_CLOCK = (process.env.RAVE_FAST_CLOCK ?? (config.isDev ? '1' : 
 export const AUTO_COMPLETE_MS = FAST_CLOCK ? 60_000 : 24 * 3600_000;
 export const RATING_REVEAL_DAYS = 14;
 
-/** Take rate off-air terkini dari pengaturan platform (Super Admin → Komisi & Biaya). */
+/** Take rate off-air standar dari pengaturan platform (Super Admin → Komisi & Biaya). */
 export const commissionPolicy = (): CommissionPolicy => ({
   promotorServiceFeePct: settings.num('commission.promotor_service_fee_pct'),
   artistCommissionPct: settings.num('commission.artist_commission_pct'),
 });
+/** Take rate RAVE Pro (Super Admin → Pengaturan Layanan → RAVE Pro). */
+export const proCommissionPolicy = (): CommissionPolicy => ({
+  promotorServiceFeePct: settings.num('subscription.pro_promotor_service_fee_pct'),
+  artistCommissionPct: settings.num('subscription.pro_artist_commission_pct'),
+});
+
+type Q = { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }> };
+export interface BookingCommission extends CommissionPolicy {
+  /** Pihak yang mendapat tarif RAVE Pro (untuk ditampilkan di rincian & kontrak). */
+  pro: { promotor: boolean; artist: boolean };
+  locked: boolean;
+}
+
+/** Org berlangganan RAVE Pro (hak berlaku termasuk masa tenggang) menurut proyeksi finance.pro.changed. */
+async function proOrgs(c: Q, ids: (string | null | undefined)[]): Promise<Set<string>> {
+  const list = [...new Set(ids.filter((x): x is string => !!x))];
+  if (!list.length) return new Set();
+  const r = await c.query(`SELECT id FROM orgs WHERE id = ANY($1::uuid[]) AND pro_plan IS NOT NULL AND (pro_until IS NULL OR pro_until > now())`, [list]);
+  return new Set(r.rows.map((x) => x.id));
+}
+
+/**
+ * Take rate satu booking (BRD §4.1): service fee promotor turun bila org promotor RAVE Pro; komisi artis turun bila org artis
+ * atau manajemen yang mengelola artis RAVE Pro. Setelah kontrak dibuat tarif dikunci di booking (tidak berubah walau
+ * langganan berakhir/berubah sebelum pencairan) — kontrak adalah sumber kebenaran.
+ */
+export async function bookingCommission(c: Q, b: Pick<BookingRow, 'artist_id' | 'artist_org_id' | 'promotor_org_id'> & Partial<Pick<BookingRow, 'commission_promotor_pct' | 'commission_artist_pct' | 'commission_pro'>>): Promise<BookingCommission> {
+  if (b.commission_promotor_pct != null && b.commission_artist_pct != null)
+    return {
+      promotorServiceFeePct: Number(b.commission_promotor_pct),
+      artistCommissionPct: Number(b.commission_artist_pct),
+      pro: { promotor: !!b.commission_pro?.promotor, artist: !!b.commission_pro?.artist },
+      locked: true,
+    };
+  const mgmt = (await c.query(`SELECT f.party_id FROM fee_splits f JOIN orgs o ON o.id = f.party_id WHERE f.artist_id=$1 AND o.type IN ('MANAGEMENT','LABEL')`, [b.artist_id])).rows.map((r) => r.party_id);
+  const pro = await proOrgs(c, [b.promotor_org_id, b.artist_org_id, ...mgmt]);
+  const parties = { promotorPro: pro.has(b.promotor_org_id), artistPro: (!!b.artist_org_id && pro.has(b.artist_org_id)) || mgmt.some((m) => pro.has(m)) };
+  return { ...commissionFor(commissionPolicy(), proCommissionPolicy(), parties), pro: { promotor: parties.promotorPro, artist: parties.artistPro }, locked: false };
+}
 
 export type Party = 'promotor' | 'management' | 'admin';
 
@@ -29,6 +68,9 @@ export interface BookingRow {
   promotor_org_id: string;
   promotor_user_id: string;
   promotor_contact: { name?: string; email?: string; phone?: string };
+  commission_promotor_pct?: string | number | null;
+  commission_artist_pct?: string | number | null;
+  commission_pro?: { promotor?: boolean; artist?: boolean } | null;
   status: string;
   prev_status: string | null;
   event_name: string;

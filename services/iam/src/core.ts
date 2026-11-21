@@ -47,16 +47,19 @@ export interface OrgRow {
   role: OrgClaim['role'];
   artist_id: string | null;
   direct: boolean;
+  pro_plan?: string | null;
+  pro_status?: string | null;
+  pro_until?: string | Date | null;
 }
 
 /** Org langsung + org ARTIST yang dikelola org MANAGEMENT milik user (peran efektif ADMIN). */
 export async function loadOrgs(q: Q, userId: string): Promise<OrgRow[]> {
   const direct = await q.query(
-    `SELECT o.id, o.type, o.name, m.role, o.artist_id, true AS direct FROM memberships m JOIN orgs o ON o.id = m.org_id WHERE m.user_id = $1 ORDER BY m.created_at`,
+    `SELECT o.id, o.type, o.name, m.role, o.artist_id, o.pro_plan, o.pro_status, o.pro_until, true AS direct FROM memberships m JOIN orgs o ON o.id = m.org_id WHERE m.user_id = $1 ORDER BY m.created_at`,
     [userId],
   );
   const managed = await q.query(
-    `SELECT DISTINCT a.id, a.type, a.name, 'ADMIN' AS role, a.artist_id, false AS direct
+    `SELECT DISTINCT a.id, a.type, a.name, 'ADMIN' AS role, a.artist_id, a.pro_plan, a.pro_status, a.pro_until, false AS direct
        FROM memberships m
        JOIN orgs mo ON mo.id = m.org_id AND mo.type = 'MANAGEMENT'
        JOIN management_artists ma ON ma.management_org_id = mo.id AND (ma.valid_to IS NULL OR ma.valid_to >= current_date)
@@ -215,7 +218,7 @@ export async function buildMe(q: Q, userId: string) {
     theme: (u.theme as 'light' | 'dark' | 'system' | null) ?? null,
     genres: u.genres,
     roles: deriveRoles(u.admin_role ?? (u.is_admin ? 'OPS' : null), orgs),
-    orgs: orgs.map((o) => ({ id: o.id, type: o.type, name: o.name, role: o.role, artist_id: o.artist_id })),
+    orgs: orgs.map((o) => ({ id: o.id, type: o.type, name: o.name, role: o.role, artist_id: o.artist_id, pro: orgPro(o) })),
     kyc_status: await kycStatus(q, userId),
     mfa_enabled: u.mfa_enabled,
     /** Aplikasi authenticator (TOTP) aktif — bisa masuk dengan email + kode authenticator. */
@@ -274,5 +277,11 @@ export async function issueTokens(q: Q, me: Me, familyId?: string) {
 }
 
 export function orgOut(o: any) {
-  return { id: o.id, type: o.type, name: o.name, slug: o.slug, city: o.city, verified: o.verified, artist_id: o.artist_id, created_at: o.created_at };
+  return { id: o.id, type: o.type, name: o.name, slug: o.slug, city: o.city, verified: o.verified, artist_id: o.artist_id, created_at: o.created_at, pro: orgPro(o) };
+}
+
+/** Hak RAVE Pro org (null bila tidak berlangganan / sudah berakhir). PAST_DUE = masa tenggang, hak masih berlaku. */
+export function orgPro(o: { pro_plan?: string | null; pro_status?: string | null; pro_until?: string | Date | null }) {
+  if (!o.pro_plan || (o.pro_until && new Date(o.pro_until).getTime() <= Date.now())) return null;
+  return { plan: o.pro_plan, status: o.pro_status ?? 'ACTIVE', until: o.pro_until ? new Date(o.pro_until).toISOString() : null };
 }

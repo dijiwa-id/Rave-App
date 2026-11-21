@@ -1,4 +1,4 @@
-import { brandedEmail, sendEmail, type Consumers, type ServiceContext } from '@rave/service-kit';
+import { brandedEmail, sendEmail, type Client, type Consumers, type ServiceContext } from '@rave/service-kit';
 import { BOOKING_STATUS_LABEL, type BookingStatus } from '@rave/domain/booking';
 import { TICKET_REFUND_REASON_LABEL, type TicketRefundReason } from '@rave/domain';
 import { artistRecipients, notifyFollowers, notifyUsers, orgRecipients, rupiah } from './notify.js';
@@ -131,6 +131,40 @@ export function consumers(ctx: ServiceContext): Consumers {
         link: '/promotor/invoices',
       });
     },
+    // ---- RAVE Pro (langganan organisasi) ----
+    'finance.pro.changed': async (e, tx) => {
+      const p = e.payload;
+      const members = await orgRecipients(tx, p.orgId);
+      if (!members.length) return;
+      const link = await proLink(tx, p.orgId);
+      const plan = p.plan ? `RAVE Pro paket ${PLAN_NAME[p.plan]}` : 'RAVE Pro';
+      const until = p.periodEnd ? tanggal(p.periodEnd) : '';
+      const msg: Record<string, { title: string; body: string } | null> = {
+        ACTIVATED: { title: `${plan} aktif`, body: `Take rate Pro, Insight Pro & fitur paket sudah berlaku hingga ${until}. Terima kasih telah berlangganan.` },
+        RENEWED: { title: `${plan} diperpanjang`, body: `Pembayaran perpanjangan diterima. Periode berikutnya berlaku hingga ${until}.` },
+        UPGRADED: { title: `Paket ditingkatkan: ${plan}`, body: `Fitur paket baru langsung berlaku hingga ${until}. Sisa periode lama sudah dikreditkan.` },
+        COMPLIMENTARY: { title: `${plan} komplimen dari RAVE`, body: `Organisasi Anda menerima ${plan} hingga ${until}.` },
+        GRACE: { title: 'Perpanjangan RAVE Pro belum dibayar', body: `Masa tenggang hingga ${p.graceUntil ? tanggal(p.graceUntil) : '-'} — bayar tagihan perpanjangan agar take rate Pro tidak berhenti.` },
+        EXPIRED: { title: 'RAVE Pro berakhir', body: 'Booking baru kembali memakai take rate standar. Booking yang sudah berkontrak tetap memakai tarif di kontrak.' },
+        CANCEL_SCHEDULED: { title: 'RAVE Pro akan berakhir di akhir periode', body: `Fitur Pro tetap berlaku hingga ${until}, lalu berakhir. Tagihan perpanjangan tidak akan dikirim.` },
+        RESUMED: { title: 'Langganan RAVE Pro dilanjutkan', body: `Tagihan perpanjangan akan dikirim sebelum ${until}. Tidak ada debit otomatis.` },
+        REVOKED: { title: 'RAVE Pro dicabut', body: 'Langganan dicabut oleh tim RAVE. Hubungi dukungan bila ada pertanyaan.' },
+        PLAN_SCHEDULED: null,
+      };
+      const m = msg[p.reason];
+      if (m) await notifyUsers(tx, members, e.id, { category: 'payment', title: m.title, body: m.body, link });
+    },
+    'finance.pro.renewal_due': async (e, tx) => {
+      const p = e.payload;
+      const members = await orgRecipients(tx, p.orgId);
+      if (!members.length) return;
+      await notifyUsers(tx, members, e.id, {
+        category: 'payment',
+        title: `Tagihan perpanjangan RAVE Pro paket ${PLAN_NAME[p.plan]}`,
+        body: `${rupiah(p.amount)} (termasuk PPN) — periode berjalan berakhir ${tanggal(p.periodEnd)}. Bayar sebelum ${tanggal(p.dueAt)} agar layanan tidak terputus.`,
+        link: await proLink(tx, p.orgId),
+      });
+    },
     'finance.payout.completed': async (e, tx) => {
       const p = e.payload;
       const members = await orgRecipients(tx, p.partyId);
@@ -254,6 +288,14 @@ export function consumers(ctx: ServiceContext): Consumers {
         });
         return;
       }
+      if (p.purpose === 'SUBSCRIPTION') {
+        await notifyUsers(tx, [p.payerUserId], e.id, {
+          category: 'payment',
+          title: 'Pembayaran RAVE Pro dikembalikan',
+          body: `${rupiah(p.amount)} dikembalikan ke metode pembayaran asal (${p.reason}). Langganan Anda tidak berubah.`,
+        });
+        return;
+      }
       if (p.purpose !== 'TICKET_ORDER') return;
       const why = TICKET_REFUND_REASON_LABEL[p.reason as TicketRefundReason] ?? 'Refund tiket';
       await notifyUsers(tx, [p.payerUserId], e.id, {
@@ -309,4 +351,12 @@ export function consumers(ctx: ServiceContext): Consumers {
       });
     },
   };
+}
+
+const PLAN_NAME: Record<string, string> = { STARTER: 'Starter', PRO: 'Pro', LABEL: 'Label' };
+const tanggal = (iso: string) => new Date(iso).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Jakarta' });
+/** Halaman RAVE Pro sesuai produk org: Promotor Hub untuk promotor/venue, Artist Studio untuk artis/manajemen/label. */
+async function proLink(tx: Client, orgId: string): Promise<string> {
+  const r = await tx.query(`SELECT org_type FROM org_members WHERE org_id=$1 LIMIT 1`, [orgId]);
+  return ['PROMOTOR', 'VENUE'].includes(r.rows[0]?.org_type) ? '/promotor/pro' : '/studio/pro';
 }

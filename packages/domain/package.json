@@ -20,6 +20,7 @@
     "./spectrum": "./src/spectrum.ts",
     "./integrations": "./src/integrations.ts",
     "./reports": "./src/reports.ts",
-    "./podcast": "./src/podcast.ts"
+    "./podcast": "./src/podcast.ts",
+    "./pro": "./src/pro.ts"
   }
 }

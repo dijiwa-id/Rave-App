@@ -9,6 +9,7 @@ import type { Booking, Contract, EscrowStatus } from '@/lib/types';
 import { Badge, Button, Card, cx, ErrorState, Field, Input, Modal, PageLoader, Textarea, toast } from '@/components/ui';
 import { BookingStatusBadge, bookingStatusLabel, categoryLabel, formatLabel, SimpleMarkdown } from './common';
 import { PayInvoice } from './PayInvoice';
+import { ProBadge } from './ProBadge';
 import type { BookingStatus } from '@rave/domain/booking';
 import { expectedSigner, type ContractStatus } from '@rave/domain/contract';
 import { useDict } from '@/lib/i18n';
@@ -231,6 +232,7 @@ function useAction(id: string) {
 
 /** Detail booking bersama untuk Artist Studio & Promotor Hub (REQ-B2B-04/05/06/08/11/12). */
 export function BookingDetail({ id }: { id: string }) {
+  const pro = useDict('b2b').pro;
   const q = useQuery({ queryKey: ['booking', id], queryFn: () => api<Booking>(`/v1/booking/bookings/${id}`), refetchInterval: 15_000 });
   const escrow = useQuery({
     queryKey: ['escrow', id],
@@ -451,10 +453,15 @@ export function BookingDetail({ id }: { id: string }) {
                 <Row k={d.artistFee} v={fmt.idr(b.invoice.dp + b.invoice.settlement)} />
                 <Row k={d.dp} v={fmt.idr(b.invoice.dp)} />
                 <Row k={d.settlement} v={fmt.idr(b.invoice.settlement)} />
-                <Row k={d.promotorServiceFee} v={fmt.idr(b.invoice.service_fee)} />
+                <Row k={rateLabel(d.promotorServiceFee, b.take_rate?.promotor_service_fee_pct, b.take_rate?.promotor_pro)} v={fmt.idr(b.invoice.service_fee)} />
                 <Row k={d.promotorTotal} v={fmt.idr(b.invoice.total_promotor)} strong />
-                {me !== 'promotor' && <Row k={d.platformCommission} v={`− ${fmt.idr(b.invoice.artist_commission)}`} />}
+                {me !== 'promotor' && <Row k={rateLabel(d.platformCommission, b.take_rate?.artist_commission_pct, b.take_rate?.artist_pro)} v={`− ${fmt.idr(b.invoice.artist_commission)}`} />}
               </dl>
+              {(b.take_rate?.promotor_pro || b.take_rate?.artist_pro) && (
+                <p className="mt-3 flex flex-wrap items-center gap-2 text-xs text-b2b-muted">
+                  <ProBadge /> {pro.proRate}{b.take_rate?.locked ? ` · ${pro.rateLocked}` : ''}
+                </p>
+              )}
             </Card>
           )}
 
@@ -562,6 +569,9 @@ export function BookingDetail({ id }: { id: string }) {
     </div>
   );
 }
+
+/** Label baris rincian dengan persentase take rate booking (mis. "Service fee promotor (3%)"). */
+const rateLabel = (label: string, pct?: number, _pro?: boolean) => (pct == null ? label : `${label} (${pct}%)`);
 
 function Row({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
   return (

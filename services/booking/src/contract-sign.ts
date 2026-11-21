@@ -9,7 +9,7 @@ import {
   type SignParty,
 } from '@rave/domain';
 import { audit, conflict, forbidden, managedArtistIds, notFound, publish, unprocessable, type AuthUser, type Client, type Db } from '@rave/service-kit';
-import { commissionPolicy, isPromotorMember, type BookingRow } from './common.js';
+import { bookingCommission, isPromotorMember, type BookingRow } from './common.js';
 import { enqueueContractJob } from './contract-jobs.js';
 import { contractAudit } from './routes-contracts.js';
 import { loadBooking, managementOrgId, transition, freezeReleaseTerms } from './repo.js';
@@ -112,7 +112,7 @@ export async function verifySignOtp(db: Db, req: FastifyRequest, contractId: str
 export async function activateBooking(c: Client, b: BookingRow, contractId: string, sha: string) {
   const nb = await transition(c, b, 'SIGNED', 'system', { note: `Ditandatangani semua pihak · sha256 ${sha.slice(0, 12)}…` });
   await freezeReleaseTerms(c, nb, contractId);
-  const inv = bookingInvoice(nb.agreed_fee!, nb.dp_pct, commissionPolicy());
+  const inv = bookingInvoice(nb.agreed_fee!, nb.dp_pct, await bookingCommission(c, nb));
   await publish(c, 'booking.contract.signed', nb.id, {
     bookingId: nb.id,
     contractId,
