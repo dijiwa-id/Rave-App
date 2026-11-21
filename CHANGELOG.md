@@ -5,6 +5,11 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+### Fitur
+
+- **berita:** Back Office → Konten → **Ruang Berita** (`/admin/news`, izin baru `news.publish`, default peran Editorial). Artikel dwibahasa ID/EN dengan editor blok (paragraf, subjudul, kutipan; tempel beberapa paragraf otomatis dipecah), foto utama 16:9 (unggah `purpose: news`), slug otomatis, cerita utama, pratinjau sesuai tampilan publik, terbitkan sekarang / jadwalkan / batalkan terbit / arsipkan / hapus — semua tercatat di audit log
+- **web:** halaman publik `/berita` dan `/berita/:slug` kini membaca artikel dari service Platform (`GET /v1/platform/news`), dengan jumlah per kategori, kerangka muat, keadaan kosong/galat, dan versi bahasa Inggris (fallback ke Indonesia)
+
 ## [0.4.2] — 2026-11-21
 
 ### Perbaikan

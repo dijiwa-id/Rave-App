@@ -22,6 +22,7 @@
     "./reports": "./src/reports.ts",
     "./podcast": "./src/podcast.ts",
     "./pro": "./src/pro.ts",
-    "./royalty": "./src/royalty.ts"
+    "./royalty": "./src/royalty.ts",
+    "./news": "./src/news.ts"
   }
 }

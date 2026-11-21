@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { backupJob, backupRoutes } from './backups.js';
 import { brandingRoutes } from './branding.js';
 import { integrationRoutes } from './integrations.js';
+import { newsRoutes } from './news.js';
 import { overviewRoutes } from './overview.js';
 import { settingsRoutes } from './settings.js';
 import { storageJobs, storageRoutes } from './storage.js';
@@ -15,6 +16,7 @@ async function routes(app: FastifyInstance, ctx: ServiceContext) {
   await backupRoutes(app, ctx);
   await brandingRoutes(app, ctx);
   await integrationRoutes(app, ctx);
+  await newsRoutes(app, ctx);
 }
 
 const svc = createService({
@@ -28,7 +30,8 @@ const svc = createService({
     const r = await db.one(
       `SELECT (SELECT version FROM settings_state WHERE id = 1) AS settings_version,
               (SELECT count(*) FROM settings)::int AS settings_overridden,
-              (SELECT count(*) FROM backups WHERE status = 'COMPLETED')::int AS backups`,
+              (SELECT count(*) FROM backups WHERE status = 'COMPLETED')::int AS backups,
+              (SELECT count(*) FROM news_articles WHERE status = 'published' AND published_at <= now())::int AS news_live`,
     );
     return r ?? {};
   },

@@ -453,7 +453,7 @@ Login: `POST /v1/auth/otp` → pakai `dev_code` dari respons → `POST /v1/auth/
 
 Service `platform` (port **4009**, schema `platform`). Gateway: `/v1/platform` dan `/v1/admin/platform` → platform.
 Peran: klaim JWT `roles` memuat `superadmin` (dan `admin`) untuk Super Admin; `admin_role` ∈ `SUPER_ADMIN|OPS|CONTENT_QC|FINANCE|LEGAL|SUPPORT|EDITORIAL`.
-Seluruh `/v1/admin/platform/*` (baca maupun tulis) dan `GET /v1/admin/iam/admins` **khusus Super Admin** (`requireSuperAdmin`); admin lain mendapat `403`. Semua perubahan tercatat di audit log.
+Seluruh `/v1/admin/platform/*` (baca maupun tulis; kecuali `/v1/admin/platform/news*` yang memakai izin `news.publish`) dan `GET /v1/admin/iam/admins` **khusus Super Admin** (`requireSuperAdmin`); admin lain mendapat `403`. Semua perubahan tercatat di audit log.
 
 **Peran & Akses (izin back office).** Endpoint back office lain dijaga `requirePermission(<izin>)` (service-kit). Matriks peran → izin disimpan sebagai pengaturan `access.role.<PERAN>` (grup `access`, daftar dengan pilihan tetap) sehingga berlaku seketika tanpa login ulang; Super Admin selalu memegang semua izin, akun non-admin tidak memegang izin apa pun. `GET /v1/me` mengembalikan `admin_permissions` (izin efektif) untuk menu web.
 
@@ -469,6 +469,7 @@ Seluruh `/v1/admin/platform/*` (baca maupun tulis) dan `GET /v1/admin/iam/admins
 | `finance.refund` | `POST /v1/admin/finance/refunds/*`, `POST /v1/admin/ticketing/orders/:id/refund` | Finance |
 | `users.view` | `GET /v1/admin/iam/users` | OPS, Support |
 | `audit.view` | `GET /v1/admin/iam/audit-logs` | OPS, Legal |
+| `news.publish` | `/v1/admin/platform/news*`, unggah `purpose: news` | Editorial |
 
 Registri pengaturan = `packages/domain/src/settings.ts` (`SETTINGS`, `coerceSetting`). Perubahan dipublikasikan sebagai event `platform.settings.updated { changes, version, byUserId }`; setiap service menerapkannya otomatis (`settings.get()` dari service-kit). Gateway mem-polling `/internal/settings`.
 
@@ -533,6 +534,33 @@ Pengguna yang ditangguhkan: OTP & refresh ditolak `403`. `Me` kini memuat `admin
 Branding & tema (grup `branding`, semua publik): `branding.logo_url` (logo latar terang), `branding.logo_dark_url` (latar gelap; kosong = logo terang), `branding.icon_url` (ikon + favicon, persegi), `appearance.dashboard_theme` ∈ `light|dark|system` (default dasbor B2B), `appearance.allow_user_theme` (pengguna boleh override; pilihan disimpan per perangkat). Nilai gambar hanya boleh path `/v1/platform/branding/<file>.svg|png` yang sudah diunggah; file yang sedang dipakai tidak bisa dihapus dari bucket (`409`).
 
 Penegakan di gateway: `maintenance.enabled` → semua non-GET selain `/v1/auth`, `/v1/admin`, `/v1/platform`, `/v1/webhooks`, POST pemutaran (`/v1/playback/*`, `/v1/events/play`, `/v1/live/streams/:id/playback|heartbeat`) (dan token admin) dijawab `503 { type: "https://rave.id/problems/maintenance", detail: maintenance.message }`; `modules.booking=false` / `modules.ticketing=false` / `modules.waitlist=false` → non-GET ke prefix terkait `503 { type: ".../module-disabled" }`; rate limit membaca `security.rate_limit_*`.
+
+### Ruang berita (/berita)
+
+Artikel berita dikelola dari Back Office → Konten → **Ruang Berita** (`/admin/news`, izin `news.publish`) dan disajikan publik di `/berita`. Teks dwibahasa disimpan per bahasa (`content.id` wajib, `content.en` opsional — bidang Inggris kosong memakai teks Indonesia). Status tersimpan `draft | published | archived`; **terjadwal** = `published` dengan `published_at` di masa depan (publik memfilter `published_at ≤ now()`, jadi tayang tepat waktu tanpa job). Paling banyak satu `featured` (cerita utama; menyetel satu melepas yang lain). Waktu baca dihitung server (±200 kata/menit). Aturan bersama: `@rave/domain/news`. Semua perubahan tercatat di audit log (`news.create|update|publish|schedule|unpublish|archive|delete`).
+
+| Method & Path | Akses | Body / Query | Respons |
+|---|---|---|---|
+| `GET /v1/platform/news` | publik | `category? (Rilis\|Scene\|Produk\|Event\|Wawancara), limit? (≤100, default 60), offset?`; bahasa dari `Accept-Language` | `{ data: NewsSummary[], total, categories: Record<category, n> }` (`cache-control: public, max-age=60`) |
+| `GET /v1/platform/news/:slug` | publik | | `NewsSummary & { body: NewsBlock[], updated_at, related: NewsSummary[3] }` — `404` bila draf/terjadwal/arsip |
+| `GET /v1/admin/platform/news` | `news.publish` | `status? (all\|draft\|scheduled\|published\|archived), q?, category?` | `{ data: NewsRow[], counts: { all, draft, scheduled, published, archived } }` |
+| `POST /v1/admin/platform/news` | `news.publish` | `{ category, content: { id: { title, excerpt?, image_alt?, body? }, en? }, slug?, author? ("Tim RAVE"), image_url?, featured? }` | `201 NewsDetail` (draf; slug otomatis dari judul, `409` bila slug eksplisit dipakai) |
+| `GET /v1/admin/platform/news/:id` | `news.publish` | | `NewsDetail` |
+| `PATCH /v1/admin/platform/news/:id` | `news.publish` | bidang POST (parsial) | `NewsDetail`; `422` bila artikel tayang kehilangan bidang wajib |
+| `POST /v1/admin/platform/news/:id/publish` | `news.publish` | `{ published_at?: ISO }` (kosong = sekarang; masa depan = jadwalkan; arsip memakai tanggal aslinya) | `NewsDetail`; `422` bila belum ada ringkasan, isi, foto utama, atau teks alternatif foto |
+| `POST /v1/admin/platform/news/:id/unpublish` | `news.publish` | | `NewsDetail` (kembali draf, `featured` dilepas) |
+| `POST /v1/admin/platform/news/:id/archive` | `news.publish` | | `NewsDetail` (hilang dari publik, `featured` dilepas) |
+| `DELETE /v1/admin/platform/news/:id` | `news.publish` | | `204`; `409` bila tayang/terjadwal |
+
+```ts
+NewsBlock = { p: string } | { h: string } | { quote: string; by: string }
+NewsSummary = { slug, category, title, excerpt, image, image_alt, author, date /* published_at */, read_min, featured }
+NewsRow = { id, slug, category, status: "draft"|"scheduled"|"published"|"archived", title, excerpt, image_url, author, featured, read_min,
+            has_en, published_at, created_at, updated_at, updated_by }
+NewsDetail = NewsRow & { content: { id: { title, excerpt, image_alt, body: NewsBlock[] }, en: { … } | null } }
+```
+
+Foto utama diunggah lewat `POST /v1/studio/uploads` dengan `{ kind: "artwork", purpose: "news" }` (izin `news.publish`; JPEG/PNG ≤ 8 MB, sisi pendek ≥ 600 px; peringatan bila bukan 16:9 atau lebar < 1600 px). `image_url` menerima `/v1/catalog/media/…` atau URL `https://`.
 
 ## 10. Live Streaming (konser & sesi live)
 

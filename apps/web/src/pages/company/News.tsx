@@ -5,12 +5,12 @@ import { BTN_PRIMARY } from '@/pages/public/marketing';
 import { CompanyPage } from './shell';
 import { NEWS_CATEGORIES, useNews } from './news-data';
 import { useDict } from '@/lib/i18n';
-import { CategoryTag, Meta, NewsCard, NewsImage } from './newsUi';
+import { CategoryTag, Meta, NewsCard, NewsCardSkeleton, NewsImage } from './newsUi';
 
 /** Ruang berita RAVE: header ringkas, filter kategori (di URL), cerita utama, grid kartu, langganan kabar. */
 export default function News() {
   const d = useDict('company').news;
-  const NEWS = useNews();
+  const { articles: NEWS, categories: counts, total, isLoading, isError, refetch } = useNews();
   const [params, setParams] = useSearchParams();
   const cat = params.get('kategori');
   const list = cat ? NEWS.filter((a) => a.category === cat) : NEWS;
@@ -30,11 +30,11 @@ export default function News() {
             </h1>
             <p className="mt-5 max-w-xl text-lg text-[#cfc4d8]">{d.lead}</p>
           </div>
-          {NEWS.length > 0 && <p className="rave-stamp text-white/60">{d.count(NEWS.length)}</p>}
+          {total > 0 && <p className="rave-stamp text-white/60">{d.count(total)}</p>}
         </div>
         {NEWS.length > 0 && (
         <nav aria-label={d.navLabel} className="mx-auto mt-10 flex max-w-[82.5rem] flex-wrap gap-2">
-          {[null, ...NEWS_CATEGORIES].map((c) => {
+          {[null, ...NEWS_CATEGORIES.filter((c) => counts[c] || c === cat)].map((c) => {
             const on = (c ?? null) === (cat ?? null);
             return (
               <button
@@ -48,6 +48,7 @@ export default function News() {
                 )}
               >
                 {c ? d.categories[c] : d.all}
+                <span className={cx('ml-2 tabular-nums', on ? 'text-rave-ink/60' : 'text-white/40')}>{c ? (counts[c] ?? 0) : total}</span>
               </button>
             );
           })}
@@ -80,14 +81,27 @@ export default function News() {
             </Link>
           )}
 
-          {rest.length ? (
+          {isLoading ? (
+            <div className="grid gap-7 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
+              {[0, 1, 2].map((i) => (
+                <NewsCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : isError ? (
+            <div className="border-2 border-rave-ink bg-[#1e1c1f] p-8 text-center text-white/70">
+              <p>{d.loadError}</p>
+              <button type="button" onClick={() => refetch()} className="rave-label mt-4 border-2 border-white/25 px-4 py-2 hover:border-rave-paper">
+                {d.retry}
+              </button>
+            </div>
+          ) : rest.length ? (
             <div className="grid gap-7 sm:grid-cols-2 lg:grid-cols-3">
               {rest.map((a) => (
                 <NewsCard key={a.slug} a={a} />
               ))}
             </div>
           ) : (
-            <p className="border-2 border-rave-ink bg-[#1e1c1f] p-8 text-center text-white/70">{d.empty}</p>
+            !featured && <p className="border-2 border-rave-ink bg-[#1e1c1f] p-8 text-center text-white/70">{cat ? d.emptyCategory : d.empty}</p>
           )}
         </div>
       </section>

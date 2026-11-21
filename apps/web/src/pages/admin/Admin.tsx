@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, ArrowRight, BadgeCheck, Briefcase, Coins, Crown, Mic2, Podcast, Ticket, Headphones, Images, ListMusic, Shapes, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow } from 'lucide-react';
+import { Activity, ArrowRight, BadgeCheck, Briefcase, Coins, Crown, Mic2, Podcast, Ticket, Headphones, Images, ListMusic, Shapes, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow, Newspaper } from 'lucide-react';
 import { ADMIN_PERMISSIONS, ADMIN_ROLE_LABEL, type AdminPermission, type AdminRole } from '@rave/domain/settings';
 import { can, isSuperAdmin, useAuth } from '@/stores/auth';
 import { B2BLayout, type B2BNavItem } from '@/layouts/B2BLayout';
@@ -46,6 +46,7 @@ export function AdminLayout() {
     { to: '/admin/categories', label: n.categories, icon: Shapes, perms: ['catalog.curate'] },
     { to: '/admin/artwork', label: n.artwork, icon: Images, perms: ['catalog.curate'] },
     { to: '/admin/editorial', label: n.editorial, icon: ListMusic, perms: ['library.curate'] },
+    { to: '/admin/news', label: n.news, icon: Newspaper, perms: ['news.publish'] },
     { to: '/admin/podcasts', label: n.podcasts, icon: Headphones, perms: ['podcast.moderate'] },
     { to: '/admin/live', label: n.live, icon: Radio, perms: ['live.moderate'] },
     // Seksi Iklan

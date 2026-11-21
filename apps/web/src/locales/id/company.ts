@@ -650,8 +650,10 @@ const company = {
     copyLink: 'Salin tautan',
     related: 'Baca juga',
     allNews: 'Semua berita →',
-    // Belum ada rilis berita resmi. Artikel ditambahkan di sini (dan di news-data.ts) saat terbit.
-    articles: {},
+    emptyCategory: 'Belum ada artikel di kategori ini.',
+    loadError: 'Berita belum bisa dimuat. Periksa koneksi lalu coba lagi.',
+    retry: 'Coba lagi',
+    by: 'Oleh',
   },
 
   terms: {

@@ -57,6 +57,7 @@ const adminRoyalty = () => import('@/pages/admin/AdminRoyalty');
 const adminLive = () => import('@/pages/admin/AdminLive');
 const adminAds = () => import('@/pages/admin/AdminAds');
 const adminEditorial = () => import('@/pages/admin/AdminEditorial');
+const adminNews = () => import('@/pages/admin/AdminNews');
 const adminPodcasts = () => import('@/pages/admin/AdminPodcasts');
 // Live Streaming: satu modul untuk Studio & Promotor Hub (org dari pemilih layout).
 const live = () => import('@/pages/live/LiveStudio');
@@ -171,6 +172,8 @@ export const b2bRoutes: RouteObject[] = [
               ]),
               // Editor playlist editorial (izin library.curate).
               access(['library.curate'], [{ path: 'editorial', element: named(adminEditorial, 'AdminEditorial') }]),
+              // Ruang berita /berita (izin news.publish).
+              access(['news.publish'], [{ path: 'news', element: named(adminNews, 'AdminNews') }]),
               // Moderasi podcast kreator (izin podcast.moderate).
               access(['podcast.moderate'], [{ path: 'podcasts', element: named(adminPodcasts, 'AdminPodcasts') }]),
               { path: 'platform/artwork', element: <Navigate to="/admin/artwork" replace /> },

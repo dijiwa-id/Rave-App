@@ -652,8 +652,10 @@ const company: Shape<typeof id> = {
     copyLink: 'Copy link',
     related: 'Read next',
     allNews: 'All news →',
-    // Belum ada rilis berita resmi. Artikel ditambahkan di sini (dan di news-data.ts) saat terbit.
-    articles: {},
+    emptyCategory: 'No articles in this category yet.',
+    loadError: "News couldn't be loaded. Check your connection and try again.",
+    retry: 'Try again',
+    by: 'By',
   },
 
   terms: {

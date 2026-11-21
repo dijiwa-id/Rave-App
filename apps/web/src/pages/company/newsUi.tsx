@@ -9,7 +9,7 @@ import { fmtNewsDate, type NewsArticle } from './news-data';
 export function NewsImage({ a, className, eager, clean }: { a: NewsArticle; className?: string; eager?: boolean; clean?: boolean }) {
   return (
     <div className={cx('relative overflow-hidden bg-rave-plum', className)}>
-      <img src={a.image} alt={a.imageAlt} loading={eager ? 'eager' : 'lazy'} className="size-full object-cover grayscale contrast-[1.2] transition duration-700 group-hover:scale-[1.04]" />
+      {a.image && <img src={a.image} alt={a.imageAlt} loading={eager ? 'eager' : 'lazy'} className="size-full object-cover grayscale contrast-[1.2] transition duration-700 group-hover:scale-[1.04]" />}
       <span className="absolute inset-0 bg-rave-purple opacity-30 mix-blend-color" aria-hidden />
       {clean ? (
         <span className="absolute inset-0 bg-[linear-gradient(180deg,transparent_55%,rgba(24,24,24,0.35))]" aria-hidden />
@@ -60,5 +60,19 @@ export function NewsCard({ a }: { a: NewsArticle }) {
         </span>
       </div>
     </Link>
+  );
+}
+
+/** Kerangka kartu saat daftar berita dimuat. */
+export function NewsCardSkeleton() {
+  return (
+    <div className="flex h-full flex-col border-2 border-rave-ink bg-[#1e1c1f] shadow-[5px_5px_0_#0b0a0c]" aria-hidden>
+      <div className="aspect-[16/10] animate-pulse border-b-2 border-rave-ink bg-white/5" />
+      <div className="space-y-3 p-5">
+        <div className="h-3 w-24 animate-pulse bg-white/10" />
+        <div className="h-5 w-full animate-pulse bg-white/10" />
+        <div className="h-4 w-2/3 animate-pulse bg-white/5" />
+      </div>
+    </div>
   );
 }

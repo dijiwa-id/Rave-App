@@ -153,6 +153,8 @@ const AD_AUDIO_EXT = ['.mp3', '.m4a', '.aac', '.ogg', '.opus'];
 /** Sampul playlist pengguna: ringan (≤ 8 MB) namun tetap tajam di layar retina (≥ 300 px). */
 const PLAYLIST_COVER_MAX_MB = 8;
 const PLAYLIST_COVER_MIN_PX = 300;
+/** Foto utama berita: lanskap, tampil lebar di halaman artikel. */
+const NEWS_IMAGE_MIN_PX = 600;
 
 /** Batas ukuran per tujuan upload (pengaturan Upload). Sampul playlist/kategori tetap ringan. */
 function uploadMaxMb(purpose: string, kind: string): number {
@@ -690,7 +692,8 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
           /** podcast = audio episode (≤ upload.podcast_max_mb) atau sampul acara (≥ upload.cover_min_px). */
           /** ad = audio/gambar kampanye iklan (izin ads.manage) — audio lossy ringan (MP3/AAC/OGG/Opus), gambar ≥ 300 px, ≤ 8 MB. */
           /** avatar = foto profil pengguna (verifikasi akun) — gambar saja, ≤ 8 MB, ≥ 300 px. */
-          purpose: z.enum(['release', 'playlist', 'category', 'podcast', 'ad', 'avatar']).default('release'),
+          /** news = foto utama artikel berita (izin news.publish) — gambar saja, ≤ 8 MB, sisi pendek ≥ 600 px, disarankan 16:9. */
+          purpose: z.enum(['release', 'playlist', 'category', 'podcast', 'ad', 'avatar', 'news']).default('release'),
           filename: z.string().min(1).max(200),
           // Boleh kosong: browser sering tidak mengenali .flac/.aiff → MIME ditentukan dari ekstensi di bawah.
           content_type: z.string().max(100),
@@ -710,6 +713,7 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
         if (b.kind === 'audio' && !AD_AUDIO_EXT.includes(ext)) throw unprocessable(`Audio iklan harus ${AD_AUDIO_EXT.join(', ')} (berkas ringan siap putar, bukan master)`);
       }
       if (b.purpose === 'category' && !hasPermission(req.user, 'catalog.curate')) throw forbidden('Gambar kategori memerlukan izin Kurasi katalog');
+      if (b.purpose === 'news' && !hasPermission(req.user, 'news.publish')) throw forbidden('Foto berita memerlukan izin Ruang berita');
       // Kebijakan upload dari pengaturan platform (Super Admin → Storage & Retensi). Sampul playlist dibatasi lebih kecil.
       const maxMb = uploadMaxMb(b.purpose, b.kind);
       if (b.size > maxMb * 1024 * 1024) throw unprocessable(`Ukuran file melebihi batas ${maxMb} MB`);
@@ -812,6 +816,10 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
                 if (u.purpose === 'ad') {
                   if (Math.min(dim.width, dim.height) < PLAYLIST_COVER_MIN_PX) throw unprocessable(`Gambar iklan minimal ${PLAYLIST_COVER_MIN_PX} px (diterima ${dim.width}×${dim.height})`);
                   if (Math.abs(dim.width / dim.height - 16 / 9) > 0.05) warnings.push('Gambar iklan sebaiknya 16:9 — ditampilkan terpotong di tengah');
+                } else if (u.purpose === 'news') {
+                  if (Math.min(dim.width, dim.height) < NEWS_IMAGE_MIN_PX) throw unprocessable(`Foto berita minimal ${NEWS_IMAGE_MIN_PX} px di sisi pendek (diterima ${dim.width}×${dim.height})`);
+                  if (Math.abs(dim.width / dim.height - 16 / 9) > 0.1) warnings.push('Foto berita sebaiknya lanskap 16:9 — ditampilkan terpotong di tengah');
+                  if (dim.width < 1600) warnings.push(`Lebar ${dim.width} px: disarankan ≥ 1600 px agar tajam di layar lebar`);
                 } else if (u.purpose === 'podcast') {
                   const min = settings.num('upload.cover_min_px');
                   if (Math.min(dim.width, dim.height) < min) throw unprocessable(`Sampul acara minimal ${min}×${min} px (diterima ${dim.width}×${dim.height})`);

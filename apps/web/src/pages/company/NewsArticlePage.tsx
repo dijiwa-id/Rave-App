@@ -3,19 +3,40 @@ import { Link, Navigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Check, Link2 } from 'lucide-react';
 import halftone from '@/assets/brand/paper-halftone.webp';
 import { CompanyPage } from './shell';
-import { useNews } from './news-data';
+import { useNewsArticle } from './news-data';
 import { useDict } from '@/lib/i18n';
 import { CategoryTag, Meta, NewsCard, NewsImage } from './newsUi';
+import { Skeleton } from '@/components/ui';
 
 /** Halaman artikel berita: breadcrumb, judul, meta, foto utama, isi prose, kutipan, salin tautan, baca juga. */
 export default function NewsArticlePage() {
   const d = useDict('company').news;
-  const NEWS = useNews();
   const { slug } = useParams();
-  const a = NEWS.find((n) => n.slug === slug);
+  const { article: a, related, isLoading, notFound, isError, refetch } = useNewsArticle(slug);
   const [copied, setCopied] = useState(false);
-  if (!a) return <Navigate to="/berita" replace />;
-  const related = NEWS.filter((n) => n.slug !== a.slug && n.category === a.category).concat(NEWS.filter((n) => n.slug !== a.slug && n.category !== a.category)).slice(0, 3);
+  if (notFound || !slug) return <Navigate to="/berita" replace />;
+  if (!a)
+    return (
+      <CompanyPage title={d.title}>
+        <div className="mx-auto max-w-3xl px-4 pt-[9rem] pb-24" aria-busy={isLoading}>
+          {isError && !isLoading ? (
+            <div className="border-2 border-rave-ink bg-[#1e1c1f] p-8 text-center text-white/70">
+              <p>{d.loadError}</p>
+              <button type="button" onClick={() => refetch()} className="rave-label mt-4 border-2 border-white/25 px-4 py-2 hover:border-rave-paper">
+                {d.retry}
+              </button>
+            </div>
+          ) : (
+            <>
+              <Skeleton className="h-5 w-24" />
+              <Skeleton className="mt-6 h-16 w-full" />
+              <Skeleton className="mt-3 h-16 w-2/3" />
+              <Skeleton className="mt-8 aspect-[16/8] w-full" />
+            </>
+          )}
+        </div>
+      </CompanyPage>
+    );
   async function copy() {
     try {
       await navigator.clipboard.writeText(window.location.href);
@@ -54,7 +75,9 @@ export default function NewsArticlePage() {
             <p className="mt-5 text-lg leading-relaxed text-[#cfc4d8]">{a.excerpt}</p>
             <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t-2 border-dashed border-white/15 pt-5">
               <div>
-                <p className="text-sm font-bold">{a.author}</p>
+                <p className="text-sm font-bold">
+                  {d.by} {a.author}
+                </p>
                 <Meta a={a} />
               </div>
               <button type="button" onClick={copy} className="inline-flex items-center gap-2 border-2 border-white/25 px-4 py-2 font-label text-[11px] font-bold tracking-[0.1em] uppercase transition hover:border-rave-paper">
@@ -80,7 +103,7 @@ export default function NewsArticlePage() {
                   <footer className="mt-3 font-label text-[11px] font-bold tracking-[0.1em] text-rave-primary-text uppercase">— {b.by}</footer>
                 </blockquote>
               ) : (
-                <p key={i} className="mt-6 text-[17px] leading-[1.8] text-white/80 first:mt-0">
+                <p key={i} className="mt-6 text-[17px] leading-[1.8] whitespace-pre-line text-white/80 first:mt-0">
                   {b.p}
                 </p>
               ),
@@ -89,6 +112,7 @@ export default function NewsArticlePage() {
         </div>
       </article>
 
+      {related.length > 0 && (
       <section className="border-t-2 border-dashed border-white/10 px-4 py-16">
         <div className="mx-auto max-w-[82.5rem]">
           <div className="mb-8 flex items-end justify-between gap-4">
@@ -104,6 +128,7 @@ export default function NewsArticlePage() {
           </div>
         </div>
       </section>
+      )}
     </CompanyPage>
   );
 }

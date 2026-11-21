@@ -1788,6 +1788,52 @@ console.log('\n▶ Akses per peran (fan, artis, manajer, promotor, admin, Super 
       check('laporan layanan Royalti', rep.status === 200 && rep.data?.table?.rows?.some((r: any) => r.period === per), rep.status);
     }
   }
+
+  // ---- Ruang berita /berita (Back Office → Konten → Berita, izin news.publish) ----
+  console.log('\n▶ Ruang berita');
+  {
+    const opsNews = await call(OPS, 'GET', '/v1/admin/platform/news');
+    check('Back Office berita butuh izin news.publish (OPS 403)', opsNews.status === 403, opsNews.status);
+    const title = `Uji e2e berita ${Date.now()}`;
+    const cr = await call(S, 'POST', '/v1/admin/platform/news', { category: 'Produk', content: { id: { title } } });
+    const id = cr.data?.id as string;
+    const slug = cr.data?.slug as string;
+    check('Super Admin membuat draf (slug otomatis dari judul)', cr.status === 201 && cr.data?.status === 'draft' && /^uji-e2e-berita-\d+$/.test(slug ?? ''), [cr.status, cr.data?.slug, cr.data?.detail]);
+    const hidden = await call(null, 'GET', `/v1/platform/news/${slug}`);
+    check('draf tidak terlihat publik (404)', hidden.status === 404, hidden.status);
+    const early = await call(S, 'POST', `/v1/admin/platform/news/${id}/publish`, {});
+    check('terbit tanpa foto/isi ditolak (422)', early.status === 422, [early.status, early.data?.detail]);
+    const body = Array.from({ length: 3 }, (_, i) => ({ p: `Paragraf ${i + 1} ` + 'kata '.repeat(150) }));
+    const pa = await call(S, 'PATCH', `/v1/admin/platform/news/${id}`, {
+      image_url: 'https://example.com/berita-e2e.jpg',
+      featured: true,
+      content: {
+        id: { title, excerpt: 'Ringkasan uji', image_alt: 'Foto uji', body: [{ h: 'Subjudul' }, ...body, { quote: 'Kutipan uji', by: 'Tim RAVE' }] },
+        en: { title: `E2E news test`, excerpt: '', image_alt: '', body: [] },
+      },
+    });
+    check('lengkapi artikel (waktu baca dihitung server)', pa.status === 200 && pa.data?.read_min >= 2 && pa.data?.featured === true && pa.data?.has_en === false, [pa.status, pa.data?.read_min, pa.data?.detail]);
+    const pub = await call(S, 'POST', `/v1/admin/platform/news/${id}/publish`, {});
+    const pubList = await call(null, 'GET', '/v1/platform/news');
+    const one = await call(null, 'GET', `/v1/platform/news/${slug}`);
+    check('diterbitkan → tampil di daftar & halaman publik', pub.data?.status === 'published' && pubList.data?.data?.some((a: any) => a.slug === slug && a.featured) && one.status === 200 && one.data?.body?.length === 5, [pub.status, pub.data?.detail, one.status]);
+    const enRes = await fetch(`${BASE}/v1/platform/news/${slug}`, { headers: { 'accept-language': 'en' } });
+    const en = await enRes.json();
+    check('versi EN memakai judul EN, bidang kosong fallback ke ID', en.title === 'E2E news test' && en.excerpt === 'Ringkasan uji', [en.title, en.excerpt]);
+    const del1 = await call(S, 'DELETE', `/v1/admin/platform/news/${id}`);
+    check('artikel tayang tidak bisa dihapus (409)', del1.status === 409, del1.status);
+    const future = new Date(Date.now() + 3 * 86400_000).toISOString();
+    const sch = await call(S, 'POST', `/v1/admin/platform/news/${id}/publish`, { published_at: future });
+    const schPub = await call(null, 'GET', `/v1/platform/news/${slug}`);
+    check('dijadwalkan ke masa depan → status terjadwal & belum publik', sch.data?.status === 'scheduled' && schPub.status === 404, [sch.data?.status, schPub.status]);
+    await call(S, 'POST', `/v1/admin/platform/news/${id}/publish`, {});
+    const ar = await call(S, 'POST', `/v1/admin/platform/news/${id}/archive`, {});
+    const arPub = await call(null, 'GET', `/v1/platform/news/${slug}`);
+    check('diarsipkan → hilang dari publik, cerita utama dilepas', ar.data?.status === 'archived' && ar.data?.featured === false && arPub.status === 404, [ar.data?.status, arPub.status]);
+    const del2 = await call(S, 'DELETE', `/v1/admin/platform/news/${id}`);
+    const gone = await call(S, 'GET', `/v1/admin/platform/news/${id}`);
+    check('arsip dihapus permanen', del2.status === 204 && gone.status === 404, [del2.status, gone.status]);
+  }
 }
 
 console.log(`\n${failed ? '\x1b[31m' : '\x1b[32m'}${passed} lulus, ${failed} gagal\x1b[0m\n`);

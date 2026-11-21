@@ -612,6 +612,7 @@ export const ADMIN_PERMISSIONS = {
   'catalog.curate': { label: 'Kurasi katalog: kategori Jelajahi & artwork rilis', area: 'Konten' },
   'library.curate': { label: 'Editor playlist editorial (beranda & Jelajahi)', area: 'Konten' },
   'podcast.moderate': { label: 'Moderasi podcast: tinjau episode & sembunyikan acara', area: 'Konten' },
+  'news.publish': { label: 'Ruang berita: tulis, jadwalkan & terbitkan artikel /berita', area: 'Konten' },
   'ads.review': { label: 'Tinjau kampanye iklan', area: 'Iklan' },
   'ads.manage': { label: 'Buat & kelola kampanye iklan', area: 'Iklan' },
   'kyc.review': { label: 'Verifikasi KYC/KYB', area: 'Kepercayaan' },
@@ -638,7 +639,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Exclude<AdminRole, 'SUPER_ADMIN'>,
   FINANCE: ['finance.view', 'finance.refund', 'finance.payout', 'billing.manage', 'royalty.manage', 'kyc.review'],
   LEGAL: ['qc.review', 'kyc.review', 'dispute.resolve', 'audit.view'],
   SUPPORT: ['users.view', 'users.verify', 'finance.view'],
-  EDITORIAL: ['live.moderate', 'catalog.curate', 'library.curate', 'podcast.moderate', 'ads.manage'],
+  EDITORIAL: ['live.moderate', 'catalog.curate', 'library.curate', 'podcast.moderate', 'news.publish', 'ads.manage'],
 };
 
 export const accessKey = (role: string) => `access.role.${role}`;
@@ -652,7 +653,7 @@ for (const role of CONFIGURABLE_ADMIN_ROLES)
     type: 'list',
     default: DEFAULT_ROLE_PERMISSIONS[role],
     options: ADMIN_PERMISSION_KEYS.map((k) => ({ value: k, label: ADMIN_PERMISSIONS[k].label })),
-    consumers: ['iam', 'catalog', 'library', 'booking', 'finance', 'ticketing', 'live', 'ads', 'web'],
+    consumers: ['iam', 'catalog', 'library', 'booking', 'finance', 'ticketing', 'live', 'ads', 'platform', 'web'],
     dangerous: true,
   });
 
