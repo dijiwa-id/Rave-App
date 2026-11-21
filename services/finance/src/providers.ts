@@ -135,14 +135,18 @@ export function verifyMidtransSignature(n: { order_id?: string; status_code?: st
 }
 
 /**
- * Status transaksi Midtrans → event internal. settlement / capture+accept = PAID; deny/cancel/expire/failure = FAILED;
- * pending / capture+challenge / refund = belum final atau bukan urusan pembayaran → null.
+ * Status transaksi Midtrans → event internal. settlement / capture+accept = PAID; cancel/expire/failure = FAILED;
+ * pending / deny (boleh dicoba ulang) / capture+challenge / refund = belum final atau bukan urusan pembayaran → null.
  */
 export function mapMidtransStatus(n: any): ProviderPaymentStatus | null {
   const ts = String(n.transaction_status ?? '');
   const fraud = String(n.fraud_status ?? 'accept');
   const paid = ts === 'settlement' || (ts === 'capture' && fraud === 'accept');
-  const failed = ['deny', 'cancel', 'expire', 'failure'].includes(ts);
+  // `deny` (kartu/FDS menolak) BUKAN akhir pesanan: pembeli dapat mencoba metode/kartu lain di halaman Snap yang sama
+  // dengan order_id yang sama. Memperlakukannya FAILED dulu langsung membatalkan order tiket / booking (DP gagal →
+  // booking batal) dan mengunci tagihan sehingga tidak bisa dibayar ulang. Bila pembeli tidak mencoba lagi, tagihan
+  // berakhir lewat `expire` atau job kedaluwarsa.
+  const failed = ['cancel', 'expire', 'failure'].includes(ts);
   if (!paid && !failed) return null;
   return {
     eventId: `mt_${n.transaction_id ?? n.order_id}_${paid ? 'paid' : ts}`,

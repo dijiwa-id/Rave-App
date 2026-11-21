@@ -154,14 +154,15 @@ const dict: Shape<typeof id> = {
     stickerScene: 'pick',
     listener: 'Listener',
     b2bTitle: 'RAVE Pro for artists, management, labels & promoters',
-    proPrice: 'Rp 199,000/mo',
+    proPrice: (price) => `Rp ${price}/mo + VAT`,
     contactUs: 'Contact us',
     starterItems: ['Dynamic EPK & rate card', 'Calendar & booking inbox'],
     artistCommission: (pct) => `Artist commission ${pct}`,
     proItems: ['Advanced analytics & export', 'Custom contracts'],
     proCommission: (artist, promotor) => `Artist commission ${artist} · promoter ${promotor}`,
     labelItems: ['Multi-roster & price limits', 'Bulk catalog ingest', 'Centralized royalty reports'],
-    footnote: "Off-air booking commission: promoter 3–5% (service fee) + artist 5–8% of the fee. Payment fees and commissions are non-refundable unless caused by a RAVE system error. Figures are indicative during the beta.",
+    footnote: (promotor, artist) =>
+      `Off-air booking commission: promoter ${promotor} (service fee) + artist ${artist} of the fee. Payment fees and commissions are non-refundable unless caused by a RAVE system error. Figures are indicative during the beta.`,
   },
   faq: {
     kicker: 'FAQ',

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CONTRACT_STATUS_LABEL, type ContractStatus } from '@rave/domain';
 import { BRANDING_PUBLIC_PREFIX } from '@rave/domain/settings';
-import { settings, wakeJob, type Client, type Job } from '@rave/service-kit';
+import { publicWebUrl, settings, wakeJob, type Client, type Job } from '@rave/service-kit';
 import type { ContractData } from './contract-data.js';
 import {
   qrSvg,
@@ -83,7 +83,7 @@ export async function renderSpkPdf(
   return pdf;
 }
 
-export const PUBLIC_WEB_URL = () => (process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').replace(/\/$/, '');
+export const PUBLIC_WEB_URL = publicWebUrl;
 export const verifyUrlOf = (contractId: string) => `${PUBLIC_WEB_URL()}/verify/${contractId}`;
 
 /** Status lama (SENT/SIGNED/VOID) dipetakan ke label baru sampai kode booking dimigrasikan penuh. */

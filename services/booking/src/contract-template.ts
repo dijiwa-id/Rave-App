@@ -1,7 +1,7 @@
 import Handlebars from 'handlebars';
 import QRCode from 'qrcode';
 import { formatIdr } from '@rave/domain';
-import { SPK_TEMPLATE_VERSION, type ContractData } from './contract-data.js';
+import { LEGACY_ARTIST_PENALTY_PCT, SPK_TEMPLATE_VERSION, type ContractData } from './contract-data.js';
 
 const hb = Handlebars.create();
 const esc = (v: unknown) => Handlebars.escapeExpression(String(v ?? ''));
@@ -75,11 +75,12 @@ export const LOCKED_CLAUSE_TEXT = {
     'Pihak Kedua tidak tampil di acara publik berbayar lain dalam radius 30 km dari venue selama 14 hari sebelum tanggal acara, kecuali disetujui Pihak Pertama.',
 } as const;
 
-export const CANCELLATION_MATRIX = [
+/** Matriks pembatalan §7.3 — kompensasi artis dari snapshot kontrak (setting `finance.artist_cancel_penalty_pct`). */
+export const cancellationMatrix = (artistPenaltyPct: number) => [
   ['Promotor, > 30 hari sebelum acara', 'Hangus 50% ke Artis; sisanya refund', 'Refund 100%'],
   ['Promotor, 14–30 hari', 'Hangus 100% ke Artis', 'Refund 50%'],
   ['Promotor, < 14 hari', 'Hangus 100% ke Artis', 'Hangus 100% ke Artis'],
-  ['Artis/Manajemen, kapan pun', 'Refund 100% ke Promotor', 'Refund 100% + kompensasi 25% fee + penalti reputasi'],
+  ['Artis/Manajemen, kapan pun', 'Refund 100% ke Promotor', `Refund 100% + kompensasi ${artistPenaltyPct}% fee + penalti reputasi`],
   ['Force majeure (terbukti dokumen)', 'Ditahan untuk reschedule ≤ 90 hari atau refund dikurangi biaya riil', 'Idem'],
   ['Izin acara tidak keluar', 'Diperlakukan sebagai pembatalan Promotor', 'Idem'],
 ];
@@ -350,7 +351,7 @@ export async function renderContractHtml(data: ContractData, o: RenderOpts): Pro
     qr,
     style: STYLE,
     lockedText: LOCKED_CLAUSE_TEXT,
-    matrix: CANCELLATION_MATRIX,
+    matrix: cancellationMatrix(data.cancellation?.artist_penalty_pct ?? LEGACY_ARTIST_PENALTY_PCT),
     legal: { ...legal, show },
     signed,
   });

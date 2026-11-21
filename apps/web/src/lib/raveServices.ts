@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { AudioWaveform, BadgeCheck, CalendarCheck, Coins, Crown, Download, FileSignature, Headphones, Megaphone, Mic, Radio, Ticket, UploadCloud, Wallet } from 'lucide-react';
+import { AudioWaveform, BadgeCheck, CalendarCheck, Coins, Crown, Download, FileSignature, Headphones, Megaphone, Mic, Radio, Scale, Ticket, UploadCloud, Wallet } from 'lucide-react';
 import type { SettingGroup } from '@rave/domain/settings';
 
 /**
@@ -44,6 +44,7 @@ export const RAVE_SERVICES: RaveService[] = [
   { id: 'ticketing', report: true, type: 'event', icon: Ticket, status: 'ready', groups: ['refund'] },
   // Monetisasi — pengaturan Iklan dibuka dari Iklan → Kebijakan (tidak diduplikasi di sidebar).
   { id: 'ads', type: 'money', icon: Megaphone, status: 'ready', groups: ['ads'], nav: false },
+  { id: 'finance', type: 'money', icon: Scale, status: 'ready', groups: ['finance'] },
   { id: 'payout', report: true, type: 'money', icon: Wallet, status: 'ready', groups: ['payout'] },
   { id: 'subscription', report: true, type: 'money', icon: Crown, status: 'soon', groups: ['subscription'], keys: (k) => !isPro(k) && !isDownload(k) },
   { id: 'pro', report: true, type: 'money', icon: BadgeCheck, status: 'ready', groups: ['subscription'], keys: isPro },

@@ -75,6 +75,11 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     if (readOnly && isAdmin(req.user)) return;
     assertOrg(req.user, e.org_id);
   }
+  /** Mengubah/menerbitkan event: peran yang sama dengan membuat event (VIEWER/FINANCE hanya melihat & check-in). */
+  const EVENT_EDITORS = ['OWNER', 'ADMIN', 'MEMBER'] as const;
+  function assertEditor(req: FastifyRequest, e: any) {
+    assertOrg(req.user, e.org_id, [...EVENT_EDITORS]);
+  }
 
   // ---------------- Publik ----------------
   app.get('/v1/ticketing/events', async (req) => {
@@ -167,7 +172,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     a.patch('/v1/ticketing/events/:id', async (req) => {
       const e = await findEvent((req.params as any).id);
       if (!e) throw notFound('Event');
-      assertStaff(req, e);
+      assertEditor(req, e);
       const b = eventBody.omit({ org_id: true, ticket_types: true }).partial().extend({ ticket_types: z.array(ticketTypeBody).max(20).optional() }).parse(req.body);
       if (e.status === 'CANCELLED' || e.status === 'COMPLETED') throw conflict(`Event berstatus ${e.status} tidak dapat diubah`);
       const startsAt = new Date(b.starts_at ?? e.starts_at);
@@ -214,13 +219,15 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
     a.post('/v1/ticketing/events/:id/publish', async (req) => {
       const e = await findEvent((req.params as any).id);
       if (!e) throw notFound('Event');
-      assertStaff(req, e);
+      assertEditor(req, e);
       if (!req.user!.kyc) throw forbidden('Verifikasi akun wajib sebelum menerbitkan event bertiket.');
       if (e.status !== 'DRAFT') throw conflict(`Event berstatus ${e.status}`);
       const n = await db.one(`SELECT count(*)::int AS n FROM ticket_types WHERE event_id = $1`, [e.id]);
       if (!n?.n) throw unprocessable('Tambahkan minimal satu kategori tiket sebelum publish');
       await db.tx(async (tx) => {
-        await tx.query(`UPDATE events SET status = 'PUBLISHED', published_at = now() WHERE id = $1`, [e.id]);
+        // Kondisional pada status: dua klik "Terbitkan" paralel tidak menerbitkan (dan menotifikasi follower) dua kali.
+        const up = await tx.query(`UPDATE events SET status = 'PUBLISHED', published_at = now() WHERE id = $1 AND status = 'DRAFT'`, [e.id]);
+        if (!up.rowCount) throw conflict('Event sudah diterbitkan');
         await publish(tx, 'ticketing.event.published', e.id, {
           eventId: e.id,
           title: e.title,
@@ -305,7 +312,9 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         const merged = new Map<string, number>();
         for (const it of b.items) merged.set(it.ticket_type_id, (merged.get(it.ticket_type_id) ?? 0) + it.quantity);
         for (const [typeId, qty] of [...merged].sort(([x], [y]) => x.localeCompare(y))) {
-          const t = (await tx.query(`SELECT * FROM ticket_types WHERE id = $1 AND event_id = $2`, [typeId, e.id])).rows[0];
+          // Baris kategori dikunci SEBELUM menghitung kepemilikan: order paralel akun yang sama (Idempotency-Key berbeda)
+          // diserialkan, sehingga batas per akun dihitung setelah order lain ter-commit (tanpa ini keduanya lolos).
+          const t = (await tx.query(`SELECT * FROM ticket_types WHERE id = $1 AND event_id = $2 FOR UPDATE`, [typeId, e.id])).rows[0];
           if (!t) throw badRequest('Kategori tiket tidak valid');
           if (t.sale_starts_at && new Date(t.sale_starts_at) > new Date()) throw unprocessable(`Penjualan ${t.name} belum dibuka`);
           // Batas pembelian per akun (REQ-TIX-01) — hitung PAID + reservasi aktif
@@ -323,6 +332,9 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
           total += Number(t.price) * qty;
           lines.push({ id: typeId, quantity: qty, price: Number(t.price) });
         }
+        // Finance hanya menerbitkan tagihan bernominal positif: order Rp 0 (kategori gratis saja) ditolak jelas di sini
+        // (transaksi dibatalkan → reservasi tidak tersangkut), bukan gagal 502 setelah kuota dipesan.
+        if (total <= 0) throw unprocessable('Pemesanan tiket gratis belum didukung — hubungi promotor event ini');
         const o = (
           await tx.query(
             `INSERT INTO orders (id, event_id, user_id, holder_name, total, reserved_until, idempotency_key) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,

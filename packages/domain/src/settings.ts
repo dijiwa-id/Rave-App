@@ -58,6 +58,7 @@ export const SETTING_GROUPS = {
   upload: { label: 'Upload', description: 'Batas & format berkas yang diunggah (master lagu, audio episode, artwork), kuota per pengguna, dan batas harian.' },
   live: { label: 'Live Streaming', description: 'Siaran langsung konser & sesi studio: ingest RTMP/browser, latensi, chat, dan batas.' },
   ads: { label: 'Iklan', description: 'Kebijakan penayangan iklan untuk pengguna Gratis: ad load, frequency cap, masa bebas iklan, dan kategori.' },
+  finance: { label: 'Keuangan', description: 'Pajak & kebijakan keuangan lintas layanan: PPN langganan konsumen dan kompensasi pembatalan oleh artis.' },
   commission: { label: 'Komisi & Biaya', description: 'Take rate off-air (Bab 4.1, keputusan D-02).' },
   booking: { label: 'Booking Off-Air', description: 'Parameter saga booking & escrow (§7.1–7.3).' },
   legal: {
@@ -364,6 +365,8 @@ export const SETTINGS: SettingDef[] = [
   { key: 'ads.house_ads_enabled', group: 'ads', label: 'Promosi internal RAVE', description: 'Isi slot kosong dengan promosi RAVE (event, Premium, live) bila tidak ada kampanye berbayar yang cocok.', type: 'boolean', default: true, consumers: ['ads'] },
 
   // ---- Komisi ----
+  { key: 'finance.subscription_ppn_pct', group: 'finance', label: 'PPN langganan konsumen', description: 'Harga Premium (Individu/Pelajar/Duo) sudah termasuk PPN; tarif ini dipakai untuk menghitung DPP (pendapatan bersih) sebelum pool royalti. Ubah hanya bila tarif PPN resmi berubah — berlaku untuk perhitungan royalti berikutnya.', type: 'number', default: 11, min: 0, max: 20, step: 0.5, unit: '%', public: true, consumers: ['finance', 'web'], dangerous: true },
+  { key: 'finance.artist_cancel_penalty_pct', group: 'finance', label: 'Kompensasi pembatalan oleh artis', description: 'Persentase fee yang ditagihkan ke artis/manajemen dan dibayarkan ke promotor bila artis membatalkan (BRD §7.3, kontrak 25–100%). Dibekukan di kontrak saat dibuat: kontrak yang sudah ada tetap memakai tarif di dokumennya.', type: 'number', default: 25, min: 0, max: 100, step: 1, unit: '% fee', public: true, consumers: ['booking', 'web'] },
   { key: 'commission.promotor_service_fee_pct', group: 'commission', label: 'Service fee promotor', description: 'Ditagihkan di atas fee artis.', type: 'number', default: 4, min: 0, max: 20, step: 0.5, unit: '%', public: true, consumers: ['booking', 'finance', 'web'] },
   { key: 'commission.artist_commission_pct', group: 'commission', label: 'Komisi dari fee artis', description: 'Dipotong saat pencairan escrow.', type: 'number', default: 7, min: 0, max: 30, step: 0.5, unit: '%', public: true, consumers: ['booking', 'finance', 'web'] },
 

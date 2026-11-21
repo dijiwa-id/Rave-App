@@ -51,6 +51,11 @@ if [ -z "$URL" ]; then err "PUBLIC_WEB_URL kosong"
 elif [[ "$URL" != https://* ]]; then warn "PUBLIC_WEB_URL bukan https ($URL)"
 elif [[ "$URL" == *example* ]]; then err "PUBLIC_WEB_URL masih contoh ($URL)"
 else ok "PUBLIC_WEB_URL=$URL"; fi
+RTMP="$(get LIVE_RTMP_PUBLIC_URL)"
+if [ -z "$RTMP" ]; then warn "LIVE_RTMP_PUBLIC_URL kosong — artis melihat rtmp://<host PUBLIC_WEB_URL>:1935/live (di balik proxy Cloudflare port 1935 tidak diteruskan; pakai subdomain DNS-only)"
+elif [[ "$RTMP" == *example* || "$RTMP" == *localhost* || "$RTMP" == *127.0.0.1* ]]; then warn "LIVE_RTMP_PUBLIC_URL belum domain publik ($RTMP)"
+else ok "LIVE_RTMP_PUBLIC_URL=$RTMP"; fi
+[ "$(get CORS_ORIGINS)" = '*' ] && warn "CORS_ORIGINS=* — semua origin boleh memanggil API; kosongkan (= PUBLIC_WEB_URL) atau isi daftar origin"
 
 # 5. Integrasi yang belum produksi
 PP="$(get PAYMENT_PROVIDER)"; PP="${PP:-sandbox}"
@@ -78,6 +83,8 @@ case "$WP" in
 esac
 [ "$(get RAVE_ALLOW_SEED)" = 1 ] && warn "RAVE_ALLOW_SEED=1 — akun demo bisa ter-seed"
 [ "$(get RAVE_FAST_CLOCK)" = 1 ] && err "RAVE_FAST_CLOCK=1 dilarang di produksi"
+[ "$(get PAYOUT_AUTO_COMPLETE)" = 1 ] && err "PAYOUT_AUTO_COMPLETE=1 dilarang di produksi (payout ditandai selesai tanpa transfer)"
+[ "$(get ROYALTY_ALLOW_OPEN_PERIOD)" = 1 ] && err "ROYALTY_ALLOW_OPEN_PERIOD=1 dilarang di produksi (royalti bulan berjalan)"
 
 # 6. Backup off-site (docs/DEPLOYMENT.md §Backup & pemulihan) — peringatan, bukan blocker teknis deploy.
 BO="${BACKUP_OFFSITE:-$(get BACKUP_OFFSITE)}"

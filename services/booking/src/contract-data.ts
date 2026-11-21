@@ -63,6 +63,8 @@ export interface ContractData {
   management: PartyData;
   artist: { id: string; stage_name: string; city: string | null };
   terms: ContractTerms;
+  /** Kebijakan pembatalan yang dibekukan saat kontrak dibuat (snapshot lama tanpa field ini = 25%). */
+  cancellation?: { artist_penalty_pct: number };
   schedule: { label: string; pct: number; amount: number; due_date: string; due_text: string }[];
   money: {
     fee: number;
@@ -149,6 +151,9 @@ export function contractNumber(bookingId: string, now = new Date()): string {
  * bila artis belum punya rider berversi, jatuh ke rider di EPK. Pajak/termin/jatuh tempo dihitung di sini (backend),
  * bukan diterima dari klien.
  */
+/** Kompensasi pembatalan artis yang tercetak di kontrak sebelum tarif dapat diatur (snapshot tanpa `cancellation`). */
+export const LEGACY_ARTIST_PENALTY_PCT = 25;
+
 export async function buildContractData(
   c: Client,
   b: BookingRow,
@@ -214,6 +219,7 @@ export async function buildContractData(
     management,
     artist: { id: artist.id, stage_name: artist.name, city: artist.city },
     terms: { ...terms, fee },
+    cancellation: { artist_penalty_pct: settings.num('finance.artist_cancel_penalty_pct') },
     schedule,
     money: {
       fee: tax.gross,

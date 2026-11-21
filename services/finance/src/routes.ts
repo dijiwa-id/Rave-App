@@ -17,6 +17,7 @@ import {
   publish,
   requireAuth,
   requirePermission,
+  publicWebUrl,
   requireRole,
   settings,
   unprocessable,
@@ -39,7 +40,7 @@ function safeFinishUrl(u: string | undefined): string | undefined {
   if (!u) return undefined;
   try {
     const url = new URL(u);
-    const allowed = new Set([new URL(process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').origin]);
+    const allowed = new Set([new URL(publicWebUrl()).origin]);
     if (config.isDev) for (const o of ['http://localhost:5173', 'http://127.0.0.1:5173']) allowed.add(o);
     return allowed.has(url.origin) ? url.toString() : undefined;
   } catch {

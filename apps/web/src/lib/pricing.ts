@@ -5,6 +5,11 @@ import { currentLocale, dict, localeTag } from '@/lib/i18n';
 const num = (cfg: ReturnType<typeof usePlatformConfig>, key: string) => setting<number>(cfg, key, SETTINGS_BY_KEY[key].default as number);
 const idr = (n: number) => n.toLocaleString(localeTag());
 const pct = (n: number) => `${currentLocale() === 'en' ? String(n) : String(n).replace('.', ',')}%`;
+/** Rentang persen "3–4%" (sama → satu angka) untuk ringkasan komisi standar vs RAVE Pro. */
+const pctRange = (a: number, b: number) => {
+  const [lo, hi] = [Math.min(a, b), Math.max(a, b)];
+  return lo === hi ? pct(lo) : `${pct(lo).replace('%', '')}–${pct(hi)}`;
+};
 
 /**
  * Harga & komisi publik dari Super Admin (`subscription.*`, `commission.*`) dengan default registri pengaturan —
@@ -28,5 +33,9 @@ export function usePricing() {
     promotorFee: pct(num(cfg, 'commission.promotor_service_fee_pct')),
     proArtistCommission: pct(num(cfg, 'subscription.pro_artist_commission_pct')),
     proPromotorFee: pct(num(cfg, 'subscription.pro_promotor_service_fee_pct')),
+    /** Harga paket Pro per bulan (belum termasuk PPN). */
+    proPrice: idr(num(cfg, 'subscription.pro_price_pro_idr')),
+    promotorFeeRange: pctRange(num(cfg, 'subscription.pro_promotor_service_fee_pct'), num(cfg, 'commission.promotor_service_fee_pct')),
+    artistCommissionRange: pctRange(num(cfg, 'subscription.pro_artist_commission_pct'), num(cfg, 'commission.artist_commission_pct')),
   };
 }

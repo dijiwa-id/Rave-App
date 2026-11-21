@@ -1,4 +1,4 @@
-import { brandedEmail, sendEmail, type Client, type Consumers, type ServiceContext } from '@rave/service-kit';
+import { brandedEmail, publicWebUrl, sendEmail, type Client, type Consumers, type ServiceContext } from '@rave/service-kit';
 import { BOOKING_STATUS_LABEL, type BookingStatus } from '@rave/domain/booking';
 import { TICKET_REFUND_REASON_LABEL, type TicketRefundReason } from '@rave/domain';
 import { artistRecipients, notifyFollowers, notifyUsers, orgRecipients, rupiah } from './notify.js';
@@ -240,7 +240,7 @@ export function consumers(ctx: ServiceContext): Consumers {
     },
     'catalog.split.invited': async (e) => {
       const p = e.payload;
-      const url = `${(process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').replace(/\/$/, '')}/studio`;
+      const url = `${publicWebUrl()}/studio`;
       const m = brandedEmail({
         heading: 'Persetujuan pembagian hak lagu',
         lines: [

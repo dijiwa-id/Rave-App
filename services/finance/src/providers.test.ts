@@ -35,6 +35,9 @@ describe('Midtrans', () => {
     expect(mapMidtransStatus({ ...base, transaction_status: 'capture', fraud_status: 'challenge' })).toBeNull();
     expect(mapMidtransStatus({ ...base, transaction_status: 'pending' })).toBeNull();
     expect(mapMidtransStatus({ ...base, transaction_status: 'expire' })?.status).toBe('FAILED');
+    // deny: pembeli masih bisa mencoba kartu/metode lain di Snap yang sama → bukan akhir tagihan.
+    expect(mapMidtransStatus({ ...base, transaction_status: 'deny' })).toBeNull();
+    expect(mapMidtransStatus({ ...base, transaction_status: 'cancel' })?.status).toBe('FAILED');
     // event id stabil per transaksi+hasil → notifikasi ulang idempoten
     expect(mapMidtransStatus({ ...base, transaction_status: 'settlement' })!.eventId).toBe(mapMidtransStatus({ ...base, transaction_status: 'settlement' })!.eventId);
   });

@@ -12,6 +12,7 @@ import {
   maskSecret,
   requireService,
   requireSuperAdmin,
+  publicWebUrl,
   sendEmailWith,
   setIntegrationLoader,
   z,
@@ -97,7 +98,7 @@ export async function integrationRoutes(app: FastifyInstance, { db }: ServiceCon
         out.push(view(kind, row, await load(db, kind), ok));
       }
       const history = await db.query(`SELECT kind, provider, changed, reason, actor_name, at FROM integration_history ORDER BY at DESC LIMIT 20`);
-      return { data: out, history, webhook_url: `${(process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').replace(/\/$/, '')}/v1/webhooks/pg/midtrans`, oauth_redirects: Object.fromEntries(SOCIAL_PROVIDERS.map((p) => [p, `${(process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').replace(/\/$/, '')}/v1/auth/oauth/${p}/callback`])) };
+      return { data: out, history, webhook_url: `${publicWebUrl()}/v1/webhooks/pg/midtrans`, oauth_redirects: Object.fromEntries(SOCIAL_PROVIDERS.map((p) => [p, `${publicWebUrl()}/v1/auth/oauth/${p}/callback`])) };
     });
 
     /**
@@ -200,7 +201,7 @@ export async function integrationRoutes(app: FastifyInstance, { db }: ServiceCon
       } else if (kind === 'social') {
         // Tidak ada API "cek kredensial" lintas provider — tampilkan provider aktif & Redirect URI yang harus didaftarkan.
         const on = cfg.provider === 'oauth' ? enabledSocialProviders((k) => cfg.secrets[k] || cfg.config[k] || undefined) : [];
-        const base = (process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').replace(/\/$/, '');
+        const base = publicWebUrl();
         result = on.length
           ? { ok: true, message: `Aktif: ${on.join(', ')}. Redirect URI: ${on.map((p) => `${base}/v1/auth/oauth/${p}/callback`).join(' · ')}` }
           : { ok: false, message: 'Belum ada provider dengan kredensial lengkap.' };

@@ -274,6 +274,12 @@ export async function servingRoutes(app: FastifyInstance, { db, name }: ServiceC
       const since = imp.started_at ? (Date.now() - new Date(imp.started_at).getTime()) / 1000 : 0;
       if (since + 1 < after) throw conflict(`Iklan dapat dilewati setelah ${after} detik`);
     }
+    if (b.event === 'complete') {
+      // Impresi selesai = dasar laporan pengiklan & atribusi pendapatan iklan ke pendengar (royalti). Hanya sah setelah
+      // `start` dan durasi kreatif benar-benar berlalu (toleransi 2 dtk) — klien tidak bisa melapor "selesai" seketika.
+      const since = imp.started_at ? (Date.now() - new Date(imp.started_at).getTime()) / 1000 : -1;
+      if (since < 0 || since + 2 < Number(imp.duration_s)) throw conflict('Iklan belum selesai diputar');
+    }
     const col = { start: 'started_at', complete: 'completed_at', skip: 'skipped_at', click: 'clicked_at' }[b.event];
     await db.query(`UPDATE impressions SET ${col} = coalesce(${col}, now()) WHERE id = $1`, [imp.id]);
     return { ok: true };

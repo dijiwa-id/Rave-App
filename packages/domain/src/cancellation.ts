@@ -8,7 +8,7 @@ export interface CancellationInput {
   daysBeforeEvent: number;
   dpPaid: Idr;
   settlementPaid: Idr;
-  /** Kompensasi tambahan bila artis membatalkan (% fee, kontrak 25–100%). */
+  /** Kompensasi tambahan bila artis membatalkan (% fee, kontrak 25–100%) — dari kontrak / setting `finance.artist_cancel_penalty_pct`. */
   artistPenaltyPct?: number;
   fee?: Idr;
   /** Biaya riil yang sudah dikeluarkan artis (force majeure). */
@@ -34,7 +34,7 @@ export function computeCancellation(i: CancellationInput): CancellationOutcome {
     return { toArtist: i.dpPaid, refundToPromotor: i.settlementPaid, artistPenalty: 0, holdForReschedule: false, rule: 'SETTLEMENT_LATE' };
   }
   if (i.party === 'artist') {
-    const penalty = i.fee ? Math.floor((i.fee * (i.artistPenaltyPct ?? 25)) / 100) : 0;
+    const penalty = i.fee ? Math.floor((i.fee * (i.artistPenaltyPct ?? 0)) / 100) : 0;
     return { toArtist: 0, refundToPromotor: paid, artistPenalty: penalty, holdForReschedule: false, rule: 'ARTIST_ANYTIME' };
   }
   if (i.party === 'force_majeure') {

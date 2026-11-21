@@ -25,9 +25,13 @@ function env(name: string, fallback?: string): string {
   return v;
 }
 
+// Gagal-tertutup: hanya NODE_ENV kosong/development/test yang dianggap dev. Nilai lain (production, staging, salah ketik)
+// diperlakukan sebagai produksi — dev_code OTP, provider OAuth simulasi, fast clock, dsb. tidak pernah aktif tanpa sengaja.
+const DEV_ENVS = ['', 'development', 'dev', 'test'];
+
 export const config = {
   nodeEnv: env('NODE_ENV', 'development'),
-  isDev: env('NODE_ENV', 'development') !== 'production',
+  isDev: DEV_ENVS.includes(env('NODE_ENV', 'development').trim().toLowerCase()),
   databaseUrl: env('DATABASE_URL', 'postgres://rave:rave@127.0.0.1:55432/rave'),
   jwtSecret: env('JWT_SECRET', 'dev-only-change-me-please-32-bytes-min'),
   busDriver: env('BUS_DRIVER', 'pg') as 'pg' | 'kafka',
@@ -62,13 +66,28 @@ if (!config.isDev) {
   const bad = DEV_DEFAULTS.filter(([n, v]) => (process.env[n] ?? v) === v).map(([n]) => n);
   if (!process.env.KYC_KEY) bad.push('KYC_KEY');
   if (process.env.RAVE_FAST_CLOCK === '1') bad.push('RAVE_FAST_CLOCK (tidak boleh 1 di produksi)');
+  // Saklar uji yang memalsukan uang/periode: payout "selesai" tanpa transfer, royalti bulan berjalan.
+  if (process.env.PAYOUT_AUTO_COMPLETE === '1') bad.push('PAYOUT_AUTO_COMPLETE (tidak boleh 1 di produksi)');
+  if (process.env.ROYALTY_ALLOW_OPEN_PERIOD === '1') bad.push('ROYALTY_ALLOW_OPEN_PERIOD (tidak boleh 1 di produksi)');
+  // URL publik dipakai link email, redirect OAuth, URL kembali pembayaran, & CORS — tanpa ini jatuh ke localhost.
+  const pub = process.env.PUBLIC_WEB_URL?.trim();
+  if (!pub) bad.push('PUBLIC_WEB_URL');
+  else if (!URL.canParse(pub)) bad.push('PUBLIC_WEB_URL (bukan URL valid)');
   // Kredensial DB bawaan dev (rave:rave) dan secret pendek tidak boleh dipakai di produksi.
   if (/\/\/rave:rave@/.test(config.databaseUrl)) bad.push('DATABASE_URL (masih memakai password dev rave:rave)');
-  for (const n of ['JWT_SECRET', 'INTERNAL_SERVICE_SECRET', 'MEDIA_SIGNING_SECRET', 'KYC_KEY']) {
+  for (const n of ['JWT_SECRET', 'INTERNAL_SERVICE_SECRET', 'MEDIA_SIGNING_SECRET', 'PG_WEBHOOK_SECRET', 'KYC_KEY']) {
     const v = process.env[n];
     if (v && v.length < 32) bad.push(`${n} (minimal 32 karakter)`);
   }
-  if (bad.length) throw new Error(`NODE_ENV=production: set nilai produksi untuk ${bad.join(', ')}`);
+  if (bad.length) throw new Error(`NODE_ENV=${config.nodeEnv} (mode produksi): set nilai produksi untuk ${bad.join(', ')}`);
+}
+
+/**
+ * URL publik web tanpa garis miring akhir (link email, redirect OAuth, URL kembali pembayaran).
+ * Produksi: wajib di-set (divalidasi saat start di atas); bawaan localhost:5173 hanya untuk dev.
+ */
+export function publicWebUrl(): string {
+  return (process.env.PUBLIC_WEB_URL?.trim() || 'http://localhost:5173').replace(/\/+$/, '');
 }
 
 export type ServiceName = keyof typeof config.ports;

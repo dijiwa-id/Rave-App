@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { bookingInvoice, formatIdr, type CommissionPolicy } from '@rave/domain';
+import { settings } from '@rave/service-kit';
 import { commissionPolicy, type BookingRow } from './common.js';
 
 export const TEMPLATE_VERSION = 'booking-v1';
@@ -14,6 +15,8 @@ interface Ctx {
   riderNotes: string | null;
   /** Take rate booking ini (RAVE Pro bila berlaku); default tarif standar. */
   policy?: CommissionPolicy;
+  /** Kompensasi pembatalan oleh artis (% fee); default setting `finance.artist_cancel_penalty_pct`. */
+  artistPenaltyPct?: number;
 }
 
 const CATEGORY: Record<string, string> = {
@@ -27,9 +30,10 @@ const CATEGORY: Record<string, string> = {
 };
 
 /** Templat kontrak booking berversi — memuat klausul wajib BRD §8.7 & matriks pembatalan §7.3. */
-export function renderContract({ b, fee, artistName, artistCity, promotorName, rider, riderNotes, policy }: Ctx): { body: string; sha256: string } {
+export function renderContract({ b, fee, artistName, artistCity, promotorName, rider, riderNotes, policy, artistPenaltyPct }: Ctx): { body: string; sha256: string } {
   const inv = bookingInvoice(fee, b.dp_pct, policy ?? commissionPolicy());
   const r = rider ?? {};
+  const penaltyPct = artistPenaltyPct ?? settings.num('finance.artist_cancel_penalty_pct');
   const body = `# PERJANJIAN PERTUNJUKAN (BOOKING) — RAVE
 Templat: \`${TEMPLATE_VERSION}\` · Nomor booking: \`${b.id}\`
 
@@ -74,7 +78,7 @@ Pihak Kedua tidak tampil di acara publik berbayar lain dalam radius 30 km dari v
 | Promotor, > 30 hari sebelum acara | Hangus 50% ke Artis; sisanya refund | Refund 100% |
 | Promotor, 14–30 hari | Hangus 100% ke Artis | Refund 50% |
 | Promotor, < 14 hari | Hangus 100% ke Artis | Hangus 100% ke Artis |
-| Artis/Manajemen, kapan pun | Refund 100% ke Promotor | Refund 100% + kompensasi 25% fee + penalti reputasi |
+| Artis/Manajemen, kapan pun | Refund 100% ke Promotor | Refund 100% + kompensasi ${penaltyPct}% fee + penalti reputasi |
 | Force majeure (terbukti dokumen) | Ditahan untuk reschedule ≤ 90 hari atau refund dikurangi biaya riil | Idem |
 | Izin acara tidak keluar | Diperlakukan sebagai pembatalan Promotor | |
 

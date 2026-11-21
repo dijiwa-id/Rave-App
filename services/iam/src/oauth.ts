@@ -1,7 +1,7 @@
 import { createHash, createHmac, createPrivateKey, createPublicKey, randomBytes, sign, timingSafeEqual, verify as verifySig, type JsonWebKey } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { enabledSocialProviders, type SocialProvider } from '@rave/domain/integrations';
-import { audit, badRequest, config, forbidden, getIntegration, HttpError, publish, settings, uuidv7, z, type Client, type ServiceContext } from '@rave/service-kit';
+import { audit, badRequest, config, publicWebUrl, forbidden, getIntegration, HttpError, publish, settings, uuidv7, z, type Client, type ServiceContext } from '@rave/service-kit';
 import { buildMe, sha256 } from './core.js';
 import { completeLogin } from './mfa.js';
 
@@ -30,7 +30,7 @@ const CODE_TTL_SEC = 60;
 const COOKIE = 'rave_oauth';
 const COOKIE_PATH = '/v1/auth/oauth';
 
-const webBase = () => (process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').replace(/\/$/, '');
+const webBase = publicWebUrl;
 const redirectUri = (p: OAuthProvider) => `${webBase()}/v1/auth/oauth/${p}/callback`;
 const devProviderOn = () => config.isDev && process.env.OAUTH_DEV_PROVIDER !== '0';
 const b64url = (b: Buffer | string) => Buffer.from(b).toString('base64url');

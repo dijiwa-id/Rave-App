@@ -1,4 +1,4 @@
-import { brandedEmail, callService, DeliveryError, sendEmail, sendWhatsApp, wakeJob, type Job } from '@rave/service-kit';
+import { brandedEmail, publicWebUrl, callService, DeliveryError, sendEmail, sendWhatsApp, wakeJob, type Job } from '@rave/service-kit';
 
 /**
  * Worker kanal luar (REQ-NTF-01: pesan transaksional terkirim ≤ 60 detik).
@@ -11,7 +11,7 @@ const MAX_ATTEMPTS = 5;
 const BATCH = 50;
 const STALE_SENDING_MIN = 5;
 
-const webUrl = () => (process.env.PUBLIC_WEB_URL ?? 'http://localhost:5173').replace(/\/$/, '');
+const webUrl = publicWebUrl;
 
 type Row = { id: string; channel: string; attempts: number; user_id: string; title: string; body: string; link: string | null };
 type Contact = { email: string | null; phone: string | null; suspended: boolean } | null;

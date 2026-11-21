@@ -266,7 +266,7 @@ function Pricing() {
   ];
   const b2b = [
     { name: 'Starter', price: d.free, items: [...d.starterItems, d.artistCommission(t.artistCommission)] },
-    { name: 'Pro', price: d.proPrice, items: [...d.proItems, d.proCommission(t.proArtistCommission, t.proPromotorFee)] },
+    { name: 'Pro', price: d.proPrice(t.proPrice), items: [...d.proItems, d.proCommission(t.proArtistCommission, t.proPromotorFee)] },
     { name: 'Label', price: d.contactUs, items: d.labelItems },
   ];
   return (
@@ -321,7 +321,7 @@ function Pricing() {
           ))}
         </div>
         <p className="mx-auto mt-6 max-w-3xl text-center text-xs text-neutral-500">
-          {d.footnote}
+          {d.footnote(t.promotorFeeRange, t.artistCommissionRange)}
         </p>
       </div>
     </section>

@@ -459,6 +459,9 @@ export async function refundEscrow(
  */
 export async function collectArtistPenalty(c: Client, p: { bookingId: string; artistParty: string | null; promotorOrgId: string; amount: number }) {
   if (!p.artistParty || p.amount <= 0) return null;
+  // Kunci wallet yang sama dengan penarikan (routes.ts POST /v1/finance/payouts): saldo dibaca & didebit tanpa
+  // bersaing dengan payout paralel — tanpa ini keduanya bisa memakai saldo yang sama (saldo wallet jadi negatif).
+  await c.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`wallet:${p.artistParty}`]);
   const available = Math.max(0, await creditBalance(c, payableAccount(p.artistParty, 'offair')));
   const collected = Math.min(available, p.amount);
   const outstanding = p.amount - collected;

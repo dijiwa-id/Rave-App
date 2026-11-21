@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import net from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { settings } from '@rave/service-kit';
+import { publicWebUrl, settings } from '@rave/service-kit';
 
 /**
  * Lapisan media service live:
@@ -20,8 +20,12 @@ export const LIVE_DIR = process.env.LIVE_DIR ?? join(ROOT, 'storage', 'live');
 mkdirSync(LIVE_DIR, { recursive: true });
 
 export const RTMP_PORT = Number(process.env.LIVE_RTMP_PORT ?? 1935);
-/** Alamat RTMP yang ditampilkan ke encoder (produksi: domain ingest publik). */
-export const RTMP_PUBLIC_URL = process.env.LIVE_RTMP_PUBLIC_URL ?? `rtmp://localhost:${RTMP_PORT}/live`;
+/**
+ * Alamat RTMP yang ditampilkan ke encoder (produksi: domain ingest publik, set LIVE_RTMP_PUBLIC_URL).
+ * Tidak di-set → host dari PUBLIC_WEB_URL (bukan localhost). Catatan: di balik proxy Cloudflare (oranye) port 1935
+ * tidak diteruskan — pakai subdomain DNS-only, mis. rtmp://ingest.<domain>:1935/live.
+ */
+export const RTMP_PUBLIC_URL = process.env.LIVE_RTMP_PUBLIC_URL?.trim() || `rtmp://${new URL(publicWebUrl()).hostname}:${RTMP_PORT}/live`;
 
 export function ffmpegPath(): string | null {
   if (process.env.FFMPEG_PATH) return existsSync(process.env.FFMPEG_PATH) ? process.env.FFMPEG_PATH : null;

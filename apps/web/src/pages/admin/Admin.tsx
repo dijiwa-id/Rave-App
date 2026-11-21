@@ -961,6 +961,8 @@ function PayoutQueue() {
 
 export function AdminFinance() {
   const t = useDict('admin').finance;
+  const svcName = useDict('admin').services.items.finance.name;
+  const sup = isSuperAdmin(useAuth((s) => s.user));
   const recon = useQuery({
     queryKey: ['recon'],
     queryFn: () => api<{ balanced: boolean; total_debit: number; total_credit: number; accounts: { account: string; balance: number }[]; last_run_at: string }>('/v1/admin/finance/reconciliation'),
@@ -969,7 +971,18 @@ export function AdminFinance() {
   const ledger = useQuery({ queryKey: ['ledger', account], queryFn: () => api<{ data: any[] }>('/v1/admin/finance/ledger', { query: { account: account || undefined } }) });
   return (
     <div>
-      <PageHeader title={t.title} subtitle={t.subtitle} />
+      <PageHeader
+        title={t.title}
+        subtitle={t.subtitle}
+        actions={
+          // Tarif keuangan (PPN langganan, kompensasi pembatalan artis) diatur di pengaturan layanan — khusus Super Admin.
+          sup && (
+            <Link to={serviceHref('finance')} className="inline-flex h-8 items-center gap-2 rounded-none border border-b2b-line bg-b2b-card px-4 text-sm font-bold text-b2b-ink transition hover:border-b2b-ink">
+              <SlidersHorizontal className="size-4" /> {svcName} <ArrowRight className="size-4" />
+            </Link>
+          )
+        }
+      />
       <QueryState q={recon}>
         {recon.data && (
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

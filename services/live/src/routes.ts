@@ -239,9 +239,29 @@ export async function routes(app: FastifyInstance, ctx: ServiceContext, mgr: Liv
     return { viewers: 0, status: r.status };
   });
 
+  // Hak baca chat siaran bertiket di-cache singkat per (siaran, pengguna): chat di-polling tiap beberapa detik,
+  // jadi tidak memanggil ticketing pada setiap poll.
+  const chatAccessCache = new Map<string, { at: number; reason: Awaited<ReturnType<typeof access>> }>();
+  async function chatReadAccess(r: any, u: AuthUser | null) {
+    if (r.access !== 'TICKET') return null;
+    const k = `${r.id}:${u?.sub ?? '-'}`;
+    const hit = chatAccessCache.get(k);
+    // Izin di-cache 60 dtk; penolakan hanya 10 dtk (pembeli tiket baru tidak menunggu lama).
+    if (hit && Date.now() - hit.at < (hit.reason === null ? 60_000 : 10_000)) return hit.reason;
+    // Status siaran tidak relevan untuk membaca chat (replay chat setelah selesai tetap khusus pemegang tiket).
+    const reason = await access({ ...r, status: 'LIVE' }, u);
+    if (chatAccessCache.size > 5000) chatAccessCache.clear();
+    chatAccessCache.set(k, { at: Date.now(), reason });
+    return reason;
+  }
+
   // ---- Chat (polling) ----
   app.get('/v1/live/streams/:id/chat', async (req) => {
     const r = await loadLite((req.params as { id: string }).id);
+    // Siaran bertiket: isi chat hanya untuk pemegang tiket / anggota org / moderator (bukan publik).
+    const denied = await chatReadAccess(r, req.user);
+    if (denied === 'login_required') throw unauthorized('Masuk untuk membaca chat siaran bertiket');
+    if (denied === 'ticket_required') throw forbidden('Chat khusus pemegang tiket');
     const q = req.query as { after?: string; limit?: string };
     const limit = Math.min(Number(q.limit) || 50, 100);
     const after = Number(q.after) || 0;

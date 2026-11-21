@@ -31,7 +31,7 @@ import {
 } from '@rave/service-kit';
 import { FAST_CLOCK, RATING_REVEAL_DAYS, bookingCommission, daysUntil, isPromotorMember, partyOf, requireParty, todayWib, type BookingRow, type Party } from './common.js';
 import { renderContract } from './contract.js';
-import { SPK_TEMPLATE_VERSION, buildContractData } from './contract-data.js';
+import { LEGACY_ARTIST_PENALTY_PCT, SPK_TEMPLATE_VERSION, buildContractData } from './contract-data.js';
 import { enqueueContractJob } from './contract-jobs.js';
 import { contractAudit } from './routes-contracts.js';
 import { activateBooking } from './contract-sign.js';
@@ -178,6 +178,7 @@ async function ensureContract(c: Client, b: BookingRow, who: { actorId?: string;
     rider: { ...data.rider.hospitality, ...data.rider.technical },
     riderNotes: data.rider.notes,
     policy: { promotorServiceFeePct: data.commission.promotor_service_fee_pct, artistCommissionPct: data.commission.artist_commission_pct },
+    artistPenaltyPct: data.cancellation?.artist_penalty_pct,
   });
   // Kunci take rate (RAVE Pro bila berlaku) sesuai yang tercetak di kontrak — dipakai invoice, escrow & pencairan.
   await c.query(`UPDATE bookings SET commission_promotor_pct=$2, commission_artist_pct=$3, commission_pro=$4 WHERE id=$1`, [
@@ -416,13 +417,18 @@ export async function bookingRoutes(app: FastifyInstance, { db }: ServiceContext
       }
       const cancelParty = party === 'promotor' ? 'promotor' : 'artist';
       const to: BookingStatus = party === 'promotor' ? 'CANCELLED_BY_PROMOTOR' : 'CANCELLED_BY_ARTIST';
+      // Kompensasi artis mengikuti tarif yang tercetak di kontrak (snapshot), bukan setting saat ini.
+      const snap = (await c.query(`SELECT data_snapshot FROM contracts WHERE booking_id=$1 ORDER BY version DESC LIMIT 1`, [id])).rows[0]?.data_snapshot;
+      const artistPenaltyPct = snap
+        ? (snap.cancellation?.artist_penalty_pct ?? LEGACY_ARTIST_PENALTY_PCT)
+        : settings.num('finance.artist_cancel_penalty_pct');
       const out = computeCancellation({
         party: cancelParty,
         daysBeforeEvent: days,
         dpPaid: b.dp_paid,
         settlementPaid: b.settlement_paid,
         fee: b.agreed_fee ?? 0,
-        artistPenaltyPct: 25,
+        artistPenaltyPct,
         // Pelunasan promotor terlambat → manajemen membatalkan: DP hangus ke artis (kontrak §pembayaran).
         settlementLate: party === 'management' && b.status === 'AT_RISK',
       });

@@ -145,7 +145,8 @@ export function createService(def: ServiceDefinition) {
     // Pengaturan platform dimuat SEBELUM menerima permintaan: tanpa ini service sempat melayani nilai bawaan registri
     // (mis. saklar penjualan yang dimatikan Super Admin terbaca menyala beberapa detik setelah restart/deploy).
     // Platform belum siap (start bersamaan) → coba lagi hingga ±20 dtk, lalu lanjut dengan bawaan + refresh berkala.
-    for (let i = 0; i < 20 && !(await refreshSettings(def.name)); i++) await new Promise((r) => setTimeout(r, 1000));
+    const settingsDeadline = Date.now() + 20_000; // batas total, termasuk waktu tunggu tiap permintaan
+    while (!(await refreshSettings(def.name)) && Date.now() < settingsDeadline) await new Promise((r) => setTimeout(r, 1000));
     await app.listen({ port: def.port, host: process.env.HOST ?? '0.0.0.0' });
     await bus.startRelay();
     // Lalu LISTEN/NOTIFY `rave_settings` (setiap replika, termasuk platform — platform memuat dari DB lewat

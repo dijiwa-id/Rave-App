@@ -153,14 +153,15 @@ const dict = {
     stickerScene: 'scene',
     listener: 'Pendengar',
     b2bTitle: 'RAVE Pro untuk artis, manajemen, label & promotor',
-    proPrice: 'Rp 199.000/bln',
+    proPrice: (price: string) => `Rp ${price}/bln + PPN`,
     contactUs: 'Hubungi kami',
     starterItems: ['EPK dinamis & rate card', 'Kalender & inbox booking'],
     artistCommission: (pct: string) => `Komisi artis ${pct}`,
     proItems: ['Analitik lanjutan & ekspor', 'Kontrak kustom'],
     proCommission: (artist: string, promotor: string) => `Komisi artis ${artist} · promotor ${promotor}`,
     labelItems: ['Multi-roster & batas harga', 'Ingest katalog massal', 'Laporan royalti terpusat'],
-    footnote: 'Komisi booking off-air: promotor 3–5% (service fee) + artis 5–8% dari fee. Biaya payment & komisi tidak direfund kecuali kesalahan sistem RAVE. Angka bersifat indikatif selama beta.',
+    footnote: (promotor: string, artist: string) =>
+      `Komisi booking off-air: promotor ${promotor} (service fee) + artis ${artist} dari fee. Biaya payment & komisi tidak direfund kecuali kesalahan sistem RAVE. Angka bersifat indikatif selama beta.`,
   },
   faq: {
     kicker: 'FAQ',

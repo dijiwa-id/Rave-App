@@ -45,11 +45,33 @@ Jalankan `npm run prod:preflight` sebelum setiap deploy; blocker di bawah juga m
       HEALTHCHECK, `no-new-privileges`, rotasi log, Postgres tidak terekspos, nginx (cache aset, header keamanan,
       SPA fallback, proxy `/v1`), Caddy HTTPS opsional, Chromium untuk PDF kontrak, ffmpeg untuk live, pg_dump untuk backup.
 - [x] **Preflight** produksi (`npm run prod:preflight`): secret wajib ≥ 32 karakter & unik, bukan nilai dev,
-      password DB kuat, `PUBLIC_WEB_URL`, compose valid. Service juga menolak boot dengan konfigurasi dev.
+      password DB kuat, `PUBLIC_WEB_URL`, compose valid. Service juga menolak boot dengan konfigurasi dev
+      (secret bawaan/pendek, `PUBLIC_WEB_URL` kosong, `RAVE_FAST_CLOCK`/`PAYOUT_AUTO_COMPLETE`/`ROYALTY_ALLOW_OPEN_PERIOD`=1).
+      `NODE_ENV` selain kosong/`development`/`test` diperlakukan sebagai produksi (gagal-tertutup).
 - [x] **CORS** dibatasi di produksi (default hanya `PUBLIC_WEB_URL`; `CORS_ORIGINS` untuk tambahan).
 - [x] **Versioning**: SemVer tunggal, `npm run release`, CHANGELOG otomatis, tag → image GHCR + GitHub Release,
       versi di `/healthz`, `/v1/version`, `/v1/status` (deteksi drift), dan dasbor Back Office (docs/VERSIONING.md).
 - [x] **Operasional**: `scripts/prod.sh` (build/pull/up/rollback/smoke/logs), CI membangun image di setiap PR.
+
+## Menunggu server & domain final (notice persiapan, audit 2026-11-21)
+
+Sengaja belum dikerjakan sampai env server baru dan alamat domain tetap. Selesaikan sebelum/saat hari-H:
+
+- [ ] **Env server nyata**: `.env.production` baru untuk server target — `PUBLIC_WEB_URL` (domain final), `CORS_ORIGINS`
+      (tambahkan origin aplikasi desktop/Tauri bila perlu), `EMAIL_FROM` dari domain sendiri, secret baru (bukan salinan
+      prod-lokal), `PG_WEBHOOK_SECRET` ≥ 32 karakter; `npm run prod:preflight` tanpa BLOCKER.
+- [ ] **RTMP live**: subdomain DNS-only (mis. `ingest.<domain>`, proxy Cloudflare tidak meneruskan port 1935) →
+      `LIVE_RTMP_PUBLIC_URL`; kosong = diturunkan dari host `PUBLIC_WEB_URL`.
+- [ ] **Pengaturan Super Admin setelah naik**: matikan `live.demo_channel` (ffmpeg terus siaran bila DB berisi data demo),
+      `general.support_email` ke email resmi.
+- [ ] **Keputusan produk — harga tier di Landing**: Starter tampil "gratis" padahal `subscription.pro_price_starter_idr`
+      = 149.000; Label tampil "Hubungi kami" padahal ada `pro_price_label_idr`. Samakan copy dengan setting atau sebaliknya.
+- [x] **PPN langganan & kompensasi pembatalan artis** kini setting (Super Admin → Monetisasi → Keuangan):
+      `finance.subscription_ppn_pct` (default 11) dan `finance.artist_cancel_penalty_pct` (default 25, dibekukan per kontrak).
+- [ ] **Kosmetik**: footer email `brandedEmail` belum memakai `general.platform_name`.
+- [ ] **Uji di lingkungan nyata**: smoke + `npm run monitor:prod`, login OTP lewat email sungguhan, redirect OAuth Google
+      dengan domain final, checkout + webhook Midtrans (sandbox → production), link email/kontrak mengarah ke domain final,
+      ingest RTMP dari luar jaringan, backup off-site + `prod:backup-verify`, aplikasi mobile/desktop menunjuk domain final.
 
 ## Runbook hari-H
 

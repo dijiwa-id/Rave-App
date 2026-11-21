@@ -114,7 +114,7 @@ export async function computePeriod(db: Db, period: string, input: { adRevenue: 
   // 2. Atribusi pendapatan per pendengar (DPP Premium prorata; iklan menurut impresi) → angka final Finance.
   const premAuto = premiumRevenue(
     premRes.data.map((m) => ({ userId: m.user_id, memberType: m.member_type, since: m.member_updated_at ? new Date(m.member_updated_at) : null, until: m.member_until ? new Date(m.member_until) : null })),
-    { INDIVIDUAL: num('subscription.price_individual_idr'), STUDENT: num('subscription.price_student_idr'), DUO: num('subscription.price_duo_idr'), ppnPct: 11 },
+    { INDIVIDUAL: num('subscription.price_individual_idr'), STUDENT: num('subscription.price_student_idr'), DUO: num('subscription.price_duo_idr'), ppnPct: num('finance.subscription_ppn_pct') },
     period,
   );
   const premAutoTotal = Math.round([...premAuto.values()].reduce((a, b) => a + b, 0));
