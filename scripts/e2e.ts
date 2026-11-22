@@ -1945,6 +1945,18 @@ console.log('\n▶ Unduhan offline Premium (perangkat, lisensi, berkas terenkrip
       plays: [{ seq: 7, license_id: offlineReport.licenseId, track_id: offlineTrackId, started_at: new Date(offlineReport.t0 + 14_000).toISOString(), played_ms: 1000 }],
     });
     check('offline-plays: download.enabled mati → laporan putar sah tetap diterima', r.status === 200 && r.data?.results?.[0]?.status === 'accepted', [r.status, r.data?.results ?? r.data?.detail]);
+    // Akun ditangguhkan → seluruh batch 403 account_suspended (tidak final: dikirim ulang setelah dipulihkan diterima).
+    const play8 = { device_id: offlineReport.deviceId, plays: [{ seq: 8, license_id: offlineReport.licenseId, track_id: offlineTrackId, started_at: new Date(offlineReport.t0 + 15_000).toISOString(), played_ms: 500 }] };
+    try {
+      const sus = await call(SA, 'PATCH', `/v1/admin/iam/users/${SEED.users.premium}`, { suspended: true, reason: 'uji e2e laporan putar offline' });
+      check('offline-plays: Super Admin menangguhkan akun uji', sus.status === 200, [sus.status, sus.data?.detail]);
+      const blocked = await call(P, 'POST', '/v1/events/offline-plays', play8);
+      check('offline-plays: akun ditangguhkan → 403 account_suspended untuk seluruh batch', blocked.status === 403 && blocked.data?.code === 'account_suspended', [blocked.status, blocked.data?.code]);
+    } finally {
+      await call(SA, 'PATCH', `/v1/admin/iam/users/${SEED.users.premium}`, { suspended: false, reason: 'selesai uji e2e laporan putar offline' });
+    }
+    const restored = await call(P, 'POST', '/v1/events/offline-plays', play8);
+    check('offline-plays: akun dipulihkan → seq yang sama diterima (penolakan sebelumnya tidak final & tidak disimpan)', restored.status === 200 && restored.data?.results?.[0]?.status === 'accepted', [restored.status, restored.data?.results ?? restored.data?.detail]);
   }
   // Laporan Super Admin (playback mengagregasi iam + catalog); flag mati tetap laporan valid.
   const dlRep = await call(SA, 'GET', '/v1/admin/reports/downloads');
