@@ -55,7 +55,7 @@ function Kpi({ k }: { k: ReportKpi }) {
   const tone = { good: 'border-t-emerald-500', warn: 'border-t-amber-500', bad: 'border-t-red-500', neutral: 'border-t-b2b-line' }[k.tone ?? 'neutral'];
   return (
     <div className={cx('b2b-surface min-w-0 border border-t-4 border-b2b-line p-4', tone)}>
-      <p className="rave-label truncate !text-[10.5px] text-b2b-muted" title={tx(k.label)}>
+      <p className="rave-label line-clamp-2 min-h-[2.4em] !text-[10.5px] leading-[1.2] text-b2b-muted" title={tx(k.label)}>
         {tx(k.label)}
       </p>
       <p className="mt-2 truncate text-[clamp(1.3rem,2.4vw,1.75rem)] leading-none font-extrabold tracking-tight tabular-nums" title={k.format === 'idr' ? fmt.idr(k.value) : undefined}>
@@ -92,10 +92,47 @@ function Trend({ s }: { s: NonNullable<Report['series']> }) {
   );
 }
 
+/** Satu tabel laporan (judul + isi, atau keadaan kosong). Aksi kepala (muat ulang/tautan) opsional. */
+function ReportTableView({ t, actions }: { t: Report['table']; actions?: React.ReactNode }) {
+  const tx = useTx();
+  return (
+    <section>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-bold">{tx(t.title)}</h3>
+        <div className="flex items-center gap-2">
+          {actions}
+          {t.link && (
+            <Link to={t.link.href} className="inline-flex h-7 items-center gap-1 border border-b2b-ink px-2.5 text-xs font-bold hover:bg-b2b-ink hover:text-white">
+              {tx(t.link.label)} <ArrowRight className="size-3.5" />
+            </Link>
+          )}
+        </div>
+      </div>
+      {t.rows.length ? (
+        <Table head={t.columns.map((c: ReportColumn) => tx(c.label))}>
+          {t.rows.map((row, i) => (
+            <tr key={i}>
+              {t.columns.map((c, j) => (
+                <td key={c.key} className={cx('px-4 py-2.5 text-sm', j === 0 && 'font-bold', (c.format === 'num' || c.format === 'idr' || c.format === 'pct' || c.format === 'bytes') && 'tabular-nums whitespace-nowrap')}>
+                  {format(row[c.key], c.format)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </Table>
+      ) : (
+        <Empty title={tx(t.empty) || '—'} />
+      )}
+    </section>
+  );
+}
+
 export function ServiceReport({ id }: { id: string }) {
   const tx = useTx();
   const q = useQuery({ queryKey: ['service-report', id], queryFn: () => api<Report>(`/v1/admin/reports/${id}`), refetchInterval: 5 * 60_000 });
   const r = q.data;
+  // Deret & tabel tambahan (kontrak aditif `extra_*`) tampil setelah yang utama.
+  const series = r ? [...(r.series ? [r.series] : []), ...(r.extra_series ?? [])] : [];
   return (
     <QueryState q={q}>
       {r && (
@@ -105,38 +142,27 @@ export function ServiceReport({ id }: { id: string }) {
               <Kpi key={k.label.id} k={k} />
             ))}
           </div>
-          {r.series && <Trend s={r.series} />}
-          <section>
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="font-bold">{tx(r.table.title)}</h3>
-              <div className="flex items-center gap-2">
+          {series.length > 0 && (
+            <div className={cx('grid gap-4', series.length > 1 && 'lg:grid-cols-2')}>
+              {series.map((s, i) => (
+                <Trend key={`${s.label.id}-${i}`} s={s} />
+              ))}
+            </div>
+          )}
+          <ReportTableView
+            t={r.table}
+            actions={
+              <>
                 <span className="text-xs text-b2b-muted">{fmt.dateTime(r.generated_at)}</span>
                 <Button size="sm" variant="outline-ink" icon={<RefreshCcw className="size-3.5" />} loading={q.isFetching} onClick={() => q.refetch()} className="h-7 px-2.5 text-xs">
                   {tx({ id: 'Muat ulang', en: 'Refresh' })}
                 </Button>
-                {r.table.link && (
-                  <Link to={r.table.link.href} className="inline-flex h-7 items-center gap-1 border border-b2b-ink px-2.5 text-xs font-bold hover:bg-b2b-ink hover:text-white">
-                    {tx(r.table.link.label)} <ArrowRight className="size-3.5" />
-                  </Link>
-                )}
-              </div>
-            </div>
-            {r.table.rows.length ? (
-              <Table head={r.table.columns.map((c: ReportColumn) => tx(c.label))}>
-                {r.table.rows.map((row, i) => (
-                  <tr key={i}>
-                    {r.table.columns.map((c, j) => (
-                      <td key={c.key} className={cx('px-4 py-2.5 text-sm', j === 0 && 'font-bold', (c.format === 'num' || c.format === 'idr' || c.format === 'pct' || c.format === 'bytes') && 'tabular-nums whitespace-nowrap')}>
-                        {format(row[c.key], c.format)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </Table>
-            ) : (
-              <Empty title={tx(r.table.empty) || '—'} />
-            )}
-          </section>
+              </>
+            }
+          />
+          {(r.extra_tables ?? []).map((t, i) => (
+            <ReportTableView key={`${t.title.id}-${i}`} t={t} />
+          ))}
         </div>
       )}
     </QueryState>
