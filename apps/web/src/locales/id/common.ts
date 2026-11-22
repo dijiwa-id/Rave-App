@@ -209,6 +209,7 @@ const common = {
     notifications: 'Notifikasi',
     myTickets: 'Tiket Saya',
     profileSettings: 'Profil & Pengaturan',
+    devicesDownloads: 'Perangkat & unduhan',
     registerArtist: 'Daftar sebagai Artis',
     registerPromotor: 'Daftar sebagai Promotor',
     registerPodcaster: 'Daftar sebagai Podcaster',

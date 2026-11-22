@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AudioLines, BadgeCheck, Bell, ChevronDown, Copy, Download, KeyRound, Monitor, Moon, Sun, Globe, Library, MonitorPlay, RotateCcw, Search, ShieldCheck, SlidersHorizontal, TriangleAlert, User, X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -11,6 +11,7 @@ import { EQ_PRESETS, presetOf, usePrefs, type EqPreset } from '@/stores/prefs';
 import { ChoiceChips, FanPage } from '@/components/fan';
 import { Equalizer } from '@/components/fan/Equalizer';
 import { VerificationPanel } from '@/components/fan/VerificationPanel';
+import { OfflineDevices } from '@/components/fan/OfflineDevices';
 import { VerifiedBadge } from '@/components/ui/VerifiedBadge';
 import { switchLanguage } from '@/components/LanguageSwitch';
 import { Button, confirmDialog, cx, toast } from '@/components/ui';
@@ -37,8 +38,8 @@ const NOTIF_CHANNELS: NotifChannel[] = ['push', 'email', 'whatsapp'];
 const defaultPref = (category: NotifCategory): NotifPref => ({ category, push: true, email: category === 'booking' || category === 'payment', whatsapp: false, quiet_start: null, quiet_end: null });
 const CITIES = ['Jakarta', 'Bandung', 'Yogyakarta', 'Surabaya', 'Malang', 'Bali', 'Medan', 'Semarang', 'Makassar', 'Solo', 'Palembang', 'Lainnya'];
 
-type SectionId = 'account' | 'verify' | 'language' | 'audio' | 'eq' | 'library' | 'display' | 'notifications' | 'privacy' | 'security' | 'danger';
-const SECTION_ICON: Record<SectionId, any> = { account: User, verify: BadgeCheck, language: Globe, audio: AudioLines, eq: SlidersHorizontal, library: Library, display: MonitorPlay, notifications: Bell, privacy: ShieldCheck, security: KeyRound, danger: TriangleAlert };
+type SectionId = 'account' | 'verify' | 'language' | 'audio' | 'eq' | 'library' | 'display' | 'notifications' | 'privacy' | 'security' | 'downloads' | 'danger';
+const SECTION_ICON: Record<SectionId, any> = { account: User, verify: BadgeCheck, language: Globe, audio: AudioLines, eq: SlidersHorizontal, library: Library, display: MonitorPlay, notifications: Bell, privacy: ShieldCheck, security: KeyRound, downloads: Download, danger: TriangleAlert };
 
 // ───────────────────────── primitif tata letak ─────────────────────────
 /** Kata kunci pencarian aktif; baris yang tidak cocok tidak dirender, bagian tanpa baris disembunyikan via CSS :has(). */
@@ -423,14 +424,17 @@ export default function Settings() {
     () => [...(Object.keys(EQ_PRESETS) as EqPreset[]).map((k) => ({ value: k as EqPreset | 'custom', label: s.eqPresets[k] })), ...(preset ? [] : [{ value: 'custom' as const, label: s.eqCustom }])],
     [s, preset],
   );
-  const sections: SectionId[] = ['account', 'verify', 'language', 'audio', 'eq', 'library', 'display', 'notifications', 'privacy', 'security', 'danger'];
-  // Tautan langsung ke bagian (mis. notifikasi verifikasi → #set-verify).
+  const sections: SectionId[] = ['account', 'verify', 'language', 'audio', 'eq', 'library', 'display', 'notifications', 'privacy', 'security', 'downloads', 'danger'];
+  // Tautan langsung ke bagian (mis. notifikasi verifikasi → #set-verify, menu akun → #downloads). Ikut berubah saat
+  // hash berganti di halaman yang sama (menu akun dibuka dari Pengaturan).
+  const { hash } = useLocation();
   useEffect(() => {
-    const id = window.location.hash.slice(1);
-    if (!id.startsWith('set-')) return;
+    const raw = hash.slice(1);
+    const id = raw.startsWith('set-') ? raw : (sections as string[]).includes(raw) ? `set-${raw}` : '';
+    if (!id) return;
     const t = setTimeout(() => document.getElementById(id)?.scrollIntoView({ block: 'start' }), 150);
     return () => clearTimeout(t);
-  }, []);
+  }, [hash]); // eslint-disable-line react-hooks/exhaustive-deps
   const jump = (id: SectionId) => document.getElementById(`set-${id}`)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
   const [ql, qd] = s.qualityRow;
 
@@ -693,6 +697,12 @@ export default function Settings() {
 
             <Section id="security" title={s.sections.security}>
               <TotpRow />
+            </Section>
+
+            <Section id="downloads" title={s.sections.downloads}>
+              <Row hideLabel label={s.sections.downloads} keywords={s.offline.keywords} stack>
+                <OfflineDevices />
+              </Row>
             </Section>
 
             <Section id="danger" title={s.sections.danger} tone="danger">

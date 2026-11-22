@@ -185,6 +185,9 @@ function UserMenu() {
               <Link role="menuitem" className={MENU_ITEM} to="/app/settings">
                 <User className="size-4" /> {d.layout.profileSettings}
               </Link>
+              <Link role="menuitem" className={MENU_ITEM} to="/app/settings#downloads">
+                <Download className="size-4" /> {d.layout.devicesDownloads}
+              </Link>
               <Link role="menuitem" className={MENU_ITEM} to="/premium">
                 <Heart className="size-4" /> Premium
               </Link>

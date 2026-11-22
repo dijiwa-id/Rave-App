@@ -209,6 +209,7 @@ const common: Shape<typeof id> = {
     notifications: 'Notifications',
     myTickets: 'My Tickets',
     profileSettings: 'Profile & Settings',
+    devicesDownloads: 'Devices & downloads',
     registerArtist: 'Join as an Artist',
     registerPromotor: 'Join as a Promoter',
     registerPodcaster: 'Join as a Podcaster',
