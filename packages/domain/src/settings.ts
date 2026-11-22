@@ -522,6 +522,7 @@ export const SETTINGS: SettingDef[] = [
     public: true,
     consumers: ['catalog', 'web'],
   },
+  { key: 'download.report_per_minute', group: 'download', label: 'Laporan putar offline per menit', description: 'Batas kiriman laporan putar offline per akun per menit (tiap kiriman ≤ 200 putar). Aplikasi normal mengirim beberapa kiriman saat kembali online; lewat batas dijawab 429 dan aplikasi mengirim ulang nanti — tidak ada putar yang hilang.', type: 'number', default: 30, min: 1, max: 600, unit: 'kiriman/menit', consumers: ['playback'] },
   { key: 'download.report_max_age_days', group: 'download', label: 'Batas umur laporan putar offline', description: 'Putar offline yang dilaporkan perangkat lebih tua dari ini (dihitung dari waktu mulai putar) ditolak dan tidak dihitung royalti. Default = masa berlaku lisensi 30 hari + margin 5 hari; jangan lebih kecil dari Masa berlaku lisensi.', type: 'number', default: 35, min: 7, max: 120, unit: 'hari', consumers: ['playback'] },
 
   // ---- Refund tiket ----

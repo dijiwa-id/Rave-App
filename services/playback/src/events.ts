@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { config, publish, settings, z, type Client, type ServiceContext } from '@rave/service-kit';
+import { FRAUD_RATE_WINDOW_MS, rateWindowExceeded } from '@rave/domain/offline-plays';
 import { insertDeltas, type AggDelta, type ArtistCounter } from './aggregates.js';
 import { todayWib, UNKNOWN } from './util.js';
 
@@ -23,28 +24,55 @@ const evt = z
 const FAST_CLOCK = (process.env.RAVE_FAST_CLOCK ?? (config.isDev ? '1' : '0')) === '1';
 const CLOCK_TOLERANCE_MS = 10_000;
 
+/**
+ * Kunci transaksi per pengguna untuk pencatatan qualified stream (hitungan RATE_LIMIT/LOOP_31S + sisip). Laporan putar
+ * offline memakai versi `try` (gagal cepat → 429, tidak menahan koneksi pool); jalur online menunggu (blocking) tetapi
+ * mengambilnya SETELAH sesi dikunci dan SEBELUM menulis qualified_streams/daily_listeners — transaksi offline tidak
+ * pernah mengunci baris sesi, jadi urutan ini bebas deadlock. Kunci yang sama → hitungan fraud online & offline
+ * pengguna yang sama tidak bisa sama-sama lolos di ambang.
+ */
+export const USER_STREAM_LOCK = `SELECT pg_advisory_xact_lock(hashtext('playback.offline-plays'), hashtext($1))`;
+export const USER_STREAM_TRY_LOCK = `SELECT pg_try_advisory_xact_lock(hashtext('playback.offline-plays'), hashtext($1)) AS ok`;
+
 /** Aturan fraud sederhana (REQ-ADM-03). Produksi: model + fitur device/IP/ASN di pipeline streaming. */
 export const FRAUD = { loopWindow: 5, loopMaxPlayedMs: 35_000 };
 
 
 /**
  * Deteksi pola mencurigakan sebelum stream dihitung.
- * - RATE_LIMIT: stream qualified pengguna dalam 1 jam sebelum `ref` menurut WAKTU DENGAR (`coalesce(played_at, at)`) —
- *   online `ref` = sekarang (played_at = at, hasil identik dengan sebelumnya); offline `ref` = started_at perangkat,
- *   sehingga sinkronisasi ratusan putar offline sekaligus tidak dianggap "120 stream dalam satu jam".
+ * - RATE_LIMIT menurut WAKTU DENGAR (`coalesce(played_at, at)`):
+ *   - online (tanpa `ref`): stream qualified pengguna dalam 1 jam sebelum sekarang ≥ batas (tidak berubah);
+ *   - offline (`ref` = started_at perangkat): DUA ARAH — ditandai bila ada jendela 1 jam yang memuat `ref` sudah berisi
+ *     ≥ batas (`rateWindowExceeded`). Putar offline datang tidak berurutan (batch per putar, waktu menurun); hitungan satu
+ *     arah hanya melihat masa lalu sehingga putar yang lebih awal selalu lolos. Untuk urutan menaik hasilnya identik
+ *     dengan hitungan satu arah, dan sinkronisasi ratusan putar lintas hari tetap tidak dianggap "N stream dalam 1 jam".
  * - LOOP_31S: N stream qualified terakhir berhenti tepat setelah ambang. Online (tanpa `ref`): sesi online saja (perilaku
  *   lama). Offline: sesi online + putar offline yang qualified, sebelum `ref`.
  */
 export async function fraudCheck(tx: Client, userId: string, ref?: Date): Promise<string | null> {
-  // Hitungan dibatasi ambang (LIMIT) → cukup scan indeks qualified_user_played_idx sampai ambang, bukan seluruh jam.
   const max = settings.num('streaming.fraud_max_streams_per_hour');
-  const rate = await tx.query(
-    `SELECT count(*)::int AS n FROM (SELECT 1 FROM qualified_streams WHERE user_id = $1
-        AND coalesce(played_at, at) > coalesce($3::timestamptz, now()) - interval '1 hour'
-        AND ($3::timestamptz IS NULL OR coalesce(played_at, at) <= $3::timestamptz) LIMIT $2) x`,
-    [userId, Number.isFinite(max) ? Math.max(0, Math.ceil(max)) : null, ref ?? null],
-  );
-  if (rate.rows[0].n >= max) return 'RATE_LIMIT';
+  const cap = Number.isFinite(max) ? Math.max(0, Math.ceil(max)) : null;
+  if (!ref) {
+    // Hitungan dibatasi ambang (LIMIT) → cukup scan indeks qualified_user_played_idx sampai ambang, bukan seluruh jam.
+    const rate = await tx.query(
+      `SELECT count(*)::int AS n FROM (SELECT 1 FROM qualified_streams WHERE user_id = $1
+          AND coalesce(played_at, at) > now() - interval '1 hour' LIMIT $2) x`,
+      [userId, cap],
+    );
+    if (rate.rows[0].n >= max) return 'RATE_LIMIT';
+  } else {
+    // Titik di (ref − 1 jam, ref + 1 jam), dibatasi 2 × batas: bila sebanyak itu, salah satu sisi berisi ≥ batas dan
+    // jendela yang berakhir di ref / di titik terakhir sisi kanan pasti melampaui (pigeonhole) → tidak perlu sisa baris.
+    const lim = cap == null ? null : 2 * cap;
+    const pts = await tx.query(
+      `SELECT coalesce(played_at, at) AS t FROM qualified_streams WHERE user_id = $1
+          AND coalesce(played_at, at) > $3::timestamptz - interval '1 hour' AND coalesce(played_at, at) < $3::timestamptz + interval '1 hour'
+        ORDER BY coalesce(played_at, at) LIMIT $2`,
+      [userId, lim, ref],
+    );
+    if ((lim != null && pts.rows.length >= lim) || rateWindowExceeded(pts.rows.map((r: any) => new Date(r.t).getTime()), ref.getTime(), max, FRAUD_RATE_WINDOW_MS))
+      return 'RATE_LIMIT';
+  }
   // Pola loop "31 detik": sesi-sesi terakhir berhenti tepat setelah ambang qualified (indeks parsial sessions_user_qualified_idx).
   const recent = ref
     ? await tx.query(
@@ -211,6 +239,8 @@ export async function eventRoutes(app: FastifyInstance, { db }: ServiceContext) 
         ]);
       }
       // Setelah max_played_ms tersimpan → fraudCheck (pola loop) melihat state sesi yang sama seperti sebelumnya.
+      // Kunci per pengguna yang sama dengan laporan putar offline (lihat USER_STREAM_LOCK) — hanya bila ada yang qualified.
+      if (toQualify.length && uid) await tx.query(USER_STREAM_LOCK, [uid]);
       for (const q of toQualify) if (await qualify(tx, q.s, q.played, deltas)) qualified++;
       await insertDeltas(tx, deltas);
     });

@@ -8,7 +8,7 @@ import { seed } from './seed.js';
 import { reportRoutes } from './reports.js';
 import { sessionRoutes } from './sessions.js';
 import { offlineExpireJob, offlineRoutes } from './offline.js';
-import { offlinePlayRoutes } from './offline-plays.js';
+import { offlinePlayRoutes, offlinePlaysPurgeJob } from './offline-plays.js';
 import { offlineReportRoutes } from './offline-report.js';
 
 async function routes(app: FastifyInstance, ctx: ServiceContext) {
@@ -28,7 +28,7 @@ const svc = createService({
   migrationsDir: new URL('../migrations/', import.meta.url),
   routes,
   consumers,
-  jobs: [aggFlushJob, uniquesJob, offlineExpireJob],
+  jobs: [aggFlushJob, uniquesJob, offlineExpireJob, offlinePlaysPurgeJob],
   stats: async ({ db }) => (await db.one(
     `SELECT (SELECT count(*) FROM qualified_streams WHERE NOT suspicious AND at >= date_trunc('day', now()))::int AS streams_today,
               (SELECT count(*) FROM qualified_streams WHERE NOT suspicious AND at > now() - interval '28 days')::int AS streams_28d,

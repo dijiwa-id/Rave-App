@@ -104,26 +104,51 @@ Izin konten: `tracks.offline_allowed` / `episodes.offline_allowed` (default true
 ### Putar offline (T6) — `POST /v1/events/offline-plays`
 - Perangkat mencatat putar lokal dengan `seq` monoton per perangkat dan mengirim batch ≤ 200 saat online. Idempoten:
   `UNIQUE(device_id, seq)` di `offline_plays`; kirim ulang → `duplicate` (hasil pertama berlaku, tanpa efek kedua).
+- Akun ditangguhkan/dihapus → seluruh batch `403 account_suspended`, tidak ada yang disimpan. Sengaja **tidak final**:
+  perangkat menyimpan log dan mengirim ulang; bila akun dipulihkan sebelum `download.report_max_age_days`, putar sah
+  tetap dibayar (keputusan konservatif — tidak membayar selama ditangguhkan, tidak menghapus hak artis bila dipulihkan).
 - Sah bila: perangkat milik pengguna (boleh sudah dicabut, asal `started_at` < waktu cabut); lisensi milik pengguna +
   perangkat + konten yang sama; `started_at` ∈ [lisensi pertama terbit (`created_at`), `min(expires_at, revoked_at)`);
-  tidak di masa depan (> 5 menit skew); tidak lebih tua dari `download.report_max_age_days` (default 35 = TTL 30 + margin);
-  tidak beririsan dengan putar lain yang diterima di perangkat itu (toleransi 1 dtk); total per perangkat per hari
-  kalender WIB ≤ 24 jam. `played_ms` dipangkas ke durasi + 5 dtk (sama dengan online). Batas bawah memakai `created_at`,
+  bila Premium sudah tidak aktif, `started_at` < `member_until` (`after_membership` — menutup celah masa langganan habis
+  secara alami tanpa event pencabutan); tidak di masa depan (> 5 menit skew); tidak lebih tua dari
+  `download.report_max_age_days` (default 35 = TTL 30 + margin); tidak beririsan dengan putar lain yang diterima di
+  **akun yang sama, perangkat mana pun** (toleransi 1 dtk); total per **akun** per hari kalender WIB ≤ 24 jam. Satu orang
+  tidak bisa mendengar dua putar sekaligus — overlap/batas per perangkat membiarkan N perangkat "memutar" bersamaan. `played_ms` dipangkas ke durasi + 5 dtk (sama dengan online). Batas bawah memakai `created_at`,
   bukan `issued_at`, karena `POST /v1/offline/licenses` ulang memperbarui `issued_at` baris yang sama — putar sebelum
   perpanjangan tetap sah.
 - Yang lolos masuk ke **logika qualified stream yang sama** dengan jalur online (`recordQualified` di
   `services/playback/src/events.ts`): ambang `royalty.qualified_stream_seconds`, fraudCheck, `daily_listeners`,
   agregat (`source = 'offline'`), event `playback.stream.qualified` (`source: 'offline'`). Lagu offline = stream Premium
   tanpa iklan (konsumen ads mengabaikannya). Episode dicatat, bukan stream royalti lagu (sama dengan online).
-- fraudCheck dihitung menurut **waktu dengar**: `RATE_LIMIT` menghitung stream qualified pada 1 jam sebelum `started_at`
-  (kolom baru `qualified_streams.played_at`), `LOOP_31S` melihat sesi online + putar offline qualified sebelum
-  `started_at`. Satu-satunya perubahan jalur online: hitungan `RATE_LIMIT` memakai `coalesce(played_at, at)` — identik
-  untuk data online (played_at = at), dan sinkronisasi ratusan putar offline tidak lagi membuat stream online berikutnya
-  dianggap fraud.
-- Konkurensi: seluruh batch dalam satu transaksi + outbox, diserialkan `pg_advisory_xact_lock` per pengguna (dua batch
-  paralel dari perangkat yang sama / perangkat lain akun yang sama tidak bisa sama-sama lolos tumpang tindih / ambang).
-  Panggilan iam (pemilik & waktu cabut perangkat) dan catalog (artis & durasi, `/internal/playback/meta`, tanpa filter
-  status) dilakukan sebelum transaksi.
+- fraudCheck dihitung menurut **waktu dengar** (kolom `qualified_streams.played_at`). `RATE_LIMIT` untuk putar offline
+  **dua arah**: ditandai bila ada jendela 1 jam yang memuat `started_at` sudah berisi ≥ batas stream qualified
+  (`rateWindowExceeded` di `@rave/domain/offline-plays`). Hitungan satu arah (1 jam sebelum `started_at`) bisa dilewati
+  dengan mengirim putar berurutan waktu menurun; dua arah menjamin tidak ada jendela 1 jam berisi > batas stream
+  non-fraud, apa pun urutan kedatangan. Untuk kiriman menaik hasilnya identik dengan hitungan satu arah. Kueri dibatasi
+  2 × batas baris (pigeonhole: sebanyak itu pasti melampaui). `LOOP_31S` melihat sesi online + putar offline qualified
+  sebelum `started_at`. Perubahan jalur online: hitungan `RATE_LIMIT` memakai `coalesce(played_at, at)` — identik untuk
+  data online (played_at = at), dan sinkronisasi ratusan putar offline tidak lagi membuat stream online berikutnya
+  dianggap fraud; serta kunci pengguna saat mencatat qualified (lihat Konkurensi) — hasil hitungan tidak berubah.
+- Konkurensi: seluruh batch dalam satu transaksi + outbox, diserialkan per pengguna dengan
+  **`pg_try_advisory_xact_lock`** — batch lain akun yang sama sedang diproses → `429 rate_limited` + `Retry-After: 5`
+  seketika (bukan menunggu sambil memegang koneksi pool; kunci blocking membuat banyak batch paralel satu akun menghabiskan
+  pool). Sebelum itu ember laju per akun `download.report_per_minute` (default 30 kiriman/menit, tabel `offline_rate`) →
+  `429` + `Retry-After: 60` sebelum memanggil iam/catalog. Jalur online (`POST /v1/events/play`) mengambil kunci yang
+  sama (blocking) hanya bila ada sesi yang qualified, SETELAH mengunci sesi dan SEBELUM menulis
+  `qualified_streams`/`daily_listeners`; transaksi offline tidak pernah mengunci baris sesi → bebas deadlock, dan
+  hitungan fraud online & offline pengguna yang sama tidak bisa sama-sama lolos di ambang. Batch tidak dipecah per
+  potongan (atomik ≤ 200 putar; kunci try sudah membatasi satu transaksi per akun). Panggilan iam (status akun &
+  keanggotaan, pemilik & waktu cabut perangkat) dan catalog (artis & durasi, `/internal/playback/meta`, tanpa filter
+  status) dilakukan sebelum transaksi; galatnya dipetakan sama dengan `/v1/offline/*` (`mapIamUpstream`/`mapUpstream`,
+  4xx tak terpetakan → `502 upstream_error`).
+- Pertumbuhan tabel: paling banyak `OFFLINE_REJECTED_PER_DEVICE_DAY` (1000) baris REJECTED per perangkat per hari WIB
+  (waktu diterima); lewat kuota putar tetap dijawab `rejected` tetapi tidak disimpan. Job `offline-plays-purge` (per jam,
+  berbatch 5000) menghapus baris REJECTED yang diterima > `download.report_max_age_days` + 1 hari lalu — seq yang
+  terbebas tidak bisa memasukkan putar lama lagi (pasti `too_old`). Baris ACCEPTED (dasar royalti) tidak pernah dihapus.
+  Migrasi playback `009_offline_plays_user_guards` (indeks per pengguna & kuota REJECTED).
+- **Tindak lanjut iam (belum diimplementasikan):** iam sebaiknya menerbitkan `iam.user.member_changed` saat masa
+  langganan habis secara alami (job harian `member_until <= now()`), agar lisensi dicabut di sumbernya dan recheck
+  melaporkan `MEMBERSHIP` tanpa menunggu `expires_at`. Sampai itu, `after_membership` menjaga dasar royalti.
 - **Keputusan: endpoint tetap menerima laporan walau `download.enabled` dimatikan.** Mematikan fitur menghentikan
   unduhan & lisensi baru, tetapi putar yang sudah terjadi dari lisensi yang sah tetap harus dibayar ke artis.
 

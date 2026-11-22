@@ -686,7 +686,7 @@ Galat berupa Problem Details dengan `code` (klien memetakan aksi; `detail` ID/EN
 | `device_rate_limited` | 429 | pendaftaran perangkat baru > `download.devices_per_day` / 24 jam (`retry_after_s`, header `Retry-After`) |
 | `device_limit` | 409 | perangkat aktif = batas (`limit`, `devices[]`) |
 | `device_full` | 409 | lisensi aktif perangkat = `download.max_tracks_per_device` (`limit`) |
-| `rate_limited` | 429 | lisensi baru + permintaan menunggu (202) > `download.rate_per_user_hour` (`retry_after_s` 3600), konten menunggu > `download.pending_per_user` (`retry_after_s` 60), atau recheck > `download.recheck_per_minute` (header `Retry-After`) |
+| `rate_limited` | 429 | lisensi baru + permintaan menunggu (202) > `download.rate_per_user_hour` (`retry_after_s` 3600), konten menunggu > `download.pending_per_user` (`retry_after_s` 60), recheck > `download.recheck_per_minute`, atau laporan putar offline > `download.report_per_minute` / batch lain akun sedang diproses (§12.1) (header `Retry-After`) |
 | `queue_full` | 503 | antrean global penyiapan berkas penuh (`download.queue_max`) — `retry_after_s` + header `Retry-After`; tidak menambah antrean |
 | `upstream_error` | 502 | galat layanan internal (iam/catalog) tanpa padanan kode di atas; ulangi nanti |
 | `content_not_found` | 404 | lagu/episode tidak ada atau tidak tayang (rilis bukan LIVE) |
@@ -745,17 +745,30 @@ pemeliharaan. Putar yang lolos menjadi qualified stream lewat logika yang SAMA d
 | `before_license` | `started_at` < lisensi pertama kali terbit (`created_at`; perpanjangan tidak menggeser batas) | ya |
 | `after_license` | `started_at` ≥ `min(expires_at, revoked_at)` lisensi | ya |
 | `after_device_revoked` | `started_at` ≥ waktu perangkat dicabut | ya |
+| `after_membership` | Premium tidak aktif lagi dan `started_at` ≥ `member_until` (masa langganan berakhir) | ya |
 | `in_future` | `started_at` atau `started_at + played_ms` > sekarang + 5 menit | ya |
 | `too_old` | `started_at` < sekarang − `download.report_max_age_days` (default 35) | ya |
-| `overlap` | beririsan > 1 dtk dengan putar lain yang diterima di perangkat yang sama (atau mulai di ms yang sama) | ya |
-| `daily_limit` | total putar perangkat di hari kalender WIB `started_at` > 24 jam | ya |
+| `overlap` | beririsan > 1 dtk dengan putar lain yang diterima di **akun yang sama, perangkat mana pun** (atau mulai di ms yang sama) | ya |
+| `daily_limit` | total putar **akun** (semua perangkat) di hari kalender WIB `started_at` > 24 jam | ya |
 
 \* Disimpan = seq terpakai; kirim ulang seq itu → `duplicate` dengan `original: "rejected"` dan alasan yang sama.
+Paling banyak 1000 penolakan disimpan per perangkat per hari WIB; lewat itu putar tetap dijawab `rejected` (final bagi
+klien) tetapi seq tidak terpakai. Penolakan yang diterima > `download.report_max_age_days` + 1 hari lalu dihapus berkala.
 `played_ms` dipangkas ke durasi konten + 5 dtk (durasi tidak diketahui → apa adanya; nilai asli disimpan untuk audit).
 Putar < ambang qualified atau episode = `accepted` dengan `qualified: false` (tercatat, bukan stream royalti lagu).
 Stream yang ditandai fraud = `accepted` dengan `qualified: false` (dikecualikan dari royalti, seperti jalur online).
-Galat level batch: `404 device_not_found` (perangkat tidak ada / milik akun lain — perangkat yang sudah dicabut tetap
-boleh melapor), `400` body tidak valid / > 200 putar, `401` tanpa token.
+`RATE_LIMIT` putar offline dihitung dua arah: tidak ada jendela 1 jam (menurut waktu dengar) yang berisi lebih dari
+`streaming.fraud_max_streams_per_hour` stream non-fraud, apa pun urutan pengiriman.
+Galat level batch (tidak ada yang disimpan; **bukan final** — simpan log & kirim ulang):
+
+| Status | `code` | Kapan |
+|---|---|---|
+| `400` | — | body tidak valid / > 200 putar |
+| `401` | — | tanpa token |
+| `403` | `account_suspended` | akun ditangguhkan/dihapus (kirim ulang setelah akun dipulihkan) |
+| `404` | `device_not_found` | perangkat tidak ada / milik akun lain (perangkat yang sudah dicabut tetap boleh melapor) |
+| `429` | `rate_limited` | ember `download.report_per_minute` per akun (`retry_after_s: 60`), atau batch lain akun yang sama sedang diproses (`retry_after_s: 5`); header `Retry-After` |
+| `502` | `upstream_error` | iam/catalog mengembalikan galat tanpa padanan (detail internal tidak diteruskan); `503/504` timeout hulu |
 
 **Periode royalti** (ADR-0004 §Putar offline & royalti): stream offline masuk periode saat laporan **diterima**
 (`qualified_streams.at = received_at`), bukan saat didengar; periode yang sudah ditutup/dihitung tidak pernah dibuka ulang.

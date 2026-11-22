@@ -4,9 +4,11 @@ import {
   exceedsDailyCap,
   licenseContent,
   licenseOwnership,
+  membershipWindow,
   OFFLINE_CLOCK_SKEW_MS,
   overlapsAny,
   playWindow,
+  rateWindowExceeded,
   wibDate,
   type OfflinePlayLicense,
 } from './offline-plays.js';
@@ -82,5 +84,36 @@ describe('putar offline: aturan murni (P-7 T6)', () => {
   it('pengaturan download.report_max_age_days: default 35 (TTL 30 + margin), hanya playback', () => {
     expect(settingDefaults()['download.report_max_age_days']).toBe(35);
     expect(SETTINGS_BY_KEY['download.report_max_age_days'].consumers).toEqual(['playback']);
+  });
+  it('RATE_LIMIT dua arah: jendela 1 jam mana pun yang memuat ref; untuk titik masa lalu saja = aturan online', () => {
+    const M = 60_000;
+    const ref = NOW;
+    // Hanya masa lalu: identik dengan hitungan (ref − 1 jam, ref].
+    expect(rateWindowExceeded(Array.from({ length: 9 }, (_, i) => ref - i * M), ref, 10)).toBe(false);
+    expect(rateWindowExceeded(Array.from({ length: 10 }, (_, i) => ref - i * M), ref, 10)).toBe(true);
+    expect(rateWindowExceeded(Array.from({ length: 10 }, (_, i) => ref - H - i * M), ref, 10)).toBe(false); // tepat 1 jam lalu = di luar
+    // Hanya masa depan (putar dikirim urutan menurun): 10 titik dalam 1 jam setelah ref → jendela (t10 − 1 jam, t10] memuat ref.
+    expect(rateWindowExceeded(Array.from({ length: 10 }, (_, i) => ref + (i + 1) * M), ref, 10)).toBe(true);
+    expect(rateWindowExceeded(Array.from({ length: 9 }, (_, i) => ref + (i + 1) * M), ref, 10)).toBe(false);
+    // Dua sisi: 5 sebelum + 5 sesudah dalam 30 menit → satu jendela berisi 10.
+    expect(rateWindowExceeded([...Array.from({ length: 5 }, (_, i) => ref - (i + 1) * M), ...Array.from({ length: 5 }, (_, i) => ref + (i + 1) * M)], ref, 10)).toBe(true);
+    // Tersebar: 9 di 50–59 menit sebelum, 9 di 50–59 menit sesudah → tidak ada jendela 1 jam memuat ref dengan ≥ 10.
+    const far = [...Array.from({ length: 9 }, (_, i) => ref - (50 + i) * M), ...Array.from({ length: 9 }, (_, i) => ref + (50 + i) * M)];
+    expect(rateWindowExceeded(far, ref, 10)).toBe(false);
+    expect(rateWindowExceeded([], ref, 0)).toBe(true); // batas 0 = semua ditandai (seperti online)
+    expect(rateWindowExceeded([ref], ref, Infinity)).toBe(false);
+  });
+
+  it('masa keanggotaan: Premium tidak aktif & started_at ≥ member_until → after_membership', () => {
+    const until = new Date(NOW - DAY).toISOString();
+    expect(membershipWindow({ start: NOW - DAY - 1 }, { premium_active: false, member_until: until })).toBeNull();
+    expect(membershipWindow({ start: NOW - DAY }, { premium_active: false, member_until: until })).toBe('after_membership');
+    expect(membershipWindow({ start: NOW }, { premium_active: true, member_until: until })).toBeNull();
+    expect(membershipWindow({ start: NOW }, { premium_active: false, member_until: null })).toBeNull();
+  });
+
+  it('pengaturan download.report_per_minute: default 30, hanya playback', () => {
+    expect(settingDefaults()['download.report_per_minute']).toBe(30);
+    expect(SETTINGS_BY_KEY['download.report_per_minute'].consumers).toEqual(['playback']);
   });
 });

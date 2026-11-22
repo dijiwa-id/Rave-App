@@ -1896,12 +1896,23 @@ console.log('\n▶ Unduhan offline Premium (perangkat, lisensi, berkas terenkrip
         );
         const rep2 = await call(P, 'POST', '/v1/events/offline-plays', batch);
         check('offline-plays: kirim ulang batch yang sama → semua duplicate', rep2.status === 200 && rep2.data?.duplicate === 2 && rep2.data?.accepted === 0, rep2.data?.results);
+        // Batch paralel satu akun: yang kalah kunci dijawab 429 rate_limited + Retry-After → klien mengirim ulang.
+        let saw429 = false;
+        const report = async (body: object) => {
+          for (let i = 0; i < 20; i++) {
+            const r = await call(P, 'POST', '/v1/events/offline-plays', body);
+            if (r.status !== 429) return r;
+            saw429 = saw429 || (r.data?.code === 'rate_limited' && r.data?.retry_after_s > 0);
+            await new Promise((ok) => setTimeout(ok, 200));
+          }
+          return call(P, 'POST', '/v1/events/offline-plays', body);
+        };
         const par = await Promise.all([
-          call(P, 'POST', '/v1/events/offline-plays', { device_id: dev.data?.id, plays: [play(3, t0 + 9000, 2000)] }),
-          call(P, 'POST', '/v1/events/offline-plays', { device_id: dev.data?.id, plays: [play(4, t0 + 9500, 2000)] }),
+          report({ device_id: dev.data?.id, plays: [play(3, t0 + 9000, 2000)] }),
+          report({ device_id: dev.data?.id, plays: [play(4, t0 + 9500, 2000)] }),
         ]);
         const parSt = par.map((r) => r.data?.results?.[0]?.reason ?? r.data?.results?.[0]?.status).sort().join();
-        check('offline-plays: dua laporan paralel yang tumpang tindih → tepat satu diterima', parSt === 'accepted,overlap', parSt);
+        check('offline-plays: dua laporan paralel yang tumpang tindih → tepat satu diterima (yang kalah kunci: 429 lalu kirim ulang)', parSt === 'accepted,overlap', [parSt, saw429]);
         const foreign = await call(fan.access_token, 'POST', '/v1/events/offline-plays', { device_id: dev.data?.id, plays: [play(9, t0, 6000)] });
         check('offline-plays: perangkat milik akun lain → 404 device_not_found', foreign.status === 404 && foreign.data?.code === 'device_not_found', [foreign.status, foreign.data?.code]);
         const wait = t0 + 16_000 - Date.now(); // pencabutan sesudah semua putar uji (t0 … t0+15 dtk)

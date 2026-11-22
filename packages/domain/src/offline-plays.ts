@@ -1,5 +1,6 @@
 // Pelaporan putar offline (P-7 T6, docs/adr/0004-unduhan-offline.md §Putar offline & royalti).
-// Aturan murni (tanpa I/O): jendela waktu lisensi/perangkat, batas played_ms, tumpang tindih per perangkat, batas harian WIB.
+// Aturan murni (tanpa I/O): jendela waktu lisensi/perangkat/keanggotaan, batas played_ms, tumpang tindih & batas harian
+// WIB per PENGGUNA (semua perangkat akun), jendela laju dua arah untuk putar yang dilaporkan tidak berurutan.
 // Playback (`POST /v1/events/offline-plays`) memanggil fungsi ini di bawah kunci per pengguna; yang lolos masuk ke logika
 // qualified stream yang sama dengan jalur online (sumber `offline`).
 
@@ -11,8 +12,16 @@ export const OFFLINE_CLOCK_SKEW_MS = 5 * 60_000;
 export const OFFLINE_DURATION_TOLERANCE_MS = 5_000;
 /** Pembulatan jam klien antar-putar berurutan (akhir putar sebelumnya boleh melewati awal putar berikutnya ≤ ini). */
 export const OFFLINE_OVERLAP_TOLERANCE_MS = 1_000;
-/** Total putar per perangkat per hari kalender WIB. */
+/** Total putar per pengguna (semua perangkat) per hari kalender WIB. */
 export const OFFLINE_DAILY_CAP_MS = 24 * 3600_000;
+/**
+ * Baris REJECTED yang disimpan per perangkat per hari WIB (waktu diterima). Lewat → putar tetap dijawab `rejected`
+ * tetapi tidak disimpan (seq tidak terpakai) — mencegah tabel tumbuh tanpa batas dari kiriman sampah. Perangkat normal
+ * hampir tidak pernah menghasilkan penolakan.
+ */
+export const OFFLINE_REJECTED_PER_DEVICE_DAY = 1000;
+/** Jendela hitungan RATE_LIMIT fraudCheck (sama dengan jalur online). */
+export const FRAUD_RATE_WINDOW_MS = 3600_000;
 
 export type OfflinePlayStatus = 'accepted' | 'duplicate' | 'rejected';
 /** Alasan penolakan per event (field `reason`). Ditolak = tidak pernah dibayar; kiriman ulang dengan seq sama = `duplicate`. */
@@ -25,8 +34,9 @@ export type OfflinePlayReject =
   | 'after_device_revoked' // started_at setelah perangkat dicabut
   | 'in_future' // started_at (atau akhir putar) di masa depan melebihi toleransi jam
   | 'too_old' // lebih tua dari download.report_max_age_days
-  | 'overlap' // tumpang tindih dengan putar lain yang sudah diterima di perangkat yang sama
-  | 'daily_limit'; // total putar perangkat di hari WIB itu melebihi 24 jam
+  | 'after_membership' // started_at pada/setelah masa Premium berakhir (member_until) dan Premium tidak aktif lagi
+  | 'overlap' // tumpang tindih dengan putar lain yang sudah diterima di akun yang sama (perangkat mana pun)
+  | 'daily_limit'; // total putar akun (semua perangkat) di hari WIB itu melebihi 24 jam
 
 export interface OfflinePlayLicense {
   user_id: string;
@@ -103,7 +113,41 @@ export function capPlayedMs(playedMs: number, durationMs: number | null | undefi
 /** Tanggal kalender WIB (YYYY-MM-DD) dari epoch ms. */
 export const wibDate = (t: number) => new Date(t + 7 * 3600_000).toISOString().slice(0, 10);
 
-/** Tumpang tindih dengan putar lain di perangkat yang sama: [start, start+played) beririsan melebihi toleransi. */
+/**
+ * Masa keanggotaan: Premium sudah tidak aktif dan `started_at` ≥ `member_until` → 'after_membership'. Premium aktif atau
+ * `member_until` tidak diketahui → null (pencabutan lisensi lewat `iam.user.member_changed` tetap menjaga lewat
+ * 'after_license').
+ */
+export function membershipWindow(p: Pick<PlaySpan, 'start'>, m: { premium_active: boolean; member_until: Date | string | null }): OfflinePlayReject | null {
+  if (m.premium_active) return null;
+  const until = ms(m.member_until);
+  if (until == null || !Number.isFinite(until)) return null;
+  return p.start >= until ? 'after_membership' : null;
+}
+
+/**
+ * RATE_LIMIT dua arah untuk putar yang dilaporkan belakangan (offline): true bila ADA jendela `(s − window, s]` yang
+ * memuat `ref` (s ∈ [ref, ref + window)) dan sudah berisi ≥ `max` stream qualified. Untuk s = ref ini persis aturan
+ * jalur online (hitung 1 jam sebelum ref); jendela lain menangkap putar yang dikirim dengan urutan waktu menurun.
+ * `points` = waktu dengar stream yang sudah tercatat di `(ref − window, ref + window)` (urutan bebas).
+ */
+export function rateWindowExceeded(points: readonly number[], ref: number, max: number, windowMs = FRAUD_RATE_WINDOW_MS): boolean {
+  if (!(max > 0)) return true; // batas 0 = semua ditandai (sama dengan `n >= max` di jalur online)
+  const pts = points.filter((t) => t > ref - windowMs && t < ref + windowMs).sort((a, b) => a - b);
+  if (pts.length < max) return false;
+  // Kandidat ujung jendela: ref sendiri dan setiap titik di (ref, ref + window). Dua penunjuk: lo = titik pertama > s − window.
+  let lo = 0;
+  let hi = 0; // hi = jumlah titik ≤ s
+  const ends = [ref, ...pts.filter((t) => t > ref)];
+  for (const s of ends) {
+    while (hi < pts.length && pts[hi]! <= s) hi++;
+    while (lo < hi && pts[lo]! <= s - windowMs) lo++;
+    if (hi - lo >= max) return true;
+  }
+  return false;
+}
+
+/** Tumpang tindih dengan putar lain akun yang sama: [start, start+played) beririsan melebihi toleransi. */
 export function overlapsAny(p: PlaySpan, accepted: readonly PlaySpan[], toleranceMs = OFFLINE_OVERLAP_TOLERANCE_MS): boolean {
   const a0 = p.start;
   const a1 = p.start + p.played_ms;
@@ -117,7 +161,7 @@ export function overlapsAny(p: PlaySpan, accepted: readonly PlaySpan[], toleranc
   return false;
 }
 
-/** Total played_ms perangkat di hari WIB `started_at` (termasuk event ini) melebihi 24 jam. */
+/** Total played_ms akun di hari WIB `started_at` (termasuk event ini) melebihi 24 jam. */
 export function exceedsDailyCap(p: PlaySpan, accepted: readonly PlaySpan[], capMs = OFFLINE_DAILY_CAP_MS): boolean {
   const day = wibDate(p.start);
   let total = p.played_ms;
