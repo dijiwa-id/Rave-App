@@ -11,6 +11,7 @@ import { studioRoutes } from './studio.js';
 import { podcastRoutes } from './podcasts.js';
 import { transcodeJob } from './audio.js';
 import { spectrumJob, spectrumRoutes } from './spectrum.js';
+import { offlineArtifactJob, offlineRoutes } from './offline.js';
 
 async function routes(app: FastifyInstance, ctx: ServiceContext) {
   await syncGenres(ctx);
@@ -21,6 +22,7 @@ async function routes(app: FastifyInstance, ctx: ServiceContext) {
   await podcastRoutes(app, ctx);
   await reportRoutes(app, ctx);
   await shareRoutes(app, ctx);
+  await offlineRoutes(app, ctx);
 }
 
 const svc = createService({
@@ -30,7 +32,7 @@ const svc = createService({
   migrationsDir: new URL('../migrations/', import.meta.url),
   routes,
   consumers,
-  jobs: [scheduledReleaseJob, listenersDecayJob, transcodeJob, spectrumJob],
+  jobs: [scheduledReleaseJob, listenersDecayJob, transcodeJob, spectrumJob, offlineArtifactJob],
   stats: async ({ db }) =>
     (await db.one(
       `SELECT (SELECT count(*) FROM artists)::int AS artists,

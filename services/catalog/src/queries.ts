@@ -8,7 +8,7 @@ async function rows<T = any>(q: Q, sql: string, params: unknown[] = []): Promise
 
 /** SELECT standar Track (docs/API.md §2). Alias: t=tracks, a=artists, r=releases. */
 export const TRACK_SELECT = `
-  SELECT t.id, t.title, t.duration_ms, t.explicit, t.isrc, t.track_number, t.play_count,
+  SELECT t.id, t.title, t.duration_ms, t.explicit, t.isrc, t.track_number, t.play_count, t.offline_allowed,
          EXISTS (SELECT 1 FROM lyrics l WHERE l.track_id = t.id) AS has_lyrics,
          (SELECT json_build_object(
                    'lossless', coalesce((au.audio_meta->>'lossless')::bool, false),

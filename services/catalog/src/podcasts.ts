@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { assertOrg, audit, badRequest, conflict, forbidden, notFound, requireAuth, requirePermission, settings, signProtectedMediaUrl, unprocessable, uuidv7, z, type ServiceContext } from '@rave/service-kit';
 import { EMBED_PROVIDERS, parseEmbed, publishTarget, type EmbedError } from '@rave/domain/podcast';
 import { isUuid } from './queries.js';
+import { publishOfflineRevoked } from './offline.js';
 
 /**
  * Podcaster — acara (podcast/audio fiksi) & episode buatan kreator, plus moderasi Back Office.
@@ -118,6 +119,7 @@ export async function podcastRoutes(app: FastifyInstance, { db }: ServiceContext
     embed: e.source === 'embed' ? { provider: e.embed_provider, src: e.embed_url, kind: e.embed_kind, height: e.embed_height } : null,
     duration_ms: e.duration_ms,
     is_premium: e.is_premium,
+    offline_allowed: e.offline_allowed ?? true,
     season: e.season,
     episode_number: e.episode_number,
     cover_url: e.cover_url,
@@ -236,7 +238,9 @@ export async function podcastRoutes(app: FastifyInstance, { db }: ServiceContext
       const sh = await loadShow(req, (req.params as { id: string }).id, false);
       assertOrg(req.user, sh.org_id, ['OWNER', 'ADMIN']);
       await db.tx(async (tx) => {
+        const eps = (await tx.query(`SELECT id FROM episodes WHERE show_id = $1`, [sh.id])).rows.map((x: { id: string }) => x.id);
         await tx.query(`DELETE FROM shows WHERE id = $1`, [sh.id]);
+        await publishOfflineRevoked(tx, 'episode', eps, 'DELETED');
         await audit(tx, { actorId: req.user!.sub, action: 'podcast.show.delete', entity: 'show', entityId: sh.id, data: { title: sh.title, episodes: sh.episode_count }, ip: ip(req) });
       });
       return { ok: true };
@@ -274,8 +278,9 @@ export async function podcastRoutes(app: FastifyInstance, { db }: ServiceContext
       const e = await db.one(`SELECT * FROM episodes WHERE id = $1 AND show_id = $2`, [episodeId, sh.id]);
       if (!e) throw notFound('Episode');
       if (e.status === 'HIDDEN') throw conflict('Episode disembunyikan moderator dan tidak bisa diubah');
-      const b = episodeBody.omit({ publish: true }).partial().extend({ publish: z.boolean().optional() }).parse(req.body ?? {});
-      const contentChanged = Object.keys(b).some((k) => k !== 'publish');
+      const b = episodeBody.omit({ publish: true }).partial().extend({ publish: z.boolean().optional(), offline_allowed: z.boolean().optional() }).parse(req.body ?? {});
+      // offline_allowed (P-7) bukan perubahan isi → tidak memicu tinjauan ulang.
+      const contentChanged = Object.keys(b).some((k) => k !== 'publish' && k !== 'offline_allowed');
       const nextPremium = b.is_premium ?? e.is_premium;
       if (b.is_premium && !e.is_premium && !settings.bool('podcast.premium_episodes')) throw forbidden('Episode Premium oleh kreator sedang dinonaktifkan admin');
       let src: Awaited<ReturnType<typeof resolveSource>> | null = null;
@@ -292,26 +297,33 @@ export async function podcastRoutes(app: FastifyInstance, { db }: ServiceContext
       else if (contentChanged && e.status === 'REJECTED') status = 'DRAFT';
       // Menekan "Terbitkan" lagi pada episode yang sudah menunggu (tanpa ubah isi) tidak memindahkannya ke ujung antrean.
       const nowSubmitted = (status === 'PENDING' && (e.status !== 'PENDING' || contentChanged)) || (status === 'PUBLISHED' && e.status !== 'PUBLISHED');
-      await db.query(
-        `UPDATE episodes SET title = coalesce($2, title), description = coalesce($3, description),
-           is_premium = $4, season = CASE WHEN $5 THEN $6 ELSE season END, episode_number = CASE WHEN $7 THEN $8 ELSE episode_number END,
-           cover_url = CASE WHEN $9 THEN $10 ELSE cover_url END,
-           source = coalesce($11, source), audio_url = CASE WHEN $12 THEN $13 ELSE audio_url END,
-           duration_ms = CASE WHEN $12 THEN $14 ELSE coalesce($15, duration_ms) END,
-           embed_provider = CASE WHEN $12 THEN $16 ELSE embed_provider END, embed_url = CASE WHEN $12 THEN $17 ELSE embed_url END,
-           embed_kind = CASE WHEN $12 THEN $18 ELSE embed_kind END, embed_height = CASE WHEN $12 THEN $19 ELSE embed_height END,
-           status = $20, submitted_at = CASE WHEN $21 THEN now() ELSE submitted_at END,
-           published_at = CASE WHEN $20 = 'PUBLISHED' AND status <> 'PUBLISHED' THEN now() ELSE published_at END,
-           review_note = CASE WHEN $21 THEN NULL ELSE review_note END, updated_at = now()
-         WHERE id = $1`,
-        [
-          e.id, b.title ?? null, b.description ?? null, nextPremium, 'season' in b, b.season ?? null, 'episode_number' in b, b.episode_number ?? null,
-                    // Durasi episode unggahan berasal dari berkas (probe) — klien hanya boleh mengisinya untuk episode embed.
-          'cover_url' in b, b.cover_url ?? null, src ? (b.source ?? e.source) : null, !!src, src?.audio_url ?? null, src?.duration_ms ?? 0, e.source === 'embed' ? (b.duration_ms ?? null) : null,
-          src?.embed_provider ?? null, src?.embed_url ?? null, src?.embed_kind ?? null, src?.embed_height ?? null, status, nowSubmitted,
-        ],
-      );
-      await audit(db, { actorId: req.user!.sub, action: 'podcast.episode.update', entity: 'episode', entityId: e.id, data: { changed: Object.keys(b), from: e.status, to: status }, ip: ip(req) });
+      await db.tx(async (tx) => {
+        await tx.query(
+          `UPDATE episodes SET title = coalesce($2, title), description = coalesce($3, description),
+             is_premium = $4, season = CASE WHEN $5 THEN $6 ELSE season END, episode_number = CASE WHEN $7 THEN $8 ELSE episode_number END,
+             cover_url = CASE WHEN $9 THEN $10 ELSE cover_url END,
+             source = coalesce($11, source), audio_url = CASE WHEN $12 THEN $13 ELSE audio_url END,
+             duration_ms = CASE WHEN $12 THEN $14 ELSE coalesce($15, duration_ms) END,
+             embed_provider = CASE WHEN $12 THEN $16 ELSE embed_provider END, embed_url = CASE WHEN $12 THEN $17 ELSE embed_url END,
+             embed_kind = CASE WHEN $12 THEN $18 ELSE embed_kind END, embed_height = CASE WHEN $12 THEN $19 ELSE embed_height END,
+             status = $20, submitted_at = CASE WHEN $21 THEN now() ELSE submitted_at END,
+             published_at = CASE WHEN $20 = 'PUBLISHED' AND status <> 'PUBLISHED' THEN now() ELSE published_at END,
+             review_note = CASE WHEN $21 THEN NULL ELSE review_note END, offline_allowed = coalesce($22, offline_allowed), updated_at = now()
+           WHERE id = $1`,
+          [
+            e.id, b.title ?? null, b.description ?? null, nextPremium, 'season' in b, b.season ?? null, 'episode_number' in b, b.episode_number ?? null,
+                      // Durasi episode unggahan berasal dari berkas (probe) — klien hanya boleh mengisinya untuk episode embed.
+            'cover_url' in b, b.cover_url ?? null, src ? (b.source ?? e.source) : null, !!src, src?.audio_url ?? null, src?.duration_ms ?? 0, e.source === 'embed' ? (b.duration_ms ?? null) : null,
+            src?.embed_provider ?? null, src?.embed_url ?? null, src?.embed_kind ?? null, src?.embed_height ?? null, status, nowSubmitted,
+            b.offline_allowed ?? null,
+          ],
+        );
+        await audit(tx, { actorId: req.user!.sub, action: 'podcast.episode.update', entity: 'episode', entityId: e.id, data: { changed: Object.keys(b), from: e.status, to: status }, ip: ip(req) });
+        // Unduhan offline dicabut bila episode tidak tayang lagi, berganti audio/menjadi embed, atau izin offline dimatikan.
+        if (e.status === 'PUBLISHED' && status !== 'PUBLISHED') await publishOfflineRevoked(tx, 'episode', [e.id], 'UNPUBLISHED');
+        else if (b.offline_allowed === false && e.offline_allowed) await publishOfflineRevoked(tx, 'episode', [e.id], 'OFFLINE_DISABLED');
+        else if (src && e.status === 'PUBLISHED') await publishOfflineRevoked(tx, 'episode', [e.id], 'UNPUBLISHED');
+      });
       return episodeOut(await db.one(`SELECT * FROM episodes WHERE id = $1`, [e.id]));
     });
 
@@ -319,9 +331,12 @@ export async function podcastRoutes(app: FastifyInstance, { db }: ServiceContext
       const { id, episodeId } = req.params as { id: string; episodeId: string };
       const sh = await loadShow(req, id, false);
       if (!isUuid(episodeId)) throw notFound('Episode');
-      const r = await db.query(`DELETE FROM episodes WHERE id = $1 AND show_id = $2 RETURNING title`, [episodeId, sh.id]);
-      if (!r.length) throw notFound('Episode');
-      await audit(db, { actorId: req.user!.sub, action: 'podcast.episode.delete', entity: 'episode', entityId: episodeId, data: { show_id: sh.id, title: r[0].title }, ip: ip(req) });
+      await db.tx(async (tx) => {
+        const r = (await tx.query(`DELETE FROM episodes WHERE id = $1 AND show_id = $2 RETURNING title`, [episodeId, sh.id])).rows;
+        if (!r.length) throw notFound('Episode');
+        await audit(tx, { actorId: req.user!.sub, action: 'podcast.episode.delete', entity: 'episode', entityId: episodeId, data: { show_id: sh.id, title: r[0].title }, ip: ip(req) });
+        await publishOfflineRevoked(tx, 'episode', [episodeId], 'DELETED');
+      });
       return { ok: true };
     });
   });
@@ -370,6 +385,7 @@ export async function podcastRoutes(app: FastifyInstance, { db }: ServiceContext
           [id, to, b.action === 'approve' ? null : b.reason, req.user!.sub],
         );
         await audit(tx, { actorId: req.user!.sub, action: `podcast.episode.${b.action}`, entity: 'episode', entityId: id, data: { title: e.title, from: e.status, reason: b.reason ?? null }, ip: ip(req) });
+        if (e.status === 'PUBLISHED' && to !== 'PUBLISHED') await publishOfflineRevoked(tx, 'episode', [id], 'UNPUBLISHED');
       });
       return episodeOut(await db.one(`SELECT * FROM episodes WHERE id = $1`, [id]));
     });
@@ -393,6 +409,10 @@ export async function podcastRoutes(app: FastifyInstance, { db }: ServiceContext
       if (!sh) throw notFound('Acara');
       await db.tx(async (tx) => {
         await tx.query(`UPDATE shows SET status = $2, hidden_reason = $3, updated_at = now() WHERE id = $1`, [id, b.hidden ? 'HIDDEN' : 'ACTIVE', b.hidden ? b.reason : null]);
+        if (b.hidden) {
+          const eps = (await tx.query(`SELECT id FROM episodes WHERE show_id = $1 AND status = 'PUBLISHED'`, [id])).rows.map((x: { id: string }) => x.id);
+          await publishOfflineRevoked(tx, 'episode', eps, 'UNPUBLISHED');
+        }
         await audit(tx, { actorId: req.user!.sub, action: b.hidden ? 'podcast.show.hide' : 'podcast.show.unhide', entity: 'show', entityId: id, data: { title: sh.title, reason: b.reason ?? null }, ip: ip(req) });
       });
       return showOut(await db.one(`${SHOW_SELECT} WHERE s.id = $1`, [id]));

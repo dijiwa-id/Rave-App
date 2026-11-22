@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { imageSize, UPLOAD_DIR } from './storage.js';
 import { requestLossless } from './audio.js';
 import { queueReleaseSpectra } from './spectrum.js';
+import { publishOfflineRevoked } from './offline.js';
 
 /** Dimensi artwork dari header berkas lokal (tanpa memuat seluruh gambar). null = eksternal / tidak terbaca. */
 async function artworkSize(url: string | null): Promise<{ width: number; height: number; bytes: number } | null> {
@@ -420,9 +421,14 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
     s.post('/v1/admin/qc/releases/:id/takedown', async (req) => {
       const { id } = req.params as { id: string };
       const b = z.object({ reason: z.string().min(3).max(1000) }).parse(req.body);
-      const r = await db.one(`UPDATE releases SET status = 'TAKEN_DOWN', qc_reason = $2, updated_at = now() WHERE id = $1 RETURNING id`, [id, b.reason]);
-      if (!r) throw notFound('Rilis');
-      await audit(db, { actorId: req.user!.sub, action: 'qc.takedown', entity: 'release', entityId: id, data: b, ip: req.ip });
+      await db.tx(async (tx) => {
+        const r = (await tx.query(`UPDATE releases SET status = 'TAKEN_DOWN', qc_reason = $2, updated_at = now() WHERE id = $1 RETURNING id`, [id, b.reason])).rows[0];
+        if (!r) throw notFound('Rilis');
+        await audit(tx, { actorId: req.user!.sub, action: 'qc.takedown', entity: 'release', entityId: id, data: b, ip: req.ip });
+        // Unduhan offline lagu rilis ini dicabut (P-7).
+        const t = await tx.query(`SELECT id FROM tracks WHERE release_id = $1`, [id]);
+        await publishOfflineRevoked(tx, 'track', t.rows.map((x: { id: string }) => x.id), 'TAKEN_DOWN');
+      });
       return releaseFull(db, id);
     });
   });
@@ -487,6 +493,8 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
            UNION ALL SELECT image_url FROM categories
          ) x WHERE u LIKE '%/v1/catalog/media/%'
          UNION SELECT '/v1/catalog/media/' || stored_name FROM uploads WHERE created_at > now() - interval '24 hours'
+         -- Artefak unduhan offline terenkripsi (P-7) bukan berkas yatim.
+         UNION SELECT '/v1/catalog/media/' || path FROM offline_artifacts WHERE path IS NOT NULL
          -- Rendisi streaming milik master yang masih dipakai (atau upload < 24 jam) bukan file yatim.
          UNION SELECT r.value->>'url' FROM uploads up CROSS JOIN LATERAL jsonb_each(up.renditions) r
           WHERE up.created_at > now() - interval '24 hours'

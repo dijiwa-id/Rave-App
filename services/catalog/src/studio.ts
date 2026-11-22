@@ -27,6 +27,7 @@ import {
   HttpError,
 } from '@rave/service-kit';
 import { isUuid, releaseFull, releasesFull } from './queries.js';
+import { publishOfflineRevoked } from './offline.js';
 import { canManageArtist } from './routes.js';
 import { imageSize, UPLOAD_DIR, uploadsBytes, wavInfo } from './storage.js';
 import { ffmpegPath, initialTranscodeStatus, probeAudio } from './audio.js';
@@ -632,8 +633,24 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
     s.patch('/v1/studio/tracks/:id', async (req) => {
       const { id } = req.params as { id: string };
       const t = await loadTrack(req, id);
+      // Izin unduhan offline (P-7) boleh diubah kapan saja, termasuk rilis yang sudah tayang; bidang lain hanya saat draf.
+      const raw = (req.body ?? {}) as Record<string, unknown>;
+      if (raw && typeof raw === 'object' && Object.keys(raw).length === 1 && 'offline_allowed' in raw) {
+        const { offline_allowed } = z.object({ offline_allowed: z.boolean() }).parse(raw);
+        await db.tx(async (tx) => {
+          const prev = (await tx.query(`SELECT offline_allowed FROM tracks WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+          if (prev.offline_allowed === offline_allowed) return;
+          await tx.query(`UPDATE tracks SET offline_allowed = $2 WHERE id = $1`, [id, offline_allowed]);
+          await audit(tx, { actorId: req.user!.sub, action: 'track.offline_allowed', entity: 'track', entityId: id, data: { offline_allowed }, ip: req.ip });
+          // Dimatikan → lisensi offline yang sudah terbit dicabut playback.
+          if (!offline_allowed) await publishOfflineRevoked(tx, 'track', [id], 'OFFLINE_DISABLED');
+        });
+        const out = await releaseFull(db, t.release_id);
+        delete out.artist_id;
+        return out;
+      }
       if (!EDITABLE.includes(t.release_status)) throw conflict('Lagu pada rilis yang sudah diajukan tidak dapat diubah');
-      const b = trackInput.partial().extend({ track_number: z.number().int().min(1).optional() }).parse(req.body);
+      const b = trackInput.partial().extend({ track_number: z.number().int().min(1).optional(), offline_allowed: z.boolean().optional() }).parse(req.body);
       const sets: string[] = [];
       const vals: unknown[] = [];
       for (const [k, v] of Object.entries(b)) {
