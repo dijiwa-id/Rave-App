@@ -214,6 +214,8 @@ check('URL dimanipulasi ditolak', tampered.status === 403, tampered.status);
 const anon = await call(null, 'POST', '/v1/playback/sessions', { track_id: track.id, quality: 'auto' });
 check('anonim = pratinjau 30 dtk', anon.data?.preview_only === true && anon.data?.preview_ms === 30000, anon.data);
 
+// Lagu dengan master unggahan (rendisi AAC nyata) — dipakai uji unduhan offline (P-7) di akhir.
+let offlineTrackId: string | null = null;
 console.log('\n▶ Master multi-format & rendisi (Artist Studio)');
 {
   const { execFileSync } = await import('node:child_process');
@@ -246,6 +248,7 @@ console.log('\n▶ Master multi-format & rendisi (Artist Studio)');
       tracks: [{ title: 'E2E Split Track', audio_url: up.public_url, duration_ms: 3000 }],
     });
     const trackId = rel.data?.tracks?.[0]?.id;
+    offlineTrackId = trackId ?? null;
     const invitee = `e2e-split-${Date.now()}@rave.test`;
     const sp = await call(AT, 'PUT', `/v1/studio/tracks/${trackId}/splits`, {
       master: [{ party_name: 'Senja Kolektif', pct: 70 }, { party_name: 'Produser Tamu', email: invitee, pct: 30 }],
@@ -1833,6 +1836,57 @@ console.log('\n▶ Akses per peran (fan, artis, manajer, promotor, admin, Super 
     const del2 = await call(S, 'DELETE', `/v1/admin/platform/news/${id}`);
     const gone = await call(S, 'GET', `/v1/admin/platform/news/${id}`);
     check('arsip dihapus permanen', del2.status === 204 && gone.status === 404, [del2.status, gone.status]);
+  }
+}
+
+// ---------------- Unduhan offline Premium (P-7, ADR-0004): iam ↔ catalog ↔ playback ----------------
+console.log('\n▶ Unduhan offline Premium (perangkat, lisensi, berkas terenkripsi, pencabutan)');
+{
+  const { createHash, generateKeyPairSync } = await import('node:crypto');
+  const SA = (await login(SEED.emails.superadmin)).access_token;
+  const P = (await login(SEED.emails.premium)).access_token;
+  const keyOf = () => (generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({ format: 'der', type: 'spki' }) as Buffer).toString('base64');
+  const off = await call(P, 'POST', '/v1/me/devices', { platform: 'desktop', name: 'E2E PC', public_key: keyOf() });
+  check('offline: flag mati (default) → daftar perangkat 403 offline_disabled', off.status === 403 && off.data?.code === 'offline_disabled', [off.status, off.data?.code]);
+  const pk = await call(null, 'GET', '/v1/offline/pubkey');
+  check('offline: kunci publik lisensi Ed25519 publik', pk.status === 200 && pk.data?.alg === 'Ed25519' && /^[\w-]{43}$/.test(pk.data?.public_key ?? ''), pk.data);
+  const on = await call(SA, 'PUT', '/v1/admin/platform/settings', { changes: { 'download.enabled': true }, reason: 'uji e2e unduhan offline' });
+  check('offline: Super Admin menyalakan download.enabled', on.status === 200, [on.status, on.data?.detail]);
+  await new Promise((r) => setTimeout(r, 2000)); // propagasi pengaturan ke iam/catalog/playback
+  try {
+    const dev = await call(P, 'POST', '/v1/me/devices', { platform: 'desktop', name: 'E2E PC', public_key: keyOf() });
+    check('offline: Premium mendaftarkan perangkat (201)', dev.status === 201 && !!dev.data?.id, [dev.status, dev.data?.detail]);
+    const extra: string[] = [];
+    let limited: any = null;
+    for (let i = 0; i < 10 && !limited; i++) {
+      const r = await call(P, 'POST', '/v1/me/devices', { platform: 'android', name: `E2E ${i}`, public_key: keyOf() });
+      if (r.status === 201) extra.push(r.data.id);
+      else limited = r;
+    }
+    check('offline: melebihi batas perangkat → 409 device_limit + daftar', limited?.status === 409 && limited.data?.code === 'device_limit' && Array.isArray(limited.data?.devices), [limited?.status, limited?.data?.code]);
+    for (const id of extra) await call(P, 'DELETE', `/v1/me/devices/${id}`);
+    const fanLic = await call(fan.access_token, 'POST', '/v1/offline/licenses', { device_id: dev.data?.id, track_id: offlineTrackId ?? dev.data?.id });
+    check('offline: pengguna Gratis → 403 premium_required', fanLic.status === 403 && fanLic.data?.code === 'premium_required', [fanLic.status, fanLic.data?.code]);
+    if (offlineTrackId) {
+      const lic = await until(() => call(P, 'POST', '/v1/offline/licenses', { device_id: dev.data?.id, track_id: offlineTrackId }), (r) => r.status !== 202, 60_000, 1500);
+      check('offline: Premium menerima lisensi (201) setelah artefak disiapkan', lic.status === 201 && lic.data?.license?.alg === 'Ed25519' && !!lic.data?.download?.url, [lic.status, lic.data?.code ?? lic.data?.detail]);
+      if (lic.status === 201) {
+        const f = await fetch(BASE + lic.data.download.url);
+        const buf = Buffer.from(await f.arrayBuffer());
+        check('offline: berkas RAVEOFL1 terunduh & SHA-256 cocok', f.status === 200 && buf.subarray(0, 8).toString() === 'RAVEOFL1' && createHash('sha256').update(buf).digest('hex') === lic.data.download.sha256, [f.status, buf.length]);
+        const unsigned = await fetch(BASE + lic.data.download.url.split('?')[0]);
+        check('offline: berkas tanpa tanda tangan → 403', unsigned.status === 403, unsigned.status);
+        const again = await call(P, 'POST', '/v1/offline/licenses', { device_id: dev.data?.id, track_id: offlineTrackId });
+        check('offline: permintaan ulang idempoten (200, lisensi sama)', again.status === 200 && again.data?.id === lic.data.id, [again.status]);
+        await call(P, 'DELETE', `/v1/me/devices/${dev.data?.id}`);
+        const rc = await until(() => call(P, 'POST', '/v1/offline/recheck', { device_id: dev.data?.id, license_ids: [lic.data.id] }), (r) => r.data?.revoked?.length === 1, 15_000, 500);
+        check('offline: perangkat dicabut → recheck melaporkan REVOKED (DEVICE_REVOKED)', rc.data?.revoked?.[0]?.reason === 'DEVICE_REVOKED', rc.data);
+      }
+    } else {
+      await call(P, 'DELETE', `/v1/me/devices/${dev.data?.id}`);
+    }
+  } finally {
+    await call(SA, 'POST', '/v1/admin/platform/settings/reset', { keys: ['download.enabled'], reason: 'selesai uji e2e unduhan offline' });
   }
 }
 
