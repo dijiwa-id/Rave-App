@@ -20,14 +20,19 @@ export interface RaveService {
   groups: SettingGroup[];
   /** Batasi kunci dalam grup (mis. RAVE Pro & unduhan offline berbagi grup subscription). */
   keys?: (key: string) => boolean;
-  /** Punya laporan `GET /v1/admin/reports/<id>` (tab Laporan). */
-  report?: boolean;
+  /**
+   * Tab Laporan: `true` = `GET /v1/admin/reports/<id>` tersedia; `'soon'` = layanan sudah berjalan tetapi endpoint laporannya
+   * belum ada → tab menampilkan "laporan segera hadir" + metrik yang direncanakan (tanpa angka palsu).
+   */
+  report?: boolean | 'soon';
   /** false = tidak tampil di sidebar (dibuka dari halaman lain, mis. Iklan → Kebijakan). */
   nav?: boolean;
 }
 
 const isPro = (k: string) => k.startsWith('subscription.pro_');
 const isDownload = (k: string) => k === 'subscription.download_devices';
+/** Unduhan offline (P-7): grup `download` + batas perangkat yang tinggal di grup subscription. */
+const isDownloadService = (k: string) => k.startsWith('download.') || isDownload(k);
 
 export const RAVE_SERVICES: RaveService[] = [
   // Musik & streaming
@@ -37,7 +42,7 @@ export const RAVE_SERVICES: RaveService[] = [
   { id: 'podcast', type: 'music', icon: Mic, status: 'ready', groups: ['podcast'] },
   { id: 'share', report: true, type: 'music', icon: Share2, status: 'ready', groups: ['share'] },
   { id: 'royalty', report: true, type: 'music', icon: Coins, status: 'ready', groups: ['royalty'] },
-  { id: 'downloads', type: 'music', icon: Download, status: 'soon', groups: ['subscription'], keys: isDownload },
+  { id: 'downloads', report: 'soon', type: 'music', icon: Download, status: 'ready', groups: ['download', 'subscription'], keys: isDownloadService },
   // Event & live
   { id: 'live', report: true, type: 'event', icon: Radio, status: 'ready', groups: ['live'] },
   { id: 'booking', report: true, type: 'event', icon: CalendarCheck, status: 'ready', groups: ['booking', 'commission'] },

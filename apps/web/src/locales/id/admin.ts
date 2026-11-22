@@ -193,6 +193,30 @@ const admin = {
     openSettings: 'Buka pengaturannya',
     tabReport: 'Laporan',
     tabSettings: 'Pengaturan',
+    /** Tab Laporan untuk layanan yang endpoint laporannya belum ada — jangan tampilkan angka palsu. */
+    reportSoon: {
+      title: 'Laporan segera hadir',
+      body: 'Layanan ini sudah berjalan, tetapi ringkasan datanya belum tersedia di dasbor. Sementara itu, pantau lewat Pengaturan dan log layanan.',
+      planned: 'Yang akan ditampilkan',
+    },
+    reportPlanned: {
+      downloads: ['Perangkat unduhan aktif & yang dicabut', 'Lisensi aktif, dicabut (per alasan), dan kedaluwarsa', 'Berkas terenkripsi siap, sedang dibuat, dan gagal', 'Lisensi baru per hari (14 hari)', 'Putar offline yang dilaporkan: diterima, ditolak (per alasan), qualified'],
+    },
+    /** Ringkasan rollout di kepala halaman layanan Unduhan Offline. */
+    rollout: {
+      title: 'Status rollout',
+      on: 'Aktif',
+      off: 'Mati',
+      offHint: 'Pendaftaran perangkat & lisensi baru ditolak. Unduhan yang ada tetap bisa diputar sampai lisensinya kedaluwarsa.',
+      everyone: 'Semua pelanggan Premium yang memenuhi syarat',
+      allowlist: (n: number) => `Terbatas: ${n} akun uji coba`,
+      tiers: 'Paket',
+      noTiers: 'Tidak ada paket — tidak ada yang berhak',
+      devices: (n: number) => `${n} perangkat/akun`,
+      perDevice: (n: number) => `${n} item/perangkat`,
+      ttl: (d: number) => `lisensi ${d} hari`,
+      loadFailed: 'Status rollout gagal dimuat.',
+    },
     items: {
       streaming: { name: 'Streaming', description: '', plan: '', steps: [] as string[] },
       transcoding: { name: 'Transcoding Audio', description: '', plan: '', steps: [] as string[] },
@@ -226,9 +250,9 @@ const admin = {
       },
       downloads: {
         name: 'Unduhan Offline',
-        description: 'Simpan lagu untuk diputar tanpa koneksi di aplikasi mobile & desktop (Premium).',
-        plan: 'Aplikasi mobile & desktop sudah menampilkan penanda "segera hadir". Penyimpanan terenkripsi dan lisensi offline belum dibangun.',
-        steps: ['Lisensi unduhan per perangkat (batas perangkat dari Pengaturan)', 'Penyimpanan terenkripsi di aplikasi', 'Sinkronisasi & kedaluwarsa lisensi saat langganan berakhir'],
+        description: 'Lagu & episode untuk diputar tanpa koneksi di aplikasi desktop & mobile (Premium): lisensi per perangkat, berkas AAC terenkripsi, cek ulang & kedaluwarsa berkala. Perlindungan lisensi, bukan DRM penuh (ADR-0004).',
+        plan: '',
+        steps: [] as string[],
       },
     },
   },
