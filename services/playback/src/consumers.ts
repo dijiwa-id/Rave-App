@@ -1,9 +1,12 @@
 import { callService, type Consumers, type ServiceContext } from '@rave/service-kit';
 import { bumpArtistDaily } from './aggregates.js';
 import { todayWib } from './util.js';
+import { offlineConsumers } from './offline.js';
 
 export function consumers(ctx: ServiceContext): Consumers {
   return {
+    // Pencabutan lisensi unduhan offline (P-7): member, perangkat, konten ditarik.
+    ...offlineConsumers(),
     // Save rate (REQ-STU-03): like lagu dihitung sebagai "save".
     'library.track.liked': async (e, tx) => {
       let r = await tx.query(`SELECT artist_id FROM track_artists WHERE track_id = $1`, [e.payload.trackId]);

@@ -56,6 +56,7 @@ export const ROUTES: [prefix: string, upstream: Upstream][] = [
   ['/v1/playback', 'playback'],
   ['/v1/events/play', 'playback'],
   ['/v1/analytics', 'playback'],
+  ['/v1/offline', 'playback'], // unduhan offline Premium (P-7)
   ['/v1/booking', 'booking'],
   ['/v1/admin/disputes', 'booking'],
   ['/v1/finance', 'finance'],
@@ -100,6 +101,8 @@ const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const PLAYBACK_WRITES = [
   /^\/v1\/playback\//,
   /^\/v1\/events\/play/,
+  // cek ulang lisensi unduhan offline: pendengar offline tidak boleh kehilangan unduhan karena pemeliharaan
+  /^\/v1\/offline\/recheck$/,
   /^\/v1\/live\/streams\/[^/]+\/(playback|heartbeat)$/,
   // siaran browser yang sedang berjalan tidak boleh putus karena pemeliharaan
   /^\/v1\/live\/studio\/streams\/[^/]+\/ingest\//,
