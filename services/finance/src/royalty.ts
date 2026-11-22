@@ -106,7 +106,7 @@ export async function computePeriod(db: Db, period: string, input: { adRevenue: 
   // 1. Data mentah dari service pemilik.
   const q = `from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`;
   const [streamRes, premRes, impRes] = await Promise.all([
-    callService<{ rows: { user_id: string; track_id: string; artist_id: string; n: number }[]; cities: { track_id: string; city: string; n: number }[]; usage: { day: string; track_id: string; first_time: string; plays: number; listeners: number }[]; excluded: { streams: number; listeners: number } }>('finance', 'playback', `/internal/royalty/streams?${q}`),
+    callService<{ rows: { user_id: string; track_id: string; artist_id: string; n: number }[]; cities: { track_id: string; city: string; n: number }[]; usage: { day: string; track_id: string; first_time: string; plays: number; listeners: number }[]; excluded: { streams: number; listeners: number }; offline?: { streams: number; listeners: number; played_before_period: number } }>('finance', 'playback', `/internal/royalty/streams?${q}`),
     callService<{ data: { user_id: string; member_type: PremiumMember['memberType']; member_updated_at: string | null; member_until: string | null }[] }>('finance', 'iam', '/internal/royalty/premium'),
     callService<{ data: { user_id: string; n: number }[] }>('finance', 'ads', `/internal/royalty/impressions?${q}`),
   ]);
@@ -277,6 +277,14 @@ export async function computePeriod(db: Db, period: string, input: { adRevenue: 
   const adAttributed = [...byUser.values()].reduce((a, l) => a + l.ads, 0);
   if (input.adRevenue > 0 && impRes.data.length && adAttributed < input.adRevenue * 0.99)
     anomalies.push({ kind: 'AD_PARTIAL', severity: 'info', message: `${Math.round(((input.adRevenue - adAttributed) * 100) / input.adRevenue)}% pendapatan iklan berasal dari pendengar tanpa stream qualified (tidak dibagikan)` });
+  // Putar offline (P-7, ADR-0004): dihitung setara stream Premium online; periode = saat laporan diterima playback.
+  const off = streamRes.offline;
+  if (off?.streams)
+    anomalies.push({
+      kind: 'OFFLINE_STREAMS',
+      severity: 'info',
+      message: `${off.streams} stream dari unduhan offline (${off.listeners} pendengar)${off.played_before_period ? `; ${off.played_before_period} didengar sebelum periode ini tetapi baru dilaporkan — dihitung di periode diterima` : ''}`,
+    });
   if (!streamRes.rows.length) anomalies.push({ kind: 'NO_STREAMS', severity: 'warn', message: 'Tidak ada stream qualified di periode ini' });
 
   // 6. Simpan draf (menimpa draf sebelumnya).

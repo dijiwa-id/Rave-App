@@ -101,6 +101,25 @@ Izin konten: `tracks.offline_allowed` / `episodes.offline_allowed` (default true
 - **Keputusan: endpoint tetap menerima laporan walau `download.enabled` dimatikan.** Mematikan fitur menghentikan
   unduhan & lisensi baru, tetapi putar yang sudah terjadi dari lisensi yang sah tetap harus dibayar ke artis.
 
+### Putar offline & royalti (T7)
+- **Setara stream Premium online.** Royalti (`services/finance/src/royalty.ts` → `computeRoyalty`) membaca hitungan stream
+  qualified non-fraud per pengguna × lagu dari `/internal/royalty/streams`; stream offline ada di hitungan yang sama
+  (tidak ada bobot/sumber terpisah). User-centric: porsi pendapatan Premium pendengar dibagi ke lagu yang ia dengar
+  termasuk yang offline; pro-rata/hybrid: masuk pool menurut jumlah stream. Putar offline tidak menghasilkan impresi
+  iklan (komponen `ads` hanya ada bila pendengar juga punya impresi iklan di periode itu).
+- **Cutoff periode = saat diterima (`received_at`), bukan saat didengar.** `qualified_streams.at` untuk putar offline =
+  waktu laporan diterima playback; periode royalti (bulan kalender WIB) memilih stream menurut `at`. Putar yang didengar
+  di periode yang sudah ditutup/dihitung tetapi baru dilaporkan masuk ke **periode saat diterima**; periode tertutup
+  tidak pernah dibuka ulang, statement terbit tidak berubah, ledger tidak dikoreksi. `played_at` (waktu dengar) hanya
+  dipakai analitik & fraudCheck.
+- Visibilitas Finance: `/internal/royalty/streams` mengembalikan `offline: { streams, listeners, played_before_period }`;
+  draf periode memuat anomali info `OFFLINE_STREAMS` (berapa yang didengar sebelum periode).
+- Kirim ulang batch tidak menggandakan: `UNIQUE(device_id, seq)` + `qualified_streams.session_id = offline_plays.id`
+  (PK) → satu putar = paling banyak satu stream qualified.
+- Konsekuensi (perlu diketahui Finance; ubah hanya lewat keputusan baru): atribusi user-centric memakai pendapatan Premium pendengar **di periode diterima** (prorata
+  hari aktif). Pendengar yang berhenti berlangganan lalu baru melapor di bulan berikutnya menyumbang pendapatan lebih kecil
+  (atau masuk pool hybrid) untuk putar tersebut. Dibatasi oleh `download.report_max_age_days` dan recheck 72 jam.
+
 ## Batas kejujuran (wajib dikomunikasikan)
 - Ini **perlindungan lisensi, BUKAN DRM penuh**. Perangkat sah memegang kunci yang bisa membuka berkasnya; perangkat
   yang di-root/jailbreak, klien yang dimodifikasi, atau perekaman keluaran audio dapat mengekstrak audio AAC 160.

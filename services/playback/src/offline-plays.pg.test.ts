@@ -3,8 +3,10 @@
 // (database kosong khusus test, mis. `postgres://rave:rave@127.0.0.1:55433/rave_test`) — membuat & menghapus schema acak.
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { computeRoyalty, currentPeriod, periodRange, previousPeriod, splitTrack, sumSource, type ListenerInput } from '@rave/domain';
 import { migrate, settings, uuidv7, type Db, type ServiceContext } from '@rave/service-kit';
-import { authAs, testApp } from '@rave/service-kit/testing';
+import { asService, authAs, testApp } from '@rave/service-kit/testing';
+import { analyticsRoutes } from './analytics.js';
 import { eventRoutes } from './events.js';
 import { offlinePlayRoutes, type OfflinePlayDeps } from './offline-plays.js';
 
@@ -78,6 +80,7 @@ describe.skipIf(!PG_URL)('playback offline-plays (Postgres asli)', () => {
     await lic(L3, U2, D2, T2);
     app = await testApp(async (a) => {
       await offlinePlayRoutes(a, { db, name: 'playback' }, deps);
+      await analyticsRoutes(a, { db, name: 'playback' } as unknown as ServiceContext);
       await eventRoutes(a, { db, name: 'playback' } as unknown as ServiceContext);
     });
   });
@@ -126,5 +129,50 @@ describe.skipIf(!PG_URL)('playback offline-plays (Postgres asli)', () => {
     expect(q).toEqual({ origin: 'online', same: true, suspicious: false });
     const d = await db.one(`SELECT count(*)::int AS n FROM agg_deltas WHERE source = 'search' AND streams = 1 AND track_id = $1`, [T1]);
     expect(d.n).toBe(1);
+  });
+
+  it('T7: periode tertutup tidak dibuka — putar didengar di periode lalu, diterima sekarang → masuk periode diterima; offline setara online; total split tepat; kirim ulang tidak dobel', async () => {
+    const cur = periodRange(currentPeriod());
+    const prev = periodRange(previousPeriod());
+    // U2 mendengar T2 offline 1 jam sebelum periode berjalan dimulai (periode lalu), melapor sekarang.
+    const heard = cur.from.getTime() - H;
+    const body = { device_id: D2, plays: [{ seq: 1, license_id: L3, track_id: T2, started_at: iso(heard), played_ms: 120_000 }] };
+    expect((await send(U2, body)).json()).toMatchObject({ accepted: 1, qualified: 1 });
+    // Stream online pembanding: U3 memutar T1 online di periode berjalan (baris setara jalur online).
+    const U3 = uuidv7();
+    await db.query(`INSERT INTO qualified_streams (session_id, user_id, track_id, artist_id, played_ms, at, played_at, origin) VALUES ($1,$2,$3,$4,120000, now(), now(), 'online')`, [uuidv7(), U3, T1, ART]);
+
+    const royalty = async (r: { from: Date; to: Date }) =>
+      (await app.inject({ method: 'GET', url: `/internal/royalty/streams?from=${r.from.toISOString()}&to=${r.to.toISOString()}`, headers: await asService() })).json();
+    const before = await royalty(cur);
+    const closed = await royalty(prev);
+    // Periode lalu (sudah ditutup) tidak menerima stream offline yang dilaporkan sekarang.
+    expect(closed.rows.find((r: any) => r.user_id === U2)).toBeUndefined();
+    expect(closed.offline.streams).toBe(0);
+    expect(before.rows.find((r: any) => r.user_id === U2)).toMatchObject({ track_id: T2, n: 1 });
+    expect(before.offline.listeners).toBe(2); // U1 (test sebelumnya) + U2
+    expect(before.offline.played_before_period).toBeGreaterThanOrEqual(1);
+
+    // Kirim ulang → duplicate, dasar royalti tidak berubah.
+    expect((await send(U2, body)).json()).toMatchObject({ accepted: 0, duplicate: 1 });
+    const after = await royalty(cur);
+    expect(after.rows).toEqual(before.rows);
+    expect(after.offline).toEqual(before.offline);
+
+    // Hitung: U2 (offline) dan U3 (online) sama-sama Premium Rp 45.000 → porsi lagu masing-masing identik.
+    const listeners: ListenerInput[] = [U2, U3].map((u) => ({
+      userId: u,
+      premium: 45_000,
+      ads: 0,
+      streams: Object.fromEntries(after.rows.filter((r: any) => r.user_id === u).map((r: any) => [r.track_id, r.n])),
+    }));
+    const res = computeRoyalty(listeners, { model: 'user_centric', rightsholderSharePct: 70, hybridFloor: 0 });
+    const t2 = res.tracks.find((t) => t.trackId === T2)!;
+    const t1 = res.tracks.find((t) => t.trackId === T1)!;
+    expect(t2.amount).toEqual({ premium: 31_500, ads: 0, pool: 0 });
+    expect(t1.amount).toEqual(t2.amount);
+    expect(res.tracks.reduce((a, t) => a + sumSource(t.amount), 0)).toBe(res.rightsholderPool);
+    const split = splitTrack(t2.amount, [{ type: 'MASTER', party: 'org:a', pct: 3333, approved: true }, { type: 'MASTER', party: 'org:b', pct: 6667, approved: true }, { type: 'PUBLISHING', party: 'user:c', pct: 100, approved: true }], 25);
+    expect(split.lines.reduce((a, l) => a + sumSource(l.amount), 0)).toBe(31_500);
   });
 });

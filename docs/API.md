@@ -758,6 +758,8 @@ boleh melapor), `400` body tidak valid / > 200 putar, `401` tanpa token.
 (`qualified_streams.at = received_at`), bukan saat didengar; periode yang sudah ditutup/dihitung tidak pernah dibuka ulang.
 Agregat analitik & pendengar harian memakai tanggal WIB saat didengar (`played_at`). Event `playback.stream.qualified`
 untuk putar offline membawa `at` = waktu dengar, `source: "offline"`, `receivedAt` (aditif).
+Internal `GET /internal/royalty/streams` kini juga mengembalikan `offline: { streams, listeners, played_before_period }`
+(sudah termasuk di `rows`); finance menampilkannya sebagai anomali info `OFFLINE_STREAMS` di draf periode.
 
 Alur klien: buat pasangan ECDH P-256 sekali per instalasi → `POST /v1/me/devices` → `POST /v1/offline/licenses` (ulangi
 selama 202) → unduh `download.url` (boleh `Range`/lanjut) → cek `sha256` → verifikasi lisensi dengan `GET /v1/offline/pubkey`

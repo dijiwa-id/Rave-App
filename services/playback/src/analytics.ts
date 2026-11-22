@@ -239,6 +239,7 @@ export async function analyticsRoutes(app: FastifyInstance, ctx: ServiceContext)
     });
 
     // Dasar royalti periode (finance, BRD §7.5): stream qualified non-fraud per pendengar × lagu, per kota, dan jumlah yang dikecualikan.
+    // Cutoff periode memakai `at` (online: saat qualified; offline: saat laporan diterima — ADR-0004).
     s.get('/internal/royalty/streams', async (req) => {
       const q = z.object({ from: z.string().datetime(), to: z.string().datetime() }).parse(req.query);
       const rows = await db.query(
@@ -262,7 +263,20 @@ export async function analyticsRoutes(app: FastifyInstance, ctx: ServiceContext)
            FROM qualified_streams WHERE NOT suspicious AND at >= $1 AND at < $2 GROUP BY 1, 2 ORDER BY 1, 3`,
         [q.from, q.to],
       );
-      return { rows, cities, usage, excluded: { streams: ex?.streams ?? 0, listeners: ex?.listeners ?? 0 } };
+      // Putar offline (P-7) sudah termasuk di `rows` (setara stream Premium online). Periode = saat DITERIMA (`at`), jadi
+      // putar yang didengar sebelum periode tetapi dilaporkan di dalamnya dihitung di sini (periode tertutup tidak dibuka).
+      const off = await db.one(
+        `SELECT count(*)::int AS streams, count(DISTINCT user_id)::int AS listeners, count(*) FILTER (WHERE played_at < $1)::int AS played_before
+           FROM qualified_streams WHERE NOT suspicious AND origin = 'offline' AND at >= $1 AND at < $2`,
+        [q.from, q.to],
+      );
+      return {
+        rows,
+        cities,
+        usage,
+        excluded: { streams: ex?.streams ?? 0, listeners: ex?.listeners ?? 0 },
+        offline: { streams: off?.streams ?? 0, listeners: off?.listeners ?? 0, played_before_period: off?.played_before ?? 0 },
+      };
     });
 
     s.get('/internal/analytics/artists/:artistId/epk', async (req) => {
