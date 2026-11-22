@@ -46,7 +46,7 @@ Acuan: **BRD/TDD v2.0** (Bab 9–11). Dokumen ini mencatat bagaimana desain di T
 | iam | Akun, OTP, sesi, org & peran, KYC, consent, waitlist | `iam` | `iam.user.*`, `iam.org.*`, `iam.kyc.verified`, `iam.waitlist.joined`, `iam.device.revoked` |
 | catalog | Artis, rilis, lagu, split hak, lirik, podcast/fiksi, pencarian (pg_trgm), QC | `catalog` | `catalog.release.*`, `catalog.artist.upserted`, `catalog.offline.revoked` |
 | library | Like, follow, playlist (fractional index), riwayat | `library` | `library.*` |
-| playback | Entitlement, sesi & URL bertanda tangan, play events, qualified stream, fraud dasar, analitik agregat, lisensi unduhan offline (ADR-0004) | `playback` | `playback.stream.qualified` |
+| playback | Entitlement, sesi & URL bertanda tangan, play events, qualified stream, fraud dasar, analitik agregat, lisensi unduhan offline & laporan putar offline (ADR-0004) | `playback` | `playback.stream.qualified` |
 | booking | EPK dinamis, rate card, kalender (exclusion constraint), inquiry/negosiasi, kontrak, rating, dispute | `booking` | `booking.*` |
 | finance | Invoice, webhook PG, ledger double-entry, escrow hold/release, wallet, payout, rekonsiliasi | `finance` (SERIALIZABLE) | `finance.*` |
 | ticketing | Event, inventori atomik, order + reservasi 10 mnt, e-ticket QR berputar, check-in | `ticketing` | `ticketing.*` |

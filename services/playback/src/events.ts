@@ -27,64 +27,116 @@ const CLOCK_TOLERANCE_MS = 10_000;
 export const FRAUD = { loopWindow: 5, loopMaxPlayedMs: 35_000 };
 
 
-/** Deteksi pola mencurigakan sebelum stream dihitung. */
-async function fraudCheck(tx: Client, userId: string): Promise<string | null> {
-  // Hitungan dibatasi ambang (LIMIT) → cukup scan indeks qualified_user_at_idx sampai ambang, bukan seluruh jam.
+/**
+ * Deteksi pola mencurigakan sebelum stream dihitung.
+ * - RATE_LIMIT: stream qualified pengguna dalam 1 jam sebelum `ref` menurut WAKTU DENGAR (`coalesce(played_at, at)`) —
+ *   online `ref` = sekarang (played_at = at, hasil identik dengan sebelumnya); offline `ref` = started_at perangkat,
+ *   sehingga sinkronisasi ratusan putar offline sekaligus tidak dianggap "120 stream dalam satu jam".
+ * - LOOP_31S: N stream qualified terakhir berhenti tepat setelah ambang. Online (tanpa `ref`): sesi online saja (perilaku
+ *   lama). Offline: sesi online + putar offline yang qualified, sebelum `ref`.
+ */
+export async function fraudCheck(tx: Client, userId: string, ref?: Date): Promise<string | null> {
+  // Hitungan dibatasi ambang (LIMIT) → cukup scan indeks qualified_user_played_idx sampai ambang, bukan seluruh jam.
   const max = settings.num('streaming.fraud_max_streams_per_hour');
   const rate = await tx.query(
-    `SELECT count(*)::int AS n FROM (SELECT 1 FROM qualified_streams WHERE user_id = $1 AND at > now() - interval '1 hour' LIMIT $2) x`,
-    [userId, Number.isFinite(max) ? Math.max(0, Math.ceil(max)) : null],
+    `SELECT count(*)::int AS n FROM (SELECT 1 FROM qualified_streams WHERE user_id = $1
+        AND coalesce(played_at, at) > coalesce($3::timestamptz, now()) - interval '1 hour'
+        AND ($3::timestamptz IS NULL OR coalesce(played_at, at) <= $3::timestamptz) LIMIT $2) x`,
+    [userId, Number.isFinite(max) ? Math.max(0, Math.ceil(max)) : null, ref ?? null],
   );
   if (rate.rows[0].n >= max) return 'RATE_LIMIT';
   // Pola loop "31 detik": sesi-sesi terakhir berhenti tepat setelah ambang qualified (indeks parsial sessions_user_qualified_idx).
-  const recent = await tx.query(
-    `SELECT max_played_ms FROM sessions WHERE user_id = $1 AND qualified_at IS NOT NULL ORDER BY created_at DESC LIMIT $2`,
-    [userId, FRAUD.loopWindow],
-  );
-  if (recent.rows.length === FRAUD.loopWindow && recent.rows.every((r) => r.max_played_ms < FRAUD.loopMaxPlayedMs)) return 'LOOP_31S';
+  const recent = ref
+    ? await tx.query(
+        `SELECT played AS max_played_ms FROM (
+           (SELECT max_played_ms AS played, created_at AS t FROM sessions
+             WHERE user_id = $1 AND qualified_at IS NOT NULL AND created_at <= $3 ORDER BY created_at DESC LIMIT $2)
+           UNION ALL
+           (SELECT played_ms, started_at_client FROM offline_plays
+             WHERE user_id = $1 AND qualified_at IS NOT NULL AND started_at_client <= $3 ORDER BY started_at_client DESC LIMIT $2)
+         ) x ORDER BY t DESC LIMIT $2`,
+        [userId, FRAUD.loopWindow, ref],
+      )
+    : await tx.query(`SELECT max_played_ms FROM sessions WHERE user_id = $1 AND qualified_at IS NOT NULL ORDER BY created_at DESC LIMIT $2`, [
+        userId,
+        FRAUD.loopWindow,
+      ]);
+  if (recent.rows.length === FRAUD.loopWindow && recent.rows.every((r: any) => r.max_played_ms < FRAUD.loopMaxPlayedMs)) return 'LOOP_31S';
   return null;
 }
 
-/** Qualified stream (≥30 dtk): tetap di tx request (per sesi, dasar royalti); agregatnya hanya berupa delta. */
+/** Satu qualified stream (online: id sesi; offline: id offline_plays — ruang uuidv7 yang sama, tidak bertabrakan). */
+export interface QualifiedStream {
+  id: string;
+  userId: string;
+  trackId: string;
+  artistId: string;
+  city: string | null;
+  /** agg_source_daily (online: sumber sesi; offline: 'offline'). */
+  source: string;
+  origin: 'online' | 'offline';
+  playedMs: number;
+  /** Diakui server = dasar periode royalti. */
+  at: Date;
+  /** Waktu dengar (offline: started_at perangkat) = tanggal agregat & daily_listeners (WIB). */
+  playedAt: Date;
+}
+
+/**
+ * Catat qualified stream + agregat + event (dipakai jalur online & offline — satu logika). Dipanggil di tx request
+ * (dasar royalti); `reason` dari fraudCheck → baris suspicious, dikecualikan dari royalti & agregat.
+ */
+export async function recordQualified(tx: Client, q: QualifiedStream, reason: string | null, deltas: AggDelta[]): Promise<boolean> {
+  const ins = await tx.query(
+    `INSERT INTO qualified_streams (session_id, user_id, track_id, artist_id, city, played_ms, at, suspicious, fraud_reason, origin, played_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (session_id) DO NOTHING`,
+    [q.id, q.userId, q.trackId, q.artistId, q.city, q.playedMs, q.at, !!reason, reason, q.origin, q.playedAt],
+  );
+  // Sudah tercatat (kiriman ulang) → tidak ada agregat/event kedua.
+  if (reason || !ins.rowCount) return false;
+
+  const date = todayWib(q.playedAt.getTime());
+  // daily_listeners = sumber dedup pendengar unik (kunci per user, bukan baris panas) → tetap sinkron.
+  const newListener = await tx.query(`INSERT INTO daily_listeners (artist_id, date, user_id, city) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [
+    q.artistId,
+    date,
+    q.userId,
+    q.city,
+  ]);
+  deltas.push({
+    artist_id: q.artistId,
+    date,
+    track_id: q.trackId,
+    city: q.city || UNKNOWN,
+    // Usia tidak dikumpulkan di token → "Tidak diketahui" sampai profil demografis (consent) tersedia.
+    age_group: UNKNOWN,
+    source: q.source,
+    streams: 1,
+    listeners: newListener.rowCount ? 1 : 0,
+  });
+  await publish(tx, 'playback.stream.qualified', q.trackId, {
+    userId: q.userId,
+    trackId: q.trackId,
+    artistId: q.artistId,
+    city: q.city,
+    playedMs: q.playedMs,
+    at: q.playedAt.toISOString(),
+    ...(q.origin === 'offline' ? { source: 'offline' as const, receivedAt: q.at.toISOString() } : {}),
+  });
+  return true;
+}
+
+/** Qualified stream (≥30 dtk) jalur online: tetap di tx request (per sesi, dasar royalti); agregatnya hanya berupa delta. */
 async function qualify(tx: Client, s: any, playedMs: number, deltas: AggDelta[]): Promise<boolean> {
   const reason = await fraudCheck(tx, s.user_id);
   const now = new Date();
   await tx.query(`UPDATE sessions SET qualified_at = $2 WHERE id = $1`, [s.id, now]);
-  await tx.query(
-    `INSERT INTO qualified_streams (session_id, user_id, track_id, artist_id, city, played_ms, at, suspicious, fraud_reason)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (session_id) DO NOTHING`,
-    [s.id, s.user_id, s.track_id, s.artist_id, s.city, playedMs, now, !!reason, reason],
+  return recordQualified(
+    tx,
+    { id: s.id, userId: s.user_id, trackId: s.track_id, artistId: s.artist_id, city: s.city, source: s.source, origin: 'online', playedMs, at: now, playedAt: now },
+    reason,
+    deltas,
   );
-  if (reason) return false;
-
-  const date = todayWib();
-  // daily_listeners = sumber dedup pendengar unik (kunci per user, bukan baris panas) → tetap sinkron.
-  const newListener = await tx.query(`INSERT INTO daily_listeners (artist_id, date, user_id, city) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [
-    s.artist_id,
-    date,
-    s.user_id,
-    s.city,
-  ]);
-  deltas.push({
-    artist_id: s.artist_id,
-    date,
-    track_id: s.track_id,
-    city: s.city || UNKNOWN,
-    // Usia tidak dikumpulkan di token → "Tidak diketahui" sampai profil demografis (consent) tersedia.
-    age_group: UNKNOWN,
-    source: s.source,
-    streams: 1,
-    listeners: newListener.rowCount ? 1 : 0,
-  });
-  await publish(tx, 'playback.stream.qualified', s.track_id, {
-    userId: s.user_id,
-    trackId: s.track_id,
-    artistId: s.artist_id,
-    city: s.city,
-    playedMs,
-    at: now.toISOString(),
-  });
-  return true;
 }
 
 const COUNTER: Partial<Record<string, ArtistCounter>> = { start: 'starts', skip: 'skips', complete: 'completes' };

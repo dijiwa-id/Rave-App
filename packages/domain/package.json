@@ -25,6 +25,7 @@
     "./royalty": "./src/royalty.ts",
     "./news": "./src/news.ts",
     "./share": "./src/share.ts",
-    "./offline": "./src/offline.ts"
+    "./offline": "./src/offline.ts",
+    "./offline-plays": "./src/offline-plays.ts"
   }
 }

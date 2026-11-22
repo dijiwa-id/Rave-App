@@ -29,6 +29,8 @@ const svc = createService({
   // Hitungan "lagu" untuk masa bebas iklan & jarak antar-jeda berasal dari server (bukan laporan klien).
   consumers: () => ({
     'playback.stream.qualified': async (e, tx) => {
+      // Putar offline (unduhan Premium, dilaporkan belakangan) tidak ikut jarak antar-jeda iklan.
+      if (e.payload.source === 'offline') return;
       // Consumer group baru membaca riwayat bus dari awal — hanya putaran hari ini (WIB) yang relevan.
       const today = (await tx.query(`SELECT ($1::timestamptz AT TIME ZONE 'Asia/Jakarta')::date = ${TODAY} AS ok`, [e.payload.at])).rows[0]?.ok;
       if (!today) return;

@@ -17,3 +17,4 @@ export * from './share.js';
 export * from './pro.js';
 export * from './royalty.js';
 export * from './offline.js';
+export * from './offline-plays.js';

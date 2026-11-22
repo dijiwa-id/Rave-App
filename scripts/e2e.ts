@@ -1840,11 +1840,12 @@ console.log('\n▶ Akses per peran (fan, artis, manajer, promotor, admin, Super 
 }
 
 // ---------------- Unduhan offline Premium (P-7, ADR-0004): iam ↔ catalog ↔ playback ----------------
-console.log('\n▶ Unduhan offline Premium (perangkat, lisensi, berkas terenkripsi, pencabutan)');
+console.log('\n▶ Unduhan offline Premium (perangkat, lisensi, berkas terenkripsi, pencabutan, laporan putar offline)');
 {
   const { createHash, generateKeyPairSync } = await import('node:crypto');
   const SA = (await login(SEED.emails.superadmin)).access_token;
   const P = (await login(SEED.emails.premium)).access_token;
+  let offlineReport: { deviceId: string; licenseId: string; t0: number } | null = null;
   const keyOf = () => (generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({ format: 'der', type: 'spki' }) as Buffer).toString('base64');
   const off = await call(P, 'POST', '/v1/me/devices', { platform: 'desktop', name: 'E2E PC', public_key: keyOf() });
   check('offline: flag mati (default) → daftar perangkat 403 offline_disabled', off.status === 403 && off.data?.code === 'offline_disabled', [off.status, off.data?.code]);
@@ -1878,15 +1879,56 @@ console.log('\n▶ Unduhan offline Premium (perangkat, lisensi, berkas terenkrip
         check('offline: berkas tanpa tanda tangan → 403', unsigned.status === 403, unsigned.status);
         const again = await call(P, 'POST', '/v1/offline/licenses', { device_id: dev.data?.id, track_id: offlineTrackId });
         check('offline: permintaan ulang idempoten (200, lisensi sama)', again.status === 200 && again.data?.id === lic.data.id, [again.status]);
+        // Laporan putar offline (T6): idempoten per (device_id, seq), tumpang tindih ditolak, played_ms dipangkas ke durasi.
+        const iso = (t: number) => new Date(t).toISOString();
+        // Putar harus setelah lisensi terbit (lebih awal → before_license); jalur dibuat rapat agar semuanya sebelum pencabutan.
+        const t0 = Date.parse(lic.data.issued_at) + 1000;
+        const play = (seq: number, at: number, played_ms: number) => ({ seq, license_id: lic.data.id, track_id: offlineTrackId, started_at: iso(at), played_ms });
+        const batch = { device_id: dev.data?.id, plays: [play(1, t0, 60_000), play(2, t0 + 2000, 5000)] }; // [t0, t0+8s) & beririsan
+        const rep = await call(P, 'POST', '/v1/events/offline-plays', batch);
+        check(
+          'offline-plays: putar sah diterima (played_ms dipangkas ke durasi 3 dtk + 5 dtk), putar tumpang tindih → overlap',
+          rep.status === 200 && rep.data?.results?.[0]?.status === 'accepted' && rep.data.results[0].played_ms === 8000 && rep.data.results[1]?.reason === 'overlap',
+          [rep.status, rep.data?.results ?? rep.data?.detail],
+        );
+        const rep2 = await call(P, 'POST', '/v1/events/offline-plays', batch);
+        check('offline-plays: kirim ulang batch yang sama → semua duplicate', rep2.status === 200 && rep2.data?.duplicate === 2 && rep2.data?.accepted === 0, rep2.data?.results);
+        const par = await Promise.all([
+          call(P, 'POST', '/v1/events/offline-plays', { device_id: dev.data?.id, plays: [play(3, t0 + 9000, 2000)] }),
+          call(P, 'POST', '/v1/events/offline-plays', { device_id: dev.data?.id, plays: [play(4, t0 + 9500, 2000)] }),
+        ]);
+        const parSt = par.map((r) => r.data?.results?.[0]?.reason ?? r.data?.results?.[0]?.status).sort().join();
+        check('offline-plays: dua laporan paralel yang tumpang tindih → tepat satu diterima', parSt === 'accepted,overlap', parSt);
+        const foreign = await call(fan.access_token, 'POST', '/v1/events/offline-plays', { device_id: dev.data?.id, plays: [play(9, t0, 6000)] });
+        check('offline-plays: perangkat milik akun lain → 404 device_not_found', foreign.status === 404 && foreign.data?.code === 'device_not_found', [foreign.status, foreign.data?.code]);
+        const wait = t0 + 16_000 - Date.now(); // pencabutan sesudah semua putar uji (t0 … t0+15 dtk)
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
         await call(P, 'DELETE', `/v1/me/devices/${dev.data?.id}`);
         const rc = await until(() => call(P, 'POST', '/v1/offline/recheck', { device_id: dev.data?.id, license_ids: [lic.data.id] }), (r) => r.data?.revoked?.length === 1, 15_000, 500);
         check('offline: perangkat dicabut → recheck melaporkan REVOKED (DEVICE_REVOKED)', rc.data?.revoked?.[0]?.reason === 'DEVICE_REVOKED', rc.data);
+        const late = await call(P, 'POST', '/v1/events/offline-plays', { device_id: dev.data?.id, plays: [play(5, t0 + 12_000, 1000), play(6, Date.now(), 1000)] });
+        const lateSt = (late.data?.results ?? []).map((r: any) => r.reason ?? r.status);
+        check(
+          'offline-plays: perangkat dicabut — putar SEBELUM pencabutan tetap diterima, sesudahnya ditolak',
+          late.status === 200 && lateSt[0] === 'accepted' && ['after_device_revoked', 'after_license'].includes(lateSt[1]),
+          [late.status, lateSt],
+        );
+        offlineReport = { deviceId: dev.data?.id, licenseId: lic.data.id, t0 };
       }
     } else {
       await call(P, 'DELETE', `/v1/me/devices/${dev.data?.id}`);
     }
   } finally {
     await call(SA, 'POST', '/v1/admin/platform/settings/reset', { keys: ['download.enabled'], reason: 'selesai uji e2e unduhan offline' });
+  }
+  // Fitur dimatikan lagi: laporan putar dari lisensi yang sah TETAP diterima (dibayar ke artis — ADR-0004).
+  if (offlineReport && offlineTrackId) {
+    await new Promise((r) => setTimeout(r, 2000)); // propagasi pengaturan
+    const r = await call(P, 'POST', '/v1/events/offline-plays', {
+      device_id: offlineReport.deviceId,
+      plays: [{ seq: 7, license_id: offlineReport.licenseId, track_id: offlineTrackId, started_at: new Date(offlineReport.t0 + 14_000).toISOString(), played_ms: 1000 }],
+    });
+    check('offline-plays: download.enabled mati → laporan putar sah tetap diterima', r.status === 200 && r.data?.results?.[0]?.status === 'accepted', [r.status, r.data?.results ?? r.data?.detail]);
   }
 }
 

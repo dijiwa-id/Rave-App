@@ -19,7 +19,7 @@
 | `/v1/auth`, `/v1/me`, `/v1/orgs`, `/v1/waitlist`, `/v1/admin/iam` | iam | 4001 | `iam` |
 | `/v1/catalog`, `/v1/studio`, `/v1/admin/qc` | catalog | 4002 | `catalog` |
 | `/v1/library` | library | 4003 | `library` |
-| `/v1/playback`, `/v1/events/play`, `/v1/analytics`, `/v1/offline` | playback | 4004 | `playback` |
+| `/v1/playback`, `/v1/events/play`, `/v1/events/offline-plays`, `/v1/analytics`, `/v1/offline` | playback | 4004 | `playback` |
 | `/v1/booking`, `/v1/admin/disputes` | booking | 4005 | `booking` |
 | `/v1/finance`, `/v1/webhooks/pg`, `/v1/admin/finance` | finance | 4006 | `finance` |
 | `/v1/ticketing` | ticketing | 4007 | `ticketing` |
@@ -238,6 +238,7 @@ Audit: `podcast.show.create|update|delete|hide|unhide`, `podcast.episode.create|
 | `POST /v1/playback/sessions` | opsional | `{ track_id? , episode_id?, quality: "auto"\|"low"\|"normal"\|"high"\|"lossless" }` | `PlaybackSession` — anonim → `preview_only: true` (30 dtk); episode premium tanpa premium → 402. **`high` (AAC 320) & `lossless` (FLAC) khusus Premium**: non-Premium/anonim diturunkan ke `normal` (AAC 160) dengan `quality_capped: "premium"\|"preview"`; `codec_label` mengikuti berkas yang benar-benar diputar (mis. `FLAC 24/96`). Master lossless tanpa rendisi standar → 503 untuk non-Premium (tidak pernah membocorkan FLAC). |
 | `GET /v1/playback/stream/:sessionId` | – (URL bertanda tangan `?exp&sig`) | | 302 ke sumber media |
 | `POST /v1/events/play` | opsional | `{ events: { session_id, track_id?, episode_id?, type: "start"\|"progress"\|"complete"\|"skip", position_ms, played_ms, at }[] }` | `{ accepted: n, qualified: n }` (qualified ≥ 30 dtk → event `playback.stream.qualified`) |
+| `POST /v1/events/offline-plays` | ✓ | putar dari unduhan offline (Premium) — lihat §12 | `{ results: { seq, status: "accepted"\|"duplicate"\|"rejected" }[] }` |
 | `GET /v1/analytics/artists/:artistId/summary` | pemilik/admin | `days=28` | `ArtistAnalytics` |
 | `GET /v1/analytics/artists/:artistId/export.csv` | pemilik/admin | `days` | CSV |
 
@@ -711,11 +712,59 @@ LicensePayload = { v: 1, typ: "rave.offline.license", license_id, user_id, devic
   key: { alg: "ECDH-ES+HKDF-SHA256+A256GCM", epk, iv, ct }, issued_at, expires_at, recheck_at }
 ```
 
+### 12.1 Laporan putar offline — `POST /v1/events/offline-plays` (T6)
+
+Perangkat mengirim putar dari unduhan saat online lagi (boleh berkali-kali; kirim ulang aman). **Tidak** di-gate
+`download.enabled`: putar dari lisensi yang sah tetap dibayar ke artis walau fitur dimatikan. Tetap dilayani saat mode
+pemeliharaan. Putar yang lolos menjadi qualified stream lewat logika yang SAMA dengan `POST /v1/events/play`
+(ambang `royalty.qualified_stream_seconds`, fraudCheck `RATE_LIMIT`/`LOOP_31S`, agregat, pendengar harian), dengan sumber
+`offline` dan dihitung sebagai stream Premium (tanpa iklan).
+
+```ts
+// Request (≤ 200 putar per batch; satu dari track_id / episode_id)
+{ device_id: uuid,
+  plays: { seq: int ≥ 0 /* penghitung monoton per perangkat — kunci idempotensi (device_id, seq) */,
+           license_id: uuid, track_id?: uuid, episode_id?: uuid,
+           started_at: ISO-8601 dengan offset /* jam perangkat saat mulai putar */,
+           played_ms: int 0..86 400 000 }[] }
+// 200
+{ device_id, received_at, accepted: n, duplicate: n, rejected: n, qualified: n,
+  results: ( { seq, status: "accepted", qualified: boolean, played_ms /* setelah dipangkas */ }
+           | { seq, status: "duplicate", original: "accepted"|"rejected", reason: string|null }
+           | { seq, status: "rejected", reason: OfflinePlayReject } )[] /* urutan = urutan request */ }
+```
+
+| `reason` | Kapan | Disimpan* |
+|---|---|---|
+| `license_not_found` | lisensi tidak ada / milik akun atau perangkat lain | tidak |
+| `license_mismatch` | lisensi untuk konten lain | ya |
+| `content_not_found` | konten sudah dihapus dari katalog | ya |
+| `before_license` | `started_at` < lisensi pertama kali terbit (`created_at`; perpanjangan tidak menggeser batas) | ya |
+| `after_license` | `started_at` ≥ `min(expires_at, revoked_at)` lisensi | ya |
+| `after_device_revoked` | `started_at` ≥ waktu perangkat dicabut | ya |
+| `in_future` | `started_at` atau `started_at + played_ms` > sekarang + 5 menit | ya |
+| `too_old` | `started_at` < sekarang − `download.report_max_age_days` (default 35) | ya |
+| `overlap` | beririsan > 1 dtk dengan putar lain yang diterima di perangkat yang sama (atau mulai di ms yang sama) | ya |
+| `daily_limit` | total putar perangkat di hari kalender WIB `started_at` > 24 jam | ya |
+
+\* Disimpan = seq terpakai; kirim ulang seq itu → `duplicate` dengan `original: "rejected"` dan alasan yang sama.
+`played_ms` dipangkas ke durasi konten + 5 dtk (durasi tidak diketahui → apa adanya; nilai asli disimpan untuk audit).
+Putar < ambang qualified atau episode = `accepted` dengan `qualified: false` (tercatat, bukan stream royalti lagu).
+Stream yang ditandai fraud = `accepted` dengan `qualified: false` (dikecualikan dari royalti, seperti jalur online).
+Galat level batch: `404 device_not_found` (perangkat tidak ada / milik akun lain — perangkat yang sudah dicabut tetap
+boleh melapor), `400` body tidak valid / > 200 putar, `401` tanpa token.
+
+**Periode royalti** (ADR-0004 §Putar offline & royalti): stream offline masuk periode saat laporan **diterima**
+(`qualified_streams.at = received_at`), bukan saat didengar; periode yang sudah ditutup/dihitung tidak pernah dibuka ulang.
+Agregat analitik & pendengar harian memakai tanggal WIB saat didengar (`played_at`). Event `playback.stream.qualified`
+untuk putar offline membawa `at` = waktu dengar, `source: "offline"`, `receivedAt` (aditif).
+
 Alur klien: buat pasangan ECDH P-256 sekali per instalasi → `POST /v1/me/devices` → `POST /v1/offline/licenses` (ulangi
 selama 202) → unduh `download.url` (boleh `Range`/lanjut) → cek `sha256` → verifikasi lisensi dengan `GET /v1/offline/pubkey`
 → buka `key` dengan kunci privat perangkat (AAD `rave-ofl1:<track|episode>:<id>`) → dekripsi potongan `RAVEOFL1` saat
 memutar. Setelah `recheck_at` dan online: `POST /v1/offline/recheck` dengan semua `license_id` perangkat; hapus berkas
-untuk `revoked`/`expired`/`unknown`. Jangan memutar setelah `expires_at`. Recheck tetap dilayani saat mode pemeliharaan.
+untuk `revoked`/`expired`/`unknown`. Simpan log putar lokal dengan `seq` naik per perangkat; saat online kirim
+`POST /v1/events/offline-plays` (≤ 200 per batch) dan hapus entri yang dijawab `accepted`/`duplicate`/`rejected` (semua final). Jangan memutar setelah `expires_at`. Recheck tetap dilayani saat mode pemeliharaan.
 
 Studio: `offline_allowed` (bool) di Track (`PATCH /v1/studio/tracks/:id` — boleh pada rilis yang sudah tayang bila
 body hanya `{ offline_allowed }`) dan Episode (`PATCH /v1/studio/podcasts/:id/episodes/:episodeId`, tidak memicu tinjauan

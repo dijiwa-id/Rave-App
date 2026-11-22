@@ -515,6 +515,7 @@ export const SETTINGS: SettingDef[] = [
     public: true,
     consumers: ['catalog', 'web'],
   },
+  { key: 'download.report_max_age_days', group: 'download', label: 'Batas umur laporan putar offline', description: 'Putar offline yang dilaporkan perangkat lebih tua dari ini (dihitung dari waktu mulai putar) ditolak dan tidak dihitung royalti. Default = masa berlaku lisensi 30 hari + margin 5 hari; jangan lebih kecil dari Masa berlaku lisensi.', type: 'number', default: 35, min: 7, max: 120, unit: 'hari', consumers: ['playback'] },
 
   // ---- Refund tiket ----
   { key: 'refund.event_cancel_sla_days', group: 'refund', label: 'Batas waktu refund event batal', description: 'Janji ke pembeli: dana kembali paling lambat sekian hari sejak event dibatalkan. Refund ini selalu penuh, termasuk biaya layanan, dan diajukan otomatis (sandbox: dana langsung kembali).', type: 'number', default: 14, min: 1, max: 30, unit: 'hari', public: true, consumers: ['ticketing', 'finance', 'web'] },

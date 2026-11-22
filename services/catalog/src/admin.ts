@@ -482,6 +482,24 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
       return e;
     });
 
+    // Pelaporan putar offline (playback, P-7 T6): artis & durasi banyak konten sekaligus (2 query). Sengaja TANPA filter
+    // status: putar dari lisensi yang sah tetap dibayar walau rilis kemudian ditarik/episode disembunyikan.
+    s.post('/internal/playback/meta', async (req) => {
+      const b = z
+        .object({ tracks: z.array(z.string().uuid()).max(200).default([]), episodes: z.array(z.string().uuid()).max(200).default([]) })
+        .parse(req.body ?? {});
+      const tracks: Record<string, { artist_id: string; duration_ms: number }> = {};
+      const episodes: Record<string, { duration_ms: number }> = {};
+      if (b.tracks.length) {
+        for (const r of await db.query(`SELECT id, artist_id, duration_ms FROM tracks WHERE id = ANY($1::uuid[])`, [b.tracks]))
+          tracks[r.id] = { artist_id: r.artist_id, duration_ms: Number(r.duration_ms ?? 0) };
+      }
+      if (b.episodes.length) {
+        for (const r of await db.query(`SELECT id, duration_ms FROM episodes WHERE id = ANY($1::uuid[])`, [b.episodes])) episodes[r.id] = { duration_ms: Number(r.duration_ms ?? 0) };
+      }
+      return { tracks, episodes };
+    });
+
     // File di bucket uploads yang masih dipakai (panel storage Super Admin → deteksi file yatim).
     // Upload < 24 jam dianggap dipakai: mungkin masih dalam draf yang sedang disusun.
     s.get('/internal/media/references', async () => {

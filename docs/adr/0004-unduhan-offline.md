@@ -20,6 +20,7 @@
 | `download.rate_per_user_hour` | 60 | Lisensi BARU per akun per jam (perpanjangan tidak dihitung) → 429 `rate_limited`. |
 | `download.podcast_enabled` | true | Episode unggahan boleh diunduh (episode embed tidak pernah). Live tidak pernah. |
 | `download.quality` | `normal` (AAC 160) | Rendisi yang dienkripsi (`low` = AAC 64). Master & Lossless tidak pernah. |
+| `download.report_max_age_days` | 35 | Laporan putar offline lebih tua dari ini (dari `started_at`) ditolak `too_old`. |
 
 Hak = Premium aktif menurut IAM (`memberActive`) ∧ paket di `download.tiers` ∧ tidak ditangguhkan ∧ (allowlist kosong
 ∨ terdaftar). Masa tenggang gagal bayar (`subscription.grace_days`) diwarisi dari IAM: lisensi mengikuti keputusan
@@ -39,7 +40,7 @@ Izin konten: `tracks.offline_allowed` / `episodes.offline_allowed` (default true
   `catalog.offline.revoked` saat rilis ditarik, `offline_allowed` dimatikan, episode/acara disembunyikan, tidak
   tayang lagi, berganti audio, atau dihapus.
 - **playback**: lisensi (`offline_licenses`), tanda tangan Ed25519, recheck, konsumen pencabutan, job kedaluwarsa,
-  dan skema `offline_plays` (pelaporan putar offline — T6, rave-money).
+  dan pelaporan putar offline (`offline_plays`, `POST /v1/events/offline-plays` — lihat §Putar offline).
 
 ### Skema kripto (persis; semua tersedia di node:crypto, WebCrypto, dan paket kripto Flutter)
 1. **Kunci perangkat**: perangkat membuat pasangan ECDH P-256 (kunci privat tidak pernah keluar; simpan di keychain /
@@ -73,6 +74,32 @@ Izin konten: `tracks.offline_allowed` / `episodes.offline_allowed` (default true
 - Pencabutan eager lewat event (idempoten, di transaksi handler): `iam.user.member_changed` (bukan Premium / paket
   tidak diizinkan), `iam.device.revoked`, `catalog.offline.revoked`. Recheck memeriksa ulang ke sumber (iam & catalog)
   sehingga pencabutan tetap benar walau event terlambat. Job `offline-expire` (tiap jam, batch kecil) menandai EXPIRED.
+
+### Putar offline (T6) — `POST /v1/events/offline-plays`
+- Perangkat mencatat putar lokal dengan `seq` monoton per perangkat dan mengirim batch ≤ 200 saat online. Idempoten:
+  `UNIQUE(device_id, seq)` di `offline_plays`; kirim ulang → `duplicate` (hasil pertama berlaku, tanpa efek kedua).
+- Sah bila: perangkat milik pengguna (boleh sudah dicabut, asal `started_at` < waktu cabut); lisensi milik pengguna +
+  perangkat + konten yang sama; `started_at` ∈ [lisensi pertama terbit (`created_at`), `min(expires_at, revoked_at)`);
+  tidak di masa depan (> 5 menit skew); tidak lebih tua dari `download.report_max_age_days` (default 35 = TTL 30 + margin);
+  tidak beririsan dengan putar lain yang diterima di perangkat itu (toleransi 1 dtk); total per perangkat per hari
+  kalender WIB ≤ 24 jam. `played_ms` dipangkas ke durasi + 5 dtk (sama dengan online). Batas bawah memakai `created_at`,
+  bukan `issued_at`, karena `POST /v1/offline/licenses` ulang memperbarui `issued_at` baris yang sama — putar sebelum
+  perpanjangan tetap sah.
+- Yang lolos masuk ke **logika qualified stream yang sama** dengan jalur online (`recordQualified` di
+  `services/playback/src/events.ts`): ambang `royalty.qualified_stream_seconds`, fraudCheck, `daily_listeners`,
+  agregat (`source = 'offline'`), event `playback.stream.qualified` (`source: 'offline'`). Lagu offline = stream Premium
+  tanpa iklan (konsumen ads mengabaikannya). Episode dicatat, bukan stream royalti lagu (sama dengan online).
+- fraudCheck dihitung menurut **waktu dengar**: `RATE_LIMIT` menghitung stream qualified pada 1 jam sebelum `started_at`
+  (kolom baru `qualified_streams.played_at`), `LOOP_31S` melihat sesi online + putar offline qualified sebelum
+  `started_at`. Satu-satunya perubahan jalur online: hitungan `RATE_LIMIT` memakai `coalesce(played_at, at)` — identik
+  untuk data online (played_at = at), dan sinkronisasi ratusan putar offline tidak lagi membuat stream online berikutnya
+  dianggap fraud.
+- Konkurensi: seluruh batch dalam satu transaksi + outbox, diserialkan `pg_advisory_xact_lock` per pengguna (dua batch
+  paralel dari perangkat yang sama / perangkat lain akun yang sama tidak bisa sama-sama lolos tumpang tindih / ambang).
+  Panggilan iam (pemilik & waktu cabut perangkat) dan catalog (artis & durasi, `/internal/playback/meta`, tanpa filter
+  status) dilakukan sebelum transaksi.
+- **Keputusan: endpoint tetap menerima laporan walau `download.enabled` dimatikan.** Mematikan fitur menghentikan
+  unduhan & lisensi baru, tetapi putar yang sudah terjadi dari lisensi yang sah tetap harus dibayar ke artis.
 
 ## Batas kejujuran (wajib dikomunikasikan)
 - Ini **perlindungan lisensi, BUKAN DRM penuh**. Perangkat sah memegang kunci yang bisa membuka berkasnya; perangkat

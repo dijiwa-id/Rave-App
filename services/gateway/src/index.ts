@@ -55,6 +55,7 @@ export const ROUTES: [prefix: string, upstream: Upstream][] = [
   ['/v1/admin/library', 'library'],
   ['/v1/playback', 'playback'],
   ['/v1/events/play', 'playback'],
+  ['/v1/events/offline-plays', 'playback'], // laporan putar unduhan offline (P-7 T6)
   ['/v1/analytics', 'playback'],
   ['/v1/offline', 'playback'], // unduhan offline Premium (P-7)
   ['/v1/booking', 'booking'],
@@ -103,6 +104,8 @@ const PLAYBACK_WRITES = [
   /^\/v1\/events\/play/,
   // cek ulang lisensi unduhan offline: pendengar offline tidak boleh kehilangan unduhan karena pemeliharaan
   /^\/v1\/offline\/recheck$/,
+  // laporan putar offline = dasar royalti artis; tidak boleh hilang karena pemeliharaan
+  /^\/v1\/events\/offline-plays$/,
   /^\/v1\/live\/streams\/[^/]+\/(playback|heartbeat)$/,
   // siaran browser yang sedang berjalan tidak boleh putus karena pemeliharaan
   /^\/v1\/live\/studio\/streams\/[^/]+\/ingest\//,

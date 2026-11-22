@@ -42,7 +42,11 @@ export interface DomainEvents {
   'library.track.liked': { userId: string; trackId: string };
 
   // Playback & analytics
-  'playback.stream.qualified': { userId: string; trackId: string; artistId: string; city: string | null; playedMs: number; at: string };
+  /**
+   * `at` = saat lagu didengar (online: saat qualified; offline: started_at dari perangkat). `source: 'offline'` = putar
+   * dari unduhan (Premium, tanpa iklan) yang dilaporkan belakangan pada `receivedAt` (aditif; tanpa field = online).
+   */
+  'playback.stream.qualified': { userId: string; trackId: string; artistId: string; city: string | null; playedMs: number; at: string; source?: 'online' | 'offline'; receivedAt?: string };
 
   // Booking (off-air)
   'booking.inquiry.created': { bookingId: string; artistId: string; promotorOrgId: string; eventDate: string; city: string; budget: number };

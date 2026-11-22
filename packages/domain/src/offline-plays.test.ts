@@ -1,0 +1,86 @@
+import { describe, expect, it } from 'vitest';
+import {
+  capPlayedMs,
+  exceedsDailyCap,
+  licenseContent,
+  licenseOwnership,
+  OFFLINE_CLOCK_SKEW_MS,
+  overlapsAny,
+  playWindow,
+  wibDate,
+  type OfflinePlayLicense,
+} from './offline-plays.js';
+import { settingDefaults, SETTINGS_BY_KEY } from './settings.js';
+
+const H = 3600_000;
+const DAY = 24 * H;
+const NOW = Date.parse('2026-11-22T05:00:00Z'); // 12:00 WIB
+const lic = (o: Partial<OfflinePlayLicense> = {}): OfflinePlayLicense => ({
+  user_id: 'u1',
+  device_id: 'd1',
+  track_id: 't1',
+  episode_id: null,
+  created_at: new Date(NOW - 10 * DAY),
+  expires_at: new Date(NOW + 20 * DAY),
+  revoked_at: null,
+  ...o,
+});
+const rules = { now: NOW, maxAgeMs: 35 * DAY };
+
+describe('putar offline: aturan murni (P-7 T6)', () => {
+  it('kepemilikan & konten lisensi', () => {
+    expect(licenseOwnership(null, 'u1', 'd1')).toBe('license_not_found');
+    expect(licenseOwnership(lic({ user_id: 'u2' }), 'u1', 'd1')).toBe('license_not_found');
+    expect(licenseOwnership(lic({ device_id: 'd2' }), 'u1', 'd1')).toBe('license_not_found');
+    expect(licenseOwnership(lic(), 'u1', 'd1')).toBeNull();
+    expect(licenseContent(lic(), { track_id: 't1' })).toBeNull();
+    expect(licenseContent(lic(), { track_id: 't2' })).toBe('license_mismatch');
+    expect(licenseContent(lic(), { episode_id: 't1' })).toBe('license_mismatch');
+  });
+
+  it('jendela waktu: [terbit, min(kedaluwarsa, dicabut)), perangkat, masa depan ± 5 menit, batas umur', () => {
+    const w = (start: number, l = lic(), dev: Date | null = null, played_ms = 60_000) => playWindow({ start, played_ms }, l, dev, rules);
+    expect(w(NOW - DAY)).toBeNull();
+    expect(w(NOW - 11 * DAY)).toBe('before_license');
+    expect(w(NOW - DAY, lic({ expires_at: new Date(NOW - 2 * DAY) }))).toBe('after_license');
+    expect(w(NOW - 3 * DAY, lic({ expires_at: new Date(NOW - 2 * DAY) }))).toBeNull();
+    expect(w(NOW - DAY, lic({ revoked_at: new Date(NOW - DAY) }))).toBe('after_license'); // tepat saat dicabut = tidak sah
+    expect(w(NOW - DAY - 1, lic({ revoked_at: new Date(NOW - DAY) }))).toBeNull();
+    expect(w(NOW - DAY, lic(), new Date(NOW - 2 * DAY))).toBe('after_device_revoked');
+    expect(w(NOW + OFFLINE_CLOCK_SKEW_MS - 60_000, lic(), null, 30_000)).toBeNull();
+    expect(w(NOW + OFFLINE_CLOCK_SKEW_MS + 1)).toBe('in_future');
+    expect(w(NOW - 10_000, lic(), null, 10 * 60_000)).toBe('in_future'); // berakhir 10 menit di masa depan
+    expect(w(NOW - 36 * DAY, lic({ created_at: new Date(NOW - 40 * DAY) }))).toBe('too_old');
+  });
+
+  it('played_ms dipangkas ke durasi + 5 dtk (durasi tidak diketahui → apa adanya)', () => {
+    expect(capPlayedMs(999_999, 200_000)).toBe(205_000);
+    expect(capPlayedMs(100_000, 200_000)).toBe(100_000);
+    expect(capPlayedMs(400_000, 0)).toBe(400_000);
+    expect(capPlayedMs(-5, 200_000)).toBe(0);
+  });
+
+  it('tumpang tindih: berurutan sah, toleransi 1 dtk, mulai sama selalu bentrok', () => {
+    const acc = [{ start: 0, played_ms: 180_000 }];
+    expect(overlapsAny({ start: 180_000, played_ms: 60_000 }, acc)).toBe(false);
+    expect(overlapsAny({ start: 179_500, played_ms: 60_000 }, acc)).toBe(false);
+    expect(overlapsAny({ start: 170_000, played_ms: 60_000 }, acc)).toBe(true);
+    expect(overlapsAny({ start: -60_000, played_ms: 120_000 }, acc)).toBe(true); // sebelum & menimpa awal
+    expect(overlapsAny({ start: 0, played_ms: 0 }, acc)).toBe(true);
+  });
+
+  it('hari kalender WIB & batas 24 jam per perangkat', () => {
+    expect(wibDate(Date.parse('2026-11-21T16:59:59Z'))).toBe('2026-11-21');
+    expect(wibDate(Date.parse('2026-11-21T17:00:00Z'))).toBe('2026-11-22');
+    const d0 = Date.parse('2026-11-21T17:00:00Z'); // 22 Nov 00:00 WIB
+    const acc = Array.from({ length: 23 }, (_, i) => ({ start: d0 + i * H, played_ms: H }));
+    expect(exceedsDailyCap({ start: d0 + 23 * H, played_ms: H }, acc)).toBe(false); // tepat 24 jam
+    expect(exceedsDailyCap({ start: d0 + 23 * H, played_ms: H + 1 }, acc)).toBe(true);
+    expect(exceedsDailyCap({ start: d0 + 24 * H, played_ms: H }, acc)).toBe(false); // hari berikutnya
+  });
+
+  it('pengaturan download.report_max_age_days: default 35 (TTL 30 + margin), hanya playback', () => {
+    expect(settingDefaults()['download.report_max_age_days']).toBe(35);
+    expect(SETTINGS_BY_KEY['download.report_max_age_days'].consumers).toEqual(['playback']);
+  });
+});
