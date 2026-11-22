@@ -1951,5 +1951,39 @@ console.log('\n▶ Unduhan offline Premium (perangkat, lisensi, berkas terenkrip
   check('laporan Unduhan offline: bukan Super Admin → 403', dlRepFan.status === 403, dlRepFan.status);
 }
 
+// ---------------- M3 (P-7): peran anggota manajemen di org artis kelolaan mengikuti peran di manajemen ----------------
+console.log('\n▶ Jalur manajemen → org artis: peran efektif (M3)');
+{
+  const MO = (await login(SEED.emails.manager)).access_token; // OWNER Nada Manajemen
+  const mgmtOrg = SEED.orgs.nadaManagement;
+  const artistOrg = SEED.orgs.senjaArtist;
+  const claimOf = async (tok: string) => ((await call(tok, 'GET', '/v1/me')).data?.orgs ?? []).find((o: any) => o.id === artistOrg)?.role;
+  check('M3: OWNER manajemen → klaim ADMIN di org artis kelolaan', (await claimOf(MO)) === 'ADMIN');
+  if (offlineTrackId) {
+    const ok = await call(MO, 'PATCH', `/v1/studio/tracks/${offlineTrackId}`, { offline_allowed: true });
+    check('M3: OWNER manajemen boleh mengubah offline_allowed artis kelolaan (200)', ok.status === 200, [ok.status, ok.data?.detail]);
+  }
+  const okPro = await call(MO, 'DELETE', `/v1/pro/orgs/${artistOrg}/scheduled-change`);
+  check('M3: OWNER manajemen boleh mengelola RAVE Pro artis kelolaan (200)', okPro.status === 200, [okPro.status, okPro.data?.detail]);
+  for (const [role, want] of [
+    ['VIEWER', 'VIEWER'],
+    ['FINANCE', 'VIEWER'],
+  ] as const) {
+    const email = `e2e-mgmt-${role.toLowerCase()}-${Date.now()}@rave.test`;
+    const inv = await call(MO, 'POST', `/v1/orgs/${mgmtOrg}/members`, { email, role });
+    check(`M3: OWNER manajemen mengundang ${role} (201)`, inv.status === 201, [inv.status, inv.data?.detail]);
+    const T = (await login(email)).access_token;
+    check(`M3: ${role} manajemen → klaim ${want} di org artis kelolaan (bukan ADMIN)`, (await claimOf(T)) === want, await claimOf(T));
+    if (offlineTrackId) {
+      const r = await call(T, 'PATCH', `/v1/studio/tracks/${offlineTrackId}`, { offline_allowed: false });
+      check(`M3: ${role} manajemen tidak bisa mematikan offline_allowed (403)`, r.status === 403, [r.status, r.data?.detail]);
+    }
+    const pro = await call(T, 'DELETE', `/v1/pro/orgs/${artistOrg}/scheduled-change`);
+    check(`M3: ${role} manajemen tidak bisa mengelola RAVE Pro org artis (403)`, pro.status === 403, [pro.status, pro.data?.detail]);
+    const pay = await call(T, 'POST', '/v1/finance/payouts', { party_id: artistOrg, amount: 100_000, bank_account: { bank: 'BCA', number: '5555666677', holder: 'Penyusup' } }, true);
+    check(`M3: ${role} manajemen tidak bisa menarik dana wallet artis (403 bukan anggota berwenang)`, pay.status === 403 && !/Verifikasi akun/.test(pay.data?.detail ?? ''), [pay.status, pay.data?.detail]);
+  }
+}
+
 console.log(`\n${failed ? '\x1b[31m' : '\x1b[32m'}${passed} lulus, ${failed} gagal\x1b[0m\n`);
 process.exit(failed ? 1 : 0);

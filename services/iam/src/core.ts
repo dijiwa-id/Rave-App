@@ -52,14 +52,36 @@ export interface OrgRow {
   pro_until?: string | Date | null;
 }
 
-/** Org langsung + org ARTIST yang dikelola org MANAGEMENT milik user (peran efektif ADMIN). */
+/**
+ * Peran efektif anggota org MANAGEMENT di org ARTIST yang dikelola (M3, review keamanan P-7). Tidak pernah melebihi
+ * peran di manajemen dan tidak pernah memberi hak yang tidak dimiliki sebelumnya:
+ * - OWNER/ADMIN manajemen → ADMIN (bukan OWNER: aksi khusus pemilik artis, mis. penarikan dana, tetap milik artis).
+ * - MEMBER → MEMBER (kerja studio/podcast/acara seperti anggota biasa).
+ * - FINANCE → VIEWER: FINANCE di org artis membuka penarikan saldo wallet artis — tidak diturunkan lewat manajemen.
+ * - VIEWER → VIEWER.
+ */
+export function managedRole(managementRole: string): OrgClaim['role'] {
+  if (managementRole === 'OWNER' || managementRole === 'ADMIN') return 'ADMIN';
+  if (managementRole === 'MEMBER') return 'MEMBER';
+  return 'VIEWER';
+}
+
+/** Peringkat untuk memilih peran tertinggi di antara beberapa jalur manajemen (hanya ADMIN/MEMBER/VIEWER). */
+const MANAGED_RANK: Record<string, number> = { VIEWER: 1, MEMBER: 2, ADMIN: 3 };
+
+/**
+ * Org langsung + org ARTIST yang dikelola org MANAGEMENT milik user (peran efektif: `managedRole`).
+ * Beberapa org manajemen mengelola artis yang sama → peran tertinggi. Keanggotaan langsung di org artis tetap dipakai
+ * (direct = true); hanya ditingkatkan bila peran langsungnya VIEWER/MEMBER dan jalur manajemen memberi peran yang
+ * lebih tinggi (ADMIN ⊇ MEMBER ⊇ VIEWER). OWNER/FINANCE langsung tidak pernah ditimpa (FINANCE tidak sebanding).
+ */
 export async function loadOrgs(q: Q, userId: string): Promise<OrgRow[]> {
   const direct = await q.query(
     `SELECT o.id, o.type, o.name, m.role, o.artist_id, o.pro_plan, o.pro_status, o.pro_until, true AS direct FROM memberships m JOIN orgs o ON o.id = m.org_id WHERE m.user_id = $1 ORDER BY m.created_at`,
     [userId],
   );
   const managed = await q.query(
-    `SELECT DISTINCT a.id, a.type, a.name, 'ADMIN' AS role, a.artist_id, a.pro_plan, a.pro_status, a.pro_until, false AS direct
+    `SELECT a.id, a.type, a.name, m.role AS management_role, a.artist_id, a.pro_plan, a.pro_status, a.pro_until
        FROM memberships m
        JOIN orgs mo ON mo.id = m.org_id AND mo.type = 'MANAGEMENT'
        JOIN management_artists ma ON ma.management_org_id = mo.id AND (ma.valid_to IS NULL OR ma.valid_to >= current_date)
@@ -67,8 +89,19 @@ export async function loadOrgs(q: Q, userId: string): Promise<OrgRow[]> {
       WHERE m.user_id = $1`,
     [userId],
   );
-  const seen = new Set(direct.rows.map((r) => r.id));
-  return [...direct.rows, ...managed.rows.filter((r) => !seen.has(r.id))];
+  const best = new Map<string, OrgRow>();
+  for (const { management_role, ...r } of managed.rows) {
+    const role = managedRole(management_role);
+    const cur = best.get(r.id);
+    if (!cur || MANAGED_RANK[role] > MANAGED_RANK[cur.role]) best.set(r.id, { ...r, role, direct: false });
+  }
+  const out: OrgRow[] = direct.rows.map((d) => {
+    const m = best.get(d.id);
+    best.delete(d.id);
+    const upgradable = d.role === 'VIEWER' || d.role === 'MEMBER';
+    return m && upgradable && MANAGED_RANK[m.role] > MANAGED_RANK[d.role] ? { ...d, role: m.role } : d;
+  });
+  return [...out, ...best.values()];
 }
 
 const ROLE_BY_ORG: Record<string, PlatformRole> = {

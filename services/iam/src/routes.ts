@@ -32,6 +32,7 @@ import {
   VERIFY_MIN_AGE,
   encrypt,
   issueTokens,
+  managedRole,
   mask,
   normalizeDestination,
   orgOut,
@@ -97,7 +98,7 @@ async function publishManagerAccess(tx: Client, managementOrgId: string, artistO
   const members = await tx.query(`SELECT user_id, role FROM memberships WHERE org_id = $1`, [managementOrgId]);
   for (const a of rels.rows)
     for (const m of members.rows)
-      await publish(tx, 'iam.org.member_added', a.id, { orgId: a.id, type: 'ARTIST', userId: m.user_id, role: 'ADMIN', artistId: a.artist_id });
+      await publish(tx, 'iam.org.member_added', a.id, { orgId: a.id, type: 'ARTIST', userId: m.user_id, role: managedRole(m.role), artistId: a.artist_id });
 }
 
 export async function routes(app: FastifyInstance, { db }: ServiceContext) {
@@ -636,7 +637,7 @@ export async function routes(app: FastifyInstance, { db }: ServiceContext) {
         if (org.type === 'MANAGEMENT') {
           const rels = await tx.query(`SELECT a.id, a.artist_id FROM management_artists ma JOIN orgs a ON a.id = ma.artist_org_id WHERE ma.management_org_id = $1`, [id]);
           for (const a of rels.rows)
-            await publish(tx, 'iam.org.member_added', a.id, { orgId: a.id, type: 'ARTIST', userId: user.id, role: 'ADMIN', artistId: a.artist_id });
+            await publish(tx, 'iam.org.member_added', a.id, { orgId: a.id, type: 'ARTIST', userId: user.id, role: managedRole(b.role), artistId: a.artist_id });
         }
         await audit(tx, { actorId: req.user!.sub, action: 'org.member.add', entity: 'org', entityId: id, data: { user_id: user.id, role: b.role }, ip: ip(req) });
         return { user_id: user.id, display_name: user.display_name, email: user.email, role: b.role, created_at: ins.rows[0].created_at };

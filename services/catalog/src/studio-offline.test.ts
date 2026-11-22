@@ -61,6 +61,33 @@ describe('studio: offline_allowed per lagu (P-7)', () => {
     expect(d.events).toHaveLength(1);
   });
 
+  // Regresi M3 (jalur manajemen): klaim org artis untuk anggota manajemen kini mengikuti peran di manajemen
+  // (iam loadOrgs/managedRole: OWNER/ADMIN→ADMIN, MEMBER→MEMBER, FINANCE/VIEWER→VIEWER) — dulu selalu ADMIN.
+  const MGMT = '0190a000-0000-7000-8000-0000000000d7';
+  const manager = (mgmtRole: string, artistRole: string) => ({
+    sub: '0190a000-0000-7000-8000-0000000000d6',
+    roles: ['manager' as const],
+    orgs: [
+      { id: MGMT, type: 'MANAGEMENT' as const, role: mgmtRole, artistId: null },
+      { id: 'o1', type: 'ARTIST' as const, role: artistRole, artistId: ARTIST },
+    ],
+  });
+  it.each([
+    ['VIEWER', 'VIEWER'],
+    ['FINANCE', 'VIEWER'],
+    ['MEMBER', 'MEMBER'],
+  ])('anggota %s manajemen (klaim %s di artis kelolaan) → 403, lisensi tidak dicabut', async (m, a) => {
+    const d = db('LIVE');
+    expect((await patch(d, { offline_allowed: false }, manager(m, a) as any)).statusCode).toBe(403);
+    expect(d.track.offline_allowed).toBe(true);
+    expect(d.events).toHaveLength(0);
+  });
+  it.each(['OWNER', 'ADMIN'])('anggota %s manajemen (klaim ADMIN di artis kelolaan) → 200', async (m) => {
+    const d = db('LIVE');
+    expect((await patch(d, { offline_allowed: false }, manager(m, 'ADMIN') as any)).statusCode).toBe(200);
+    expect(d.events).toHaveLength(1);
+  });
+
   it('OWNER/ADMIN org artis LAIN → 403', async () => {
     const d = db('LIVE');
     const user = { ...OWNER, orgs: [{ id: 'o2', type: 'ARTIST' as const, role: 'OWNER' as const, artistId: '0190a000-0000-7000-8000-0000000000ff' }] };
