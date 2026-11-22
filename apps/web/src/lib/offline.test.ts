@@ -23,6 +23,8 @@ describe('offline (unduhan offline web)', () => {
     const msgs = Object.fromEntries(OFFLINE_DENY_CODES.map((c) => [c, `pesan ${c}`])) as Record<OfflineDenyCode, string>;
     expect(offlineErrorText(problem(403, 'offline_disabled'), msgs, 'umum')).toBe('pesan offline_disabled');
     expect(offlineErrorText(problem(500, undefined, 'Server sibuk'), msgs, 'umum')).toBe('Server sibuk');
+    // 502 upstream_error → pesan umum lokal, bukan detail server
+    expect(offlineErrorText(problem(502, 'upstream_error', 'Layanan pendukung bermasalah'), msgs, 'umum')).toBe('umum');
     expect(offlineErrorText({}, msgs, 'umum')).toBe('umum');
   });
 

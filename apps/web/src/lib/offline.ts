@@ -52,6 +52,8 @@ export function offlineDenyCode(err: unknown): OfflineDenyCode | null {
 export function offlineErrorText(err: unknown, messages: Record<OfflineDenyCode, string>, fallback: string): string {
   const code = offlineDenyCode(err);
   if (code) return messages[code];
+  // 502 `upstream_error`: layanan pendukung sedang bermasalah — pakai pesan umum lokal, bukan detail server.
+  if ((err as { problem?: { code?: unknown } } | null)?.problem?.code === 'upstream_error') return fallback;
   const msg = (err as { message?: unknown } | null)?.message;
   return typeof msg === 'string' && msg ? msg : fallback;
 }

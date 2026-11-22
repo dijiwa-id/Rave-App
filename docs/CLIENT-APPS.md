@@ -14,7 +14,7 @@ Backend (gateway `/v1`, kontrak di `docs/API.md`) dipakai bersama; aplikasi klie
 | P-4 | **Versi minimum aplikasi** (pengaturan platform `apps.min_version_*` + header `X-App-Version` di gateway → 426 Upgrade Required) | Paksa update bila kontrak API berubah | P1 |
 | P-5 | **CORS/origin klien desktop** (`tauri://localhost`, `http://tauri.localhost`) di `CORS_ORIGINS` produksi | Tauri memuat UI dari origin lokal, API absolut | P1 |
 | P-6 | **Upload resumable / chunked** untuk master audio besar (saat ini satu `PUT` biner) | Studio desktop & mobile di jaringan tidak stabil | P2 |
-| P-7 | **Unduhan offline Premium** (lisensi per perangkat, batas 5 perangkat dari pengaturan, berkas terenkripsi, kedaluwarsa) — **backend selesai (flag `download.enabled` mati)**: ADR-0004 (perlindungan lisensi, bukan DRM penuh), kontrak `docs/API.md` §12; klien & pelaporan putar offline (T6) menyusul | Fitur Premium; rendisi Premium saat ini hanya URL bertanda tangan | P2 |
+| P-7 | **Unduhan offline Premium** (lisensi per perangkat, batas 5 perangkat dari pengaturan, berkas terenkripsi, kedaluwarsa) — **backend & web selesai (di belakang flag `download.enabled`, rollout via allowlist)**: ADR-0004 (perlindungan lisensi, bukan DRM penuh), kontrak `docs/API.md` §12 (lisensi & perangkat), §12.1 (laporan putar offline → royalti, cutoff saat diterima), §12.2 (laporan Super Admin); web: Pengaturan → Perangkat & unduhan, layanan & laporan di Super Admin. **Klien unduhan desktop (Tauri) & mobile (Flutter) menyusul** — kewajiban klien di ADR-0004 | Fitur Premium; rendisi Premium saat ini hanya URL bertanda tangan | P2 |
 | P-8 | **Deep link & universal link** (`rave.id/app/...` ↔ `rave://`) + `assetlinks.json` / `apple-app-site-association` | Bagikan lagu/playlist/event, tautan e-ticket | P2 |
 
 Catatan entitlement yang sudah berlaku dan wajib dihormati klien: `POST /v1/playback/sessions` mengembalikan
@@ -35,7 +35,7 @@ kedaluwarsa bersama sesi → klien meminta sesi baru saat 403/kedaluwarsa (lihat
 - Promotor: **scanner check-in** dengan antrean offline & sinkronisasi (BRD: check-in offline — belum ada di web).
 - Bahasa ID/EN mengikuti locale akun; tema & branding dari `GET /v1/platform/config`.
 
-Di luar MVP: Artist Studio penuh & Promotor Hub penuh (tetap di web/desktop), unduhan offline (menunggu P-7).
+Di luar MVP: Artist Studio penuh & Promotor Hub penuh (tetap di web/desktop), unduhan offline (P-7: backend siap, klien mobile menyusul).
 
 ### 2.2 Teknologi (usulan, verifikasi versi saat mulai)
 | Kebutuhan | Paket |
