@@ -10,8 +10,13 @@ export interface DomainEvents {
   'iam.kyc.verified': { userId: string; orgId?: string | null; level: 'INDIVIDUAL' | 'BUSINESS' };
   /** Keputusan verifikasi akun (badge Verified): disetujui, ditolak, atau dicabut admin. */
   'iam.verification.decided': { userId: string; outcome: 'APPROVED' | 'REJECTED' | 'REVOKED'; reason: string | null };
-  // Jenis member diubah Super Admin (Free/Individu/Pelajar/Duo); premium = efektif saat perubahan.
-  'iam.user.member_changed': { userId: string; memberType: 'FREE' | 'INDIVIDUAL' | 'STUDENT' | 'DUO'; memberUntil: string | null; premium: boolean };
+  /**
+   * Jenis member berubah (Free/Individu/Pelajar/Duo). `reason` (aditif, P-7): `ADMIN` = diubah Super Admin
+   * (`premium` = jenis berbayar); `EXPIRED` = masa `memberUntil` berakhir alami (job iam `member-expiry`, sekali per masa;
+   * `memberType` tetap jenis terakhir, `premium: false`). Konsumen wajib menilai keaktifan dari `premium` + `memberUntil`;
+   * event lama tanpa `reason` = `ADMIN`.
+   */
+  'iam.user.member_changed': { userId: string; memberType: 'FREE' | 'INDIVIDUAL' | 'STUDENT' | 'DUO'; memberUntil: string | null; premium: boolean; reason?: 'ADMIN' | 'EXPIRED' };
   'iam.waitlist.joined': { email: string; segment: string; city?: string | null };
   /** Perangkat unduhan offline dicabut (pemilik/admin) → playback mencabut semua lisensi perangkat itu (P-7). */
   'iam.device.revoked': { deviceId: string; userId: string; reason: 'USER' | 'ADMIN' };

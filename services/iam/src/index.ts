@@ -6,6 +6,7 @@ import { seed } from './seed.js';
 import { oauthRoutes } from './oauth.js';
 import { verificationRoutes } from './verification.js';
 import { deviceRoutes } from './devices.js';
+import { memberExpiryJob } from './member-expiry.js';
 
 const svc = createService({
   name: 'iam',
@@ -41,6 +42,8 @@ const svc = createService({
         await db.query(`DELETE FROM oauth_login_codes WHERE expires_at < now() - interval '1 day'`);
       },
     },
+    // S1 (P-7): masa Premium berakhir alami → iam.user.member_changed (EXPIRED) sekali → playback cabut lisensi offline.
+    memberExpiryJob,
   ],
   stats: async ({ db }) =>
     (await db.one(

@@ -146,9 +146,17 @@ Izin konten: `tracks.offline_allowed` / `episodes.offline_allowed` (default true
   berbatch 5000) menghapus baris REJECTED yang diterima > `download.report_max_age_days` + 1 hari lalu — seq yang
   terbebas tidak bisa memasukkan putar lama lagi (pasti `too_old`). Baris ACCEPTED (dasar royalti) tidak pernah dihapus.
   Migrasi playback `009_offline_plays_user_guards` (indeks per pengguna & kuota REJECTED).
-- **Tindak lanjut iam (belum diimplementasikan):** iam sebaiknya menerbitkan `iam.user.member_changed` saat masa
-  langganan habis secara alami (job harian `member_until <= now()`), agar lisensi dicabut di sumbernya dan recheck
-  melaporkan `MEMBERSHIP` tanpa menunggu `expires_at`. Sampai itu, `after_membership` menjaga dasar royalti.
+- **Masa Premium berakhir alami (iam, S1):** job iam `member-expiry` (tiap 10 menit) menerbitkan
+  `iam.user.member_changed` sekali per masa untuk akun berbayar dengan `member_until <= now()` — payload sama dengan
+  jalur Super Admin + `reason: "EXPIRED"` (`memberType` = jenis terakhir, `memberUntil` = tanggal berakhir,
+  `premium: false`); jalur Super Admin kini mengirim `reason: "ADMIN"`. Konsumen playback mencabut lisensi
+  (`MEMBERSHIP`) di sumbernya sehingga recheck melaporkannya tanpa menunggu `expires_at`. Idempoten lewat penanda
+  `users.member_expiry_announced_until` (= `member_until` yang sudah diumumkan, ditulis di transaksi yang sama dengan
+  outbox); perpanjangan mengganti `member_until` sehingga masa berikutnya diumumkan lagi. Aman multi-replika
+  (`FOR UPDATE SKIP LOCKED`, batch 200, ≤ 25 batch per putaran), indeks parsial `users_member_expiry_due_idx` hanya
+  memuat baris yang belum diumumkan. FREE, Premium tanpa batas (`member_until` NULL) dan akun terhapus tidak
+  disentuh. Migrasi iam `018_member_expiry`. Keterlambatan ≤ interval job (+ relay outbox); selama itu
+  `after_membership` tetap menjaga dasar royalti.
 - **Keputusan: endpoint tetap menerima laporan walau `download.enabled` dimatikan.** Mematikan fitur menghentikan
   unduhan & lisensi baru, tetapi putar yang sudah terjadi dari lisensi yang sah tetap harus dibayar ke artis.
 

@@ -281,7 +281,7 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
               data: { from: { type: u.member_type, until: prevUntil }, to: { type, until: nextUntil }, reason: b.reason },
             });
             // Token akses lama (≤ 15 mnt) masih membawa status lama; refresh berikutnya memakai jenis member baru.
-            await publish(tx, 'iam.user.member_changed', u.id, { userId: u.id, memberType: type, memberUntil: nextUntil, premium: type !== 'FREE' });
+            await publish(tx, 'iam.user.member_changed', u.id, { userId: u.id, memberType: type, memberUntil: nextUntil, premium: type !== 'FREE', reason: 'ADMIN' });
           }
         }
         if (b.reset_mfa) {
