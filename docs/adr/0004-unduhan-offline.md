@@ -12,12 +12,17 @@
 |---|---|---|
 | `download.enabled` | **false** (berbahaya) | Saklar induk. Mati → daftar perangkat, terbit lisensi, recheck & daftar lisensi = 403 `offline_disabled`. Hapus perangkat/lisensi & kunci publik tetap dilayani. |
 | `download.allow_user_ids` | `[]` | Rollout terbatas; kosong = semua Premium yang memenuhi syarat. |
-| `download.tiers` | INDIVIDUAL, STUDENT, DUO | Paket berbayar yang berhak. FREE tidak pernah berhak. |
+| `download.tiers` | INDIVIDUAL, STUDENT, DUO (berbahaya) | Paket berbayar yang berhak, minimal satu (menghentikan semua = `download.enabled`). FREE tidak pernah berhak. |
 | `subscription.download_devices` | 5 | Perangkat aktif per akun (perangkat ke-6 → 409 `device_limit` + daftar perangkat). |
 | `download.max_tracks_per_device` | 500 | Lisensi aktif per perangkat (→ 409 `device_full`). |
 | `download.license_ttl_days` | 30 | Masa berlaku lisensi sejak terbit/recheck terakhir = **batas risiko**. |
 | `download.recheck_hours` | 72 | Klien wajib cek ulang saat online setelah `recheck_at`. |
-| `download.rate_per_user_hour` | 60 | Lisensi BARU per akun per jam (perpanjangan tidak dihitung) → 429 `rate_limited`. |
+| `download.rate_per_user_hour` | 60 | Lisensi BARU + permintaan yang masih menunggu artefak (202) per akun per jam (perpanjangan tidak dihitung) → 429 `rate_limited`. |
+| `download.pending_per_user` | 20 | Konten berbeda yang sedang disiapkan (202) per akun dalam 1 jam → 429 `rate_limited` (`retry_after_s` 60). |
+| `download.queue_max` | 200 | Batas global antrean artefak (`pending`+`processing`). Penuh → 503 `queue_full` + `Retry-After` tanpa menambah antrean. |
+| `download.recheck_per_minute` | 6 | Recheck per akun per menit → 429 (`Retry-After`). |
+| `download.devices_per_day` | 10 | Pendaftaran perangkat baru per akun per 24 jam (termasuk yang kemudian dicabut) → 429 `device_rate_limited`. |
+| `download.device_reregister_block_days` | 7 | Kunci perangkat yang dicabut tidak bisa didaftarkan ulang di akun yang sama selama ini → 403 `device_revoked` + `retry_after_s` (0 = tanpa blokir). |
 | `download.podcast_enabled` | true | Episode unggahan boleh diunduh (episode embed tidak pernah). Live tidak pernah. |
 | `download.quality` | `normal` (AAC 160) | Rendisi yang dienkripsi (`low` = AAC 64). Master & Lossless tidak pernah. |
 | `download.report_max_age_days` | 35 | Laporan putar offline lebih tua dari ini (dari `started_at`) ditolak `too_old`. |
@@ -29,18 +34,28 @@ Izin konten: `tracks.offline_allowed` / `episodes.offline_allowed` (default true
 `PATCH /v1/studio/tracks/:id` dan `PATCH /v1/studio/podcasts/:id/episodes/:episodeId`), rilis harus LIVE / episode tayang.
 
 ### Pembagian tanggung jawab
-- **iam**: perangkat (`user_devices`, kunci publik ECDH P-256 dari perangkat). `iam.device.revoked` saat dicabut.
-  `/internal/offline/entitlement` memberi status member + perangkat dalam satu panggilan.
+- **iam**: perangkat (`user_devices`, kunci publik ECDH P-256 dari perangkat). Mendaftar wajib berhak unduhan
+  (`offlineAccess` yang sama dengan penerbitan: Premium aktif, paket, rollout, tidak ditangguhkan), dibatasi laju per
+  hari, dan kunci yang baru dicabut diblokir. `iam.device.revoked` saat dicabut; `iam.user.suspended` saat akun
+  ditangguhkan; `iam.user.deleted` saat akun dihapus (perangkat dicabut & data pengenalnya — nama, versi aplikasi,
+  kunci publik, sidik jari — dikosongkan, UU PDP). `/internal/offline/entitlement` memberi status member + perangkat
+  dalam satu panggilan — **hanya token service** (Super Admin ditolak & dicatat audit `internal.denied`).
 - **catalog**: izin konten & **artefak terenkripsi**. Artefak dibuat SEKALI per konten+rendisi, lazy saat lisensi
   pertama diminta (`offline_artifacts`), oleh job `offline-artifacts` dengan konkurensi 1 per replika, streaming
-  (memori ≈ 64 KiB; tanpa ffmpeg — hanya mengenkripsi rendisi AAC yang sudah ada), tulis `.part` lalu rename.
-  CEK (32 byte acak) disimpan tersegel AES-256-GCM; CEK polos tidak pernah meninggalkan proses catalog — catalog
-  membungkusnya ke kunci publik perangkat (`/internal/offline/key`). Berkas disajikan lewat jalur media yang ada
+  (memori ≈ 64 KiB; tanpa ffmpeg — hanya mengenkripsi rendisi AAC yang sudah ada), tulis `.part` bernama unik per
+  percobaan lalu rename ke nama berkas unik; UPDATE akhir dijaga `status='processing' AND attempts=n` sehingga klaim
+  basi yang diambil worker lain tidak menimpa hasilnya (berkasnya dibuang). Antrean dibatasi global
+  `download.queue_max`. CEK (32 byte acak) disimpan tersegel AES-256-GCM beserta `key_id` kunci segel; kunci berganti
+  / CEK gagal dibuka → artefak dibangun ulang (202), bukan 500. CEK polos tidak pernah meninggalkan proses catalog —
+  catalog membungkusnya ke kunci publik perangkat (`/internal/offline/key`, **hanya token service**). Berkas disajikan lewat jalur media yang ada
   (`/v1/catalog/media/:file`, URL bertanda tangan HMAC, Range 206, `cache-control: private`), bukan publik.
   `catalog.offline.revoked` saat rilis ditarik, `offline_allowed` dimatikan, episode/acara disembunyikan, tidak
   tayang lagi, berganti audio, atau dihapus.
 - **playback**: lisensi (`offline_licenses`), tanda tangan Ed25519, recheck, konsumen pencabutan, job kedaluwarsa,
-  dan pelaporan putar offline (`offline_plays`, `POST /v1/events/offline-plays` — lihat §Putar offline).
+  dan pelaporan putar offline (`offline_plays`, `POST /v1/events/offline-plays` — lihat §Putar offline). Penjaga:
+  `offline_requests` (reservasi kuota permintaan 202, dibuat SEBELUM catalog diminta menyiapkan artefak, dihapus saat
+  lisensi terbit), `offline_revocations` (watermark pencabutan), `offline_rate` (ember laju recheck). Galat hulu 4xx
+  tanpa padanan §12 → 502 `upstream_error` (detail internal tidak diteruskan).
 
 ### Skema kripto (persis; semua tersedia di node:crypto, WebCrypto, dan paket kripto Flutter)
 1. **Kunci perangkat**: perangkat membuat pasangan ECDH P-256 (kunci privat tidak pernah keluar; simpan di keychain /
@@ -63,17 +78,28 @@ Izin konten: `tracks.offline_allowed` / `episodes.offline_allowed` (default true
    issued_at, expires_at, recheck_at`. Klien WAJIB: verifikasi tanda tangan, `device_id` = perangkat sendiri,
    `sha256` berkas cocok, dan menolak memutar setelah `expires_at` (jam perangkat + waktu server terakhir yang dilihat).
 5. **Kunci server**: bahan induk `OFFLINE_KEY` (opsional, ≥ 32 karakter) → `KYC_KEY` (wajib di produksi) → JWT secret
-   (dev, jelas hanya dev). Diturunkan dua kunci terpisah (`:offline-cek:v1` untuk segel CEK, `:offline-license:v1` untuk
-   seed Ed25519). Mengganti bahan kunci = semua artefak harus dibuat ulang (hapus baris `offline_artifacts`) dan semua
-   lisensi lama gagal verifikasi (klien meminta ulang). Jangan dirotasi tanpa rencana.
+   (HANYA dev; di luar dev tanpa OFFLINE_KEY/KYC_KEY = galat, tidak pernah jatuh ke JWT secret). Nilai kosong/spasi
+   dianggap tidak diset; di produksi baris `OFFLINE_KEY=` yang kosong, < 32 karakter, atau sama dengan secret lain membuat
+   service menolak start (dicek juga oleh `scripts/prod-preflight.sh`). Diturunkan dua kunci terpisah (`:offline-cek:v1`
+   untuk segel CEK, `:offline-license:v1` untuk seed Ed25519). Mengganti bahan kunci = lisensi lama gagal verifikasi
+   (klien meminta ulang) dan artefak lama dibangun ulang otomatis (id kunci segel `offline_artifacts.key_id` tidak cocok
+   / CEK gagal dibuka → antre ulang, 202). Jangan dirotasi tanpa rencana.
 
 ### Siklus lisensi & pencabutan
 - `POST /v1/offline/licenses` idempoten per perangkat+konten (lisensi ACTIVE yang sama diperpanjang, 200); 202 selama
   artefak disiapkan. `POST /v1/offline/recheck` memperpanjang yang masih berhak dan mengembalikan `revoked`,
   `expired`, `unknown`. Lisensi EXPIRED tidak dihidupkan ulang (minta lisensi baru).
 - Pencabutan eager lewat event (idempoten, di transaksi handler): `iam.user.member_changed` (bukan Premium / paket
-  tidak diizinkan), `iam.device.revoked`, `catalog.offline.revoked`. Recheck memeriksa ulang ke sumber (iam & catalog)
-  sehingga pencabutan tetap benar walau event terlambat. Job `offline-expire` (tiap jam, batch kecil) menandai EXPIRED.
+  tidak diizinkan), `iam.user.suspended` & `iam.user.deleted` (`ACCOUNT_SUSPENDED`), `iam.device.revoked`,
+  `catalog.offline.revoked`. Recheck memeriksa ulang ke sumber (iam & catalog) sehingga pencabutan tetap benar walau
+  event terlambat. Job `offline-expire` (tiap jam, batch kecil) menandai EXPIRED dan membersihkan tabel penjaga (> 1 jam).
+- **Pencabutan bersamaan dengan penerbitan (TOCTOU):** konsumen menulis watermark `offline_revocations` (pengguna /
+  perangkat / konten) di bawah kunci advisory yang sama dengan transaksi penerbitan (urutan tetap: pengguna → perangkat →
+  konten; konsumen mengambil satu jenis kunci, terurut). Transaksi penerbitan menolak commit bila ada watermark sejak hak
+  diperiksa (margin 2 dtk) dan memeriksa ulang hak sekali ke sumber; masih bertabrakan → 409 `content_unavailable`.
+  Konsumen yang berjalan SETELAH commit mencabut lisensi baru itu seperti biasa.
+- **Recheck** dibatasi `download.recheck_per_minute`; lisensi yang belum melewati separuh interval cek ulang
+  dikembalikan di `unchanged` (aditif; lisensi lama tetap berlaku) dan tidak ditandatangani/ditulis ulang.
 
 ### Putar offline (T6) — `POST /v1/events/offline-plays`
 - Perangkat mencatat putar lokal dengan `seq` monoton per perangkat dan mengirim batch ≤ 200 saat online. Idempoten:
@@ -120,12 +146,28 @@ Izin konten: `tracks.offline_allowed` / `episodes.offline_allowed` (default true
   hari aktif). Pendengar yang berhenti berlangganan lalu baru melapor di bulan berikutnya menyumbang pendapatan lebih kecil
   (atau masuk pool hybrid) untuk putar tersebut. Dibatasi oleh `download.report_max_age_days` dan recheck 72 jam.
 
+### Kewajiban klien (desktop/mobile) — wajib diimplementasikan persis
+- Header `RAVEOFL1`: tolak berkas bila magic ≠ `RAVEOFL1`, versi ≠ 1, 3 byte cadangan ≠ 0, atau `chunk_size` ≠ 65 536
+  (jangan memakai nilai header untuk alokasi tanpa batas); ukuran berkas wajib = `32 + plain_size + n·16`.
+- Lisensi: `alg` = `Ed25519` dan `kid` lisensi = `kid` dari `GET /v1/offline/pubkey` (kid tak dikenal → ambil ulang
+  pubkey sekali; tetap tak cocok → tolak); verifikasi tanda tangan atas BYTE `payload`; `v` = 1, `typ` =
+  `rave.offline.license`; `user_id` = pengguna sesi yang sedang login (lisensi akun lain di perangkat yang sama →
+  tolak & hapus); `device_id` = perangkat sendiri; `sha256` berkas cocok dengan `artifact.sha256`; `key.alg`
+  dikenal; AAD pembuka kunci `rave-ofl1:<track|episode>:<id>` sesuai konten lisensi.
+- Waktu: tolak memutar setelah `expires_at` (jam perangkat + waktu server terakhir yang dilihat; jam mundur → tolak).
+- Recheck: hapus berkas untuk `revoked`/`expired`/`unknown`; simpan lisensi lama untuk `unchanged`; hormati
+  `Retry-After` pada 429/503.
+
 ## Batas kejujuran (wajib dikomunikasikan)
 - Ini **perlindungan lisensi, BUKAN DRM penuh**. Perangkat sah memegang kunci yang bisa membuka berkasnya; perangkat
   yang di-root/jailbreak, klien yang dimodifikasi, atau perekaman keluaran audio dapat mengekstrak audio AAC 160.
-  Yang dicegah: berbagi berkas antar-akun/perangkat (CEK terbungkus per perangkat), unduh massal (rate limit, batas
-  per perangkat), master/lossless bocor (tidak pernah dienkripsi untuk offline), dan pemakaian setelah berhenti
-  berlangganan **begitu perangkat online**.
+- **Koreksi (review keamanan):** enkripsi offline TIDAK menjaga kerahasiaan audio. Rendisi AAC yang sama
+  (`<id>.normal.m4a` / `.low.m4a`) disajikan polos lewat jalur media publik untuk streaming, sehingga siapa pun yang bisa
+  memutar online bisa menyimpan berkas polosnya. Yang dicegah lapisan offline: berkas `RAVEOFL1` + lisensi satu akun
+  tidak bisa dipakai di akun/perangkat lain lewat aplikasi resmi (CEK terbungkus per perangkat, `user_id`/`device_id`
+  di lisensi), unduh massal lewat jalur lisensi (rate limit, batas menunggu & antrean global, batas per perangkat),
+  master/lossless bocor (tidak pernah dienkripsi untuk offline), dan pemakaian di aplikasi setelah berhenti berlangganan
+  **begitu perangkat online**. Nilai utamanya adalah kontrol lisensi (hak, masa berlaku, pencabutan, royalti).
 - **Pencabutan hanya efektif saat perangkat online** (recheck). Perangkat yang terus offline tetap bisa memutar hingga
   `expires_at`; `download.license_ttl_days` adalah batas risiko yang diterima.
 - Jam perangkat bisa dimundurkan; klien menyimpan waktu server terakhir (dari respons) dan menolak bila jam mundur.

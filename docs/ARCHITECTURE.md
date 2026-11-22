@@ -54,7 +54,7 @@ Acuan: **BRD/TDD v2.0** (Bab 9–11). Dokumen ini mencatat bagaimana desain di T
 
 Komunikasi sinkron antar-service dibatasi (`callService`, token role `service`, endpoint `/internal/*` yang diblokir gateway): katalog → playback (entitlement), library → katalog (hidrasi), booking → playback (statistik EPK), ticketing → finance (invoice), playback → iam & catalog (lisensi unduhan offline: member/perangkat, artefak & CEK terbungkus).
 
-Unduhan offline Premium (P-7): perangkat di iam, artefak terenkripsi `RAVEOFL1` di catalog (job `offline-artifacts`, konkurensi 1), lisensi Ed25519 di playback; pencabutan lewat `iam.user.member_changed`, `iam.device.revoked`, `catalog.offline.revoked` + recheck. Detail & batas keamanan: `docs/adr/0004-unduhan-offline.md`.
+Unduhan offline Premium (P-7): perangkat di iam, artefak terenkripsi `RAVEOFL1` di catalog (job `offline-artifacts`, konkurensi 1), lisensi Ed25519 di playback; pencabutan lewat `iam.user.member_changed`, `iam.user.suspended`, `iam.user.deleted`, `iam.device.revoked`, `catalog.offline.revoked` (+ watermark `offline_revocations` agar pencabutan bersamaan dengan penerbitan tidak lolos) + recheck. Detail & batas keamanan: `docs/adr/0004-unduhan-offline.md`.
 
 ## 4. Saga booking (TDD §7.1, §10.6)
 

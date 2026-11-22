@@ -262,3 +262,30 @@ koneksi PG 105/300.
   kategori tiket — kandidat optimasi sebelum *war ticket*: pembuatan invoice di finance di luar jalur kritis /
   antrean, atau kuota dipecah per shard. Uji ulang di spesifikasi produksi sebelum event besar.
 - Batas `tix` 30/menit per akun bersifat hardcode; untuk uji throughput gunakan banyak akun (bukan menaikkan batas).
+
+## 5. Langkah pra-deploy migrasi
+
+Runner migrasi (`packages/service-kit/src/db.ts` → `migrate`) menjalankan SEMUA berkas migrasi yang belum tercatat di
+**satu transaksi** (kunci advisory global), dicatat per nama (bukan checksum). Akibatnya `CREATE INDEX CONCURRENTLY`
+tidak bisa dipakai di berkas migrasi, dan `CREATE INDEX` biasa pada tabel besar mengunci tulis tabel itu selama indeks
+dibangun (service menunggu saat start).
+
+### 5.1 Unduhan offline P-7 — `playback/006_offline_plays.sql`
+
+Migrasi ini membuat `qualified_user_played_idx` di `playback.qualified_streams` (tabel stream qualified — besar di
+produksi). Agar start service tidak menahan tulis stream selama indeks dibangun, buat indeks **sebelum** deploy, di luar
+transaksi; migrasi kemudian melewatinya (`IF NOT EXISTS`):
+
+```sql
+-- psql ke DB produksi, sebagai pemilik schema playback (di luar BEGIN/COMMIT)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS qualified_user_played_idx
+  ON playback.qualified_streams (user_id, (coalesce(played_at, at)) DESC);
+```
+
+Catatan: ekspresi indeks mengacu kolom `played_at` yang baru ditambahkan migrasi yang sama — jalankan dulu
+`ALTER TABLE playback.qualified_streams ADD COLUMN IF NOT EXISTS played_at timestamptz;` (hanya metadata, instan)
+lalu perintah di atas. Bila `CONCURRENTLY` gagal di tengah, indeks tertinggal `INVALID` → `DROP INDEX CONCURRENTLY
+playback.qualified_user_played_idx;` lalu ulangi. Tabel kecil (< ~1 juta baris) boleh langsung lewat migrasi.
+
+Migrasi lain di rilis ini (iam `016_device_guards`, catalog `021_offline_key_id`, playback `007_offline_guards`) hanya
+menambah kolom nullable, tabel baru, atau indeks di tabel kecil — aman di dalam transaksi migrasi.

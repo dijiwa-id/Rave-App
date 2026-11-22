@@ -1851,12 +1851,15 @@ console.log('\n▶ Unduhan offline Premium (perangkat, lisensi, berkas terenkrip
   check('offline: flag mati (default) → daftar perangkat 403 offline_disabled', off.status === 403 && off.data?.code === 'offline_disabled', [off.status, off.data?.code]);
   const pk = await call(null, 'GET', '/v1/offline/pubkey');
   check('offline: kunci publik lisensi Ed25519 publik', pk.status === 200 && pk.data?.alg === 'Ed25519' && /^[\w-]{43}$/.test(pk.data?.public_key ?? ''), pk.data);
-  const on = await call(SA, 'PUT', '/v1/admin/platform/settings', { changes: { 'download.enabled': true }, reason: 'uji e2e unduhan offline' });
+  const on = await call(SA, 'PUT', '/v1/admin/platform/settings', { changes: { 'download.enabled': true, 'download.recheck_per_minute': 60 }, reason: 'uji e2e unduhan offline' });
   check('offline: Super Admin menyalakan download.enabled', on.status === 200, [on.status, on.data?.detail]);
   await new Promise((r) => setTimeout(r, 2000)); // propagasi pengaturan ke iam/catalog/playback
   try {
-    const dev = await call(P, 'POST', '/v1/me/devices', { platform: 'desktop', name: 'E2E PC', public_key: keyOf() });
+    const devKey = keyOf();
+    const dev = await call(P, 'POST', '/v1/me/devices', { platform: 'desktop', name: 'E2E PC', public_key: devKey });
     check('offline: Premium mendaftarkan perangkat (201)', dev.status === 201 && !!dev.data?.id, [dev.status, dev.data?.detail]);
+    const fanDev = await call(fan.access_token, 'POST', '/v1/me/devices', { platform: 'android', name: 'E2E Gratis', public_key: keyOf() });
+    check('offline: pengguna Gratis tidak bisa mendaftarkan perangkat → 403 premium_required', fanDev.status === 403 && fanDev.data?.code === 'premium_required', [fanDev.status, fanDev.data?.code]);
     const extra: string[] = [];
     let limited: any = null;
     for (let i = 0; i < 10 && !limited; i++) {
@@ -1906,6 +1909,8 @@ console.log('\n▶ Unduhan offline Premium (perangkat, lisensi, berkas terenkrip
         await call(P, 'DELETE', `/v1/me/devices/${dev.data?.id}`);
         const rc = await until(() => call(P, 'POST', '/v1/offline/recheck', { device_id: dev.data?.id, license_ids: [lic.data.id] }), (r) => r.data?.revoked?.length === 1, 15_000, 500);
         check('offline: perangkat dicabut → recheck melaporkan REVOKED (DEVICE_REVOKED)', rc.data?.revoked?.[0]?.reason === 'DEVICE_REVOKED', rc.data);
+        const rereg = await call(P, 'POST', '/v1/me/devices', { platform: 'desktop', name: 'E2E PC', public_key: devKey });
+        check('offline: kunci perangkat yang baru dicabut tidak bisa didaftarkan ulang → 403 device_revoked', rereg.status === 403 && rereg.data?.code === 'device_revoked' && rereg.data?.retry_after_s > 0, [rereg.status, rereg.data?.code]);
         const late = await call(P, 'POST', '/v1/events/offline-plays', { device_id: dev.data?.id, plays: [play(5, t0 + 12_000, 1000), play(6, Date.now(), 1000)] });
         const lateSt = (late.data?.results ?? []).map((r: any) => r.reason ?? r.status);
         check(
@@ -1919,7 +1924,7 @@ console.log('\n▶ Unduhan offline Premium (perangkat, lisensi, berkas terenkrip
       await call(P, 'DELETE', `/v1/me/devices/${dev.data?.id}`);
     }
   } finally {
-    await call(SA, 'POST', '/v1/admin/platform/settings/reset', { keys: ['download.enabled'], reason: 'selesai uji e2e unduhan offline' });
+    await call(SA, 'POST', '/v1/admin/platform/settings/reset', { keys: ['download.enabled', 'download.recheck_per_minute'], reason: 'selesai uji e2e unduhan offline' });
   }
   // Fitur dimatikan lagi: laporan putar dari lisensi yang sah TETAP diterima (dibayar ke artis — ADR-0004).
   if (offlineReport && offlineTrackId) {
