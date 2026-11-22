@@ -65,7 +65,7 @@ function DownloadsRollout({ t }: { t: ServicesDict }) {
             </Badge>
           </div>
         </div>
-        <ul className="grid min-w-0 flex-1 grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+        <ul className="grid w-full min-w-0 grid-cols-1 gap-x-6 gap-y-1 text-sm sm:w-auto sm:flex-1 sm:grid-cols-2">
           <li className={cx('min-w-0 font-bold', allow.length > 0 && 'text-amber-700')}>{allow.length ? r.allowlist(allow.length) : r.everyone}</li>
           <li className="min-w-0">
             <span className="text-b2b-muted">{r.tiers}: </span>

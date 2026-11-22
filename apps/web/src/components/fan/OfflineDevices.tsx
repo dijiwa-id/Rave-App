@@ -154,11 +154,11 @@ export function OfflineDevices() {
               {list.map((d) => {
                 const Icon = PLATFORM_ICON[d.platform] ?? Smartphone;
                 return (
-                  <li key={d.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  <li key={d.id} className="grid grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 px-4 py-3 @[560px]:grid-cols-[2.5rem_minmax(0,1fr)_auto]">
                     <span className="grid size-10 shrink-0 place-items-center border-2 border-rave-ink bg-rave-purple text-rave-paper" aria-hidden>
                       <Icon className="size-5" />
                     </span>
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0">
                       <p className="flex min-w-0 items-center gap-2">
                         <span className="truncate font-bold text-white" title={d.name}>
                           {d.name}
@@ -171,7 +171,7 @@ export function OfflineDevices() {
                       </p>
                       <p className="text-xs text-rave-subtle">{d.last_seen_at ? s.lastSeen(fmt.dateTime(d.last_seen_at)) : s.added(fmt.dateTime(d.created_at))}</p>
                     </div>
-                    <Button variant="outline" className="h-11 shrink-0" loading={busy === d.id} disabled={!!busy && busy !== d.id} onClick={() => void askRevoke(d)} aria-label={s.revokeAria(d.name)}>
+                    <Button variant="outline" className="col-start-2 h-11 justify-self-start @[560px]:col-start-3" loading={busy === d.id} disabled={!!busy && busy !== d.id} onClick={() => void askRevoke(d)} aria-label={s.revokeAria(d.name)}>
                       {s.revoke}
                     </Button>
                   </li>
