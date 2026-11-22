@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, ArrowRight, BadgeCheck, Copy, Briefcase, Coins, Crown, Mic2, Podcast, Ticket, Headphones, Images, ListMusic, Shapes, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow, Newspaper } from 'lucide-react';
+import { Activity, ArrowRight, BadgeCheck, Briefcase, Coins, Crown, Mic2, Podcast, Ticket, Headphones, Images, ListMusic, Shapes, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow, Newspaper } from 'lucide-react';
 import { ADMIN_PERMISSIONS, ADMIN_ROLE_LABEL, type AdminPermission, type AdminRole } from '@rave/domain/settings';
 import { can, isSuperAdmin, useAuth } from '@/stores/auth';
 import { B2BLayout, type B2BNavItem } from '@/layouts/B2BLayout';
@@ -12,6 +12,7 @@ import { useDict } from '@/lib/i18n';
 import type { AdminPayoutRow, AdminRefundRow, Dispute, Me, MemberType, PayoutStatus, Release, TicketRefundReason } from '@/lib/types';
 import { Badge, Button, Card, cx, Field, Input, Modal, PageHeader, Select, Stat, Textarea, toast } from '@/components/ui';
 import { Empty, QueryState, Table } from '@/components/b2b/common';
+import { ChoiceCards, CopyText, DetailHeader, DetailNotice, DetailSection, Initial, KV, MiniStat, ModalActions, ReasonDialog, StatStrip } from '@/components/b2b/AdminDetail';
 import { ReleaseStatusBadge } from '../studio/Releases';
 import { VerifiedBadge } from '@/components/ui/VerifiedBadge';
 
@@ -1064,14 +1065,21 @@ function MemberModal({ user, onClose }: { user: Me | null; onClose: () => void }
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [opened, setOpened] = useState<string | null>(null);
+  const current: MemberType = user ? (user.member_type ?? (user.premium ? 'INDIVIDUAL' : 'FREE')) : 'FREE';
   // Isi ulang form setiap kali modal dibuka untuk pengguna lain.
   if (user && opened !== user.id) {
     setOpened(user.id);
-    setType(user.member_type ?? (user.premium ? 'INDIVIDUAL' : 'FREE'));
+    setType(current);
     setUntil(user.member_until ? user.member_until.slice(0, 10) : '');
     setReason('');
   }
+  const close = () => {
+    setOpened(null);
+    onClose();
+  };
   const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  const currentUntil = user?.member_until ? user.member_until.slice(0, 10) : '';
+  const changed = type !== current || (type !== 'FREE' && until !== currentUntil);
   async function save() {
     if (!user) return;
     setSaving(true);
@@ -1082,8 +1090,7 @@ function MemberModal({ user, onClose }: { user: Me | null; onClose: () => void }
       toast.success(t.saved(user.display_name, t.member[type]));
       qc.invalidateQueries({ queryKey: ['admin-users'] });
       qc.invalidateQueries({ queryKey: ['admin-user', user.id] });
-      setOpened(null);
-      onClose();
+      close();
     } catch (e) {
       toast.error(e);
     } finally {
@@ -1091,48 +1098,45 @@ function MemberModal({ user, onClose }: { user: Me | null; onClose: () => void }
     }
   }
   return (
-    <Modal open={!!user} onClose={() => { setOpened(null); onClose(); }} title={t.memberTitle}>
+    <Modal open={!!user} onClose={close} title={t.memberTitle} wide>
       {user && (
         <div className="space-y-4">
-          <p className="text-sm">
-            <strong>{user.display_name}</strong> <span className="text-b2b-muted">({user.email})</span>
-          </p>
-          <Field label={t.memberType}>
-            <div role="radiogroup" aria-label={t.memberType} className="grid grid-cols-2 gap-2">
-              {MEMBER_TYPES.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  role="radio"
-                  aria-checked={type === m}
-                  onClick={() => setType(m)}
-                  className={cx(
-                    'border px-3 py-2.5 text-left text-sm font-bold transition',
-                    type === m ? 'border-b2b-ink bg-b2b-ink text-b2b-on-ink' : 'border-b2b-line bg-b2b-card text-b2b-ink hover:border-b2b-ink',
-                  )}
-                >
-                  {t.member[m]}
-                </button>
-              ))}
-            </div>
-          </Field>
-          {type !== 'FREE' && (
-            <Field label={t.memberUntil} hint={t.memberUntilHint}>
-              <Input type="date" min={tomorrow} value={until} onChange={(e) => setUntil(e.target.value)} className="max-w-xs" />
+          <DetailHeader
+            avatar={user.avatar_url ? <img src={user.avatar_url} alt="" className="size-full object-cover" /> : <Initial name={user.display_name} />}
+            title={user.display_name}
+            badges={user.verified ? <VerifiedBadge size={18} /> : undefined}
+            meta={user.email ? <CopyText value={user.email} label={t.copyLabels.email} /> : undefined}
+          />
+          <StatStrip cols={3}>
+            <MiniStat label={t.memberCurrent} value={<MemberBadge u={user} />} />
+            <MiniStat label={t.memberNew} value={<Badge tone={memberTone(type)}>{t.member[type]}</Badge>} />
+            <MiniStat label={t.memberUntil} value={type === 'FREE' ? '—' : until ? fmt.date(`${until}T12:00:00+07:00`) : t.memberNoLimit} />
+          </StatStrip>
+          <DetailSection title={t.memberType}>
+            <ChoiceCards
+              label={t.memberType}
+              value={type}
+              onChange={setType}
+              cols={4}
+              options={MEMBER_TYPES.map((m) => ({ value: m, title: t.member[m], hint: t.memberHints[m] }))}
+            />
+          </DetailSection>
+          <div className={cx('grid gap-4', type !== 'FREE' && 'md:grid-cols-2')}>
+            {type !== 'FREE' && (
+              <Field label={t.memberUntil} hint={t.memberUntilHint}>
+                <Input type="date" min={tomorrow} value={until} onChange={(e) => setUntil(e.target.value)} />
+              </Field>
+            )}
+            <Field label={t.reason} hint={t.reasonHint}>
+              <Textarea maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t.reasonPlaceholder} />
             </Field>
-          )}
-          <Field label={t.reason} hint={t.reasonHint}>
-            <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t.reasonPlaceholder} />
-          </Field>
+          </div>
           <p className="text-xs text-b2b-muted">{t.memberNote}</p>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline-ink" onClick={() => { setOpened(null); onClose(); }}>
-              {t.cancel}
-            </Button>
-            <Button variant="ink" loading={saving} disabled={reason.trim().length < 5} onClick={save}>
+          <ModalActions onCancel={close} cancelLabel={t.cancel}>
+            <Button variant="ink" loading={saving} disabled={!changed || reason.trim().length < 5} onClick={save}>
               {t.save}
             </Button>
-          </div>
+          </ModalActions>
         </div>
       )}
     </Modal>
@@ -1149,110 +1153,6 @@ type UserDetailData = {
   consents: { purpose: string; granted: boolean; updated_at: string }[];
   activity: { id: string; actor_id: string | null; actor_name: string | null; action: string; entity: string; entity_id: string | null; data: unknown; created_at: string }[];
 };
-
-/** Baris label–nilai ringkas di panel detail pengguna. */
-function KV({ k, children }: { k: string; children: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[9.5rem_minmax(0,1fr)] gap-3 py-1.5 text-sm">
-      <dt className="text-b2b-muted">{k}</dt>
-      <dd className="min-w-0 break-words">{children ?? '—'}</dd>
-    </div>
-  );
-}
-function DetailSection({ title, children, tone, action }: { title: string; children: ReactNode; tone?: 'danger'; action?: ReactNode }) {
-  return (
-    <section className={cx('border-2 p-4', tone === 'danger' ? 'border-red-500/40 bg-red-500/[0.04]' : 'border-b2b-line bg-b2b-card')}>
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <h3 className={cx('font-label text-[11px] font-bold tracking-[0.12em] uppercase', tone === 'danger' ? 'text-red-600' : 'text-b2b-muted')}>{title}</h3>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-/** Ringkasan satu angka/nilai di strip atas detail pengguna. */
-function MiniStat({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
-  return (
-    <div className="min-w-0 border-2 border-b2b-line bg-b2b-card px-3 py-2" title={hint}>
-      <p className="font-label text-[10px] font-bold tracking-[0.12em] text-b2b-muted uppercase">{label}</p>
-      <p className="mt-0.5 truncate text-sm font-bold">{value}</p>
-    </div>
-  );
-}
-
-/** Tombol salin kecil (ID, email, nomor) dengan umpan balik toast. */
-function CopyText({ value, label, mono, className }: { value: string; label: string; mono?: boolean; className?: string }) {
-  const t = useDict('admin').users;
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        void navigator.clipboard?.writeText(value);
-        toast.success(t.copiedValue(label));
-      }}
-      title={t.copyValue(label)}
-      className={cx('inline-flex max-w-full items-center gap-1 truncate text-left hover:text-b2b-ink', mono && 'font-mono', className)}
-    >
-      <span className="truncate">{value}</span>
-      <Copy className="size-3 shrink-0 opacity-60" aria-hidden />
-    </button>
-  );
-}
-
-/** Dialog alasan (pengganti prompt bawaan): alasan wajib ≥ 5 karakter, tercatat di audit log. */
-function ReasonDialog({
-  open,
-  title,
-  body,
-  confirmLabel,
-  danger,
-  busy,
-  onClose,
-  onSubmit,
-}: {
-  open: boolean;
-  title: string;
-  body: string;
-  confirmLabel: string;
-  danger?: boolean;
-  busy: boolean;
-  onClose: () => void;
-  onSubmit: (reason: string) => void;
-}) {
-  const t = useDict('admin').users;
-  const [reason, setReason] = useState('');
-  const [wasOpen, setWasOpen] = useState(false);
-  if (open !== wasOpen) {
-    setWasOpen(open);
-    if (open) setReason('');
-  }
-  const ok = reason.trim().length >= 5;
-  return (
-    <Modal open={open} onClose={onClose} title={title}>
-      <form
-        className="space-y-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (ok && !busy) onSubmit(reason.trim());
-        }}
-      >
-        <p className="text-sm">{body}</p>
-        <Field label={t.reason} hint={t.reasonHint}>
-          <Textarea autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t.reasonPlaceholderAction} />
-        </Field>
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="outline-ink" onClick={onClose}>
-            {t.cancel}
-          </Button>
-          <Button type="submit" variant={danger ? 'danger' : 'ink'} loading={busy} disabled={!ok}>
-            {confirmLabel}
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
 
 const ORG_ROLE_TONE: Record<string, 'purple' | 'blue' | 'neutral'> = { OWNER: 'purple', ADMIN: 'blue' };
 const KYC_TONE: Record<string, 'green' | 'blue' | 'red' | 'neutral'> = { APPROVED: 'green', VERIFIED: 'green', PENDING: 'blue', REJECTED: 'red' };
@@ -1362,58 +1262,57 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
       <QueryState q={q}>
         {u && data && (
           <div className="space-y-4">
-            {/* Kepala: avatar, nama + badge, kontak (bisa disalin), aksi cepat */}
-            <div className="flex flex-wrap items-start gap-4">
-              <span className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full border-2 border-b2b-ink bg-rave-purple">
-                {u.avatar_url ? <img src={u.avatar_url} alt="" className="size-full object-cover" /> : <span className="font-display text-2xl text-rave-primary">{u.display_name.slice(0, 1).toUpperCase()}</span>}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="flex flex-wrap items-center gap-2 text-xl font-bold">
-                  <span className="min-w-0 break-words">{u.display_name}</span>
+            <DetailHeader
+              avatar={u.avatar_url ? <img src={u.avatar_url} alt="" className="size-full object-cover" /> : <Initial name={u.display_name} />}
+              title={u.display_name}
+              badges={
+                <>
                   {u.verified && <VerifiedBadge size={20} />}
                   <Badge tone={u.suspended_at ? 'red' : 'green'}>{u.suspended_at ? t.suspended : t.active}</Badge>
                   {u.admin_role && <Badge tone="purple">{ADMIN_ROLE_LABEL[u.admin_role as AdminRole] ?? u.admin_role}</Badge>}
-                </p>
-                <div className="mt-1 flex flex-col gap-0.5 text-sm text-b2b-muted">
+                </>
+              }
+              meta={
+                <>
                   {u.email && <CopyText value={u.email} label={t.copyLabels.email} />}
                   {u.phone && <CopyText value={u.phone} label={t.copyLabels.phone} />}
                   <CopyText value={u.id} label={t.copyLabels.id} mono className="text-[11px]" />
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {sup && (
-                  <Button size="sm" variant="outline-ink" onClick={() => onEditMember(u)}>
-                    {t.editMember}
-                  </Button>
-                )}
-                {canVerify && u.verified && (
-                  <Button size="sm" variant="outline-ink" disabled={busy} onClick={() => setPending('revoke')}>
-                    {t.revokeVerify}
-                  </Button>
-                )}
-                {sup && u.id !== me?.id && (
-                  <Button size="sm" variant={u.suspended_at ? 'ink' : 'outline-ink'} disabled={busy} onClick={() => setPending(u.suspended_at ? 'unsuspend' : 'suspend')}>
-                    {u.suspended_at ? t.unsuspend : t.suspend}
-                  </Button>
-                )}
-              </div>
-            </div>
+                </>
+              }
+              actions={
+                <>
+                  {sup && (
+                    <Button size="sm" variant="outline-ink" onClick={() => onEditMember(u)}>
+                      {t.editMember}
+                    </Button>
+                  )}
+                  {canVerify && u.verified && (
+                    <Button size="sm" variant="outline-ink" disabled={busy} onClick={() => setPending('revoke')}>
+                      {t.revokeVerify}
+                    </Button>
+                  )}
+                  {sup && u.id !== me?.id && (
+                    <Button size="sm" variant={u.suspended_at ? 'ink' : 'outline-ink'} disabled={busy} onClick={() => setPending(u.suspended_at ? 'unsuspend' : 'suspend')}>
+                      {u.suspended_at ? t.unsuspend : t.suspend}
+                    </Button>
+                  )}
+                </>
+              }
+            />
 
             {u.suspended_at && (
-              <p role="status" className="border-l-4 border-red-500 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-700">
-                {t.suspendedSince(fmt.dateTime(u.suspended_at))}
-              </p>
+              <DetailNotice>{t.suspendedSince(fmt.dateTime(u.suspended_at))}</DetailNotice>
             )}
 
             {/* Strip ringkasan: status penting tanpa harus membaca semua bagian */}
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+            <StatStrip>
               <MiniStat label={f.member} value={<MemberBadge u={u} />} />
               <MiniStat label={f.verification} value={<VerificationBadge status={u.verification_status ?? 'NONE'} />} />
               <MiniStat label={f.joined} value={fmt.date(u.created_at)} hint={fmt.dateTime(u.created_at)} />
               <MiniStat label={f.lastSeen} value={data.sessions.last_seen_at ? fmt.date(data.sessions.last_seen_at) : '—'} hint={data.sessions.last_seen_at ? fmt.dateTime(data.sessions.last_seen_at) : undefined} />
               <MiniStat label={f.sessions} value={data.sessions.active} />
               <MiniStat label={t.sections.orgs} value={data.orgs.length} />
-            </div>
+            </StatStrip>
 
             <div className="grid gap-4 md:grid-cols-2">
               <DetailSection title={t.sections.profile}>
