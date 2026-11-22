@@ -410,6 +410,8 @@ const fan = {
         device_limit: 'Batas perangkat tercapai. Cabut salah satu perangkat terlebih dahulu.',
         device_full: 'Batas unduhan di perangkat ini tercapai. Hapus beberapa unduhan terlebih dahulu.',
         rate_limited: 'Terlalu banyak unduhan baru dalam satu jam. Coba lagi nanti.',
+        device_rate_limited: 'Terlalu banyak pendaftaran perangkat hari ini. Coba lagi besok.',
+        queue_full: 'Antrean penyiapan unduhan sedang penuh. Coba lagi beberapa saat lagi.',
         content_not_found: 'Konten ini tidak ditemukan.',
         content_not_allowed: 'Pemilik konten tidak mengizinkan unduhan offline.',
         content_unavailable: 'Konten ini belum tersedia untuk diunduh.',

@@ -413,6 +413,8 @@ const fan: Shape<typeof id> = {
         device_limit: 'Device limit reached. Remove one of your devices first.',
         device_full: 'Download limit reached on this device. Remove some downloads first.',
         rate_limited: 'Too many new downloads within an hour. Please try again later.',
+        device_rate_limited: 'Too many device registrations today. Please try again tomorrow.',
+        queue_full: 'The download preparation queue is full. Please try again shortly.',
         content_not_found: 'This content could not be found.',
         content_not_allowed: 'The rights holder does not allow offline downloads.',
         content_unavailable: 'This content is not available for download yet.',

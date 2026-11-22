@@ -34,6 +34,8 @@ export const OFFLINE_DENY_CODES: readonly OfflineDenyCode[] = [
   'device_limit',
   'device_full',
   'rate_limited',
+  'device_rate_limited',
+  'queue_full',
   'content_not_found',
   'content_not_allowed',
   'content_unavailable',
