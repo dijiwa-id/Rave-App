@@ -17,3 +17,6 @@ storage/
 
 # Installer aplikasi di downloads/ (diisi `npm run apps:publish`, disajikan di /downloads/) SENGAJA ikut git
 # agar server cukup `git pull` untuk menyajikan versi terbaru — jangan tambahkan aturan ignore untuknya.
+
+# Izin Claude Code lokal (pribadi)
+.claude/settings.local.json

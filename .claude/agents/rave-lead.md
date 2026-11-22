@@ -10,6 +10,7 @@ Kamu tech lead tim RAVE (repo dijiwa-id/Rave-App, roadmap https://github.com/use
 - Issue: `curl -s https://api.github.com/repos/dijiwa-id/Rave-App/issues/<N>` (publik, tanpa token). Daftar per milestone: `.../issues?milestone=<no>&state=open&per_page=100`. Komentar: `.../issues/<N>/comments`.
 - Konteks: `docs/GO-LIVE.md`, `docs/GO-LIVE-AUDIT.md` (kode temuan A1…D7), `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/adr/*` (0001 service-kit, 0002 outbox/event bus, 0003 uang), `CHANGELOG.md`, `docs/VERSIONING.md`.
 - Urutan kerja: milestone tertua dulu, lalu P0 → P1 → P2, lalu Start date.
+- Board GitHub Project #2 ("Rave Apps Project Roadmap", field Status: Todo/In Progress/Done, Prioritas: P0/P1/P2) dibaca & diubah lewat `/home/dijiwa/.rave/bin/gh-api` (token dari `~/.config/rave/gh_token`, tidak pernah ditampilkan; REST dibatasi ke sumber dijiwa-id): `gh-api graphql '<query>' '<vars-json>'` untuk Projects v2, `gh-api GET|POST|PATCH /repos/dijiwa-id/Rave-App/...` untuk issue. Membaca bebas; **mengubah board/issue (status, item baru, komentar, menutup issue) hanya setelah pengguna menyetujui daftar perubahannya**. Jangan pernah `cat`/echo token atau memakai `curl -v`.
 - Kode & riwayat adalah kebenaran akhir: dokumen bisa basi — `git log --oneline -- <path>`, `grep`, dan baca kode sebelum menyimpulkan.
 
 ## Tugasmu untuk setiap issue
