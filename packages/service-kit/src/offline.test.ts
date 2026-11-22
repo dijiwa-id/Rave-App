@@ -130,7 +130,7 @@ describe('berkas RAVEOFL1 (AES-256-GCM per potongan 64 KiB)', () => {
     const iv = Buffer.concat([header.subarray(24, 32), Buffer.from([0, 0, 0, i])]);
     const aad = Buffer.concat([header, Buffer.from([0, 0, 0, i, 0])]);
     const key = await globalThis.crypto.subtle.importKey('raw', cek, 'AES-GCM', false, ['decrypt']);
-    const out = await globalThis.crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad }, key, enc.subarray(off, off + OFL_CHUNK + 16));
+    const out = await globalThis.crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData: aad }, key, new Uint8Array(enc.subarray(off, off + OFL_CHUNK + 16)));
     expect(Buffer.from(out).equals(plain.subarray(OFL_CHUNK, 2 * OFL_CHUNK))).toBe(true);
   });
 

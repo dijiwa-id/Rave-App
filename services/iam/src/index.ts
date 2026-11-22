@@ -5,6 +5,7 @@ import { reportRoutes } from './reports.js';
 import { seed } from './seed.js';
 import { oauthRoutes } from './oauth.js';
 import { verificationRoutes } from './verification.js';
+import { deviceRoutes } from './devices.js';
 
 const svc = createService({
   name: 'iam',
@@ -16,6 +17,7 @@ const svc = createService({
     await oauthRoutes(app, ctx);
     await adminRoutes(app, ctx);
     await verificationRoutes(app, ctx);
+    await deviceRoutes(app, ctx);
     await reportRoutes(app, ctx);
   },
   // RAVE Pro: proyeksi status langganan org dari finance (badge, gating klien, batas roster).
