@@ -10,12 +10,14 @@ import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
 import type { OfflineContentKind } from '@rave/domain/offline';
 import {
+  cekKeyId,
   createOflEncryptor,
   offlineDeny,
   openCek,
   parseDevicePublicKey,
   publish,
   requireService,
+  requireServiceOnly,
   sealCek,
   settings,
   unprocessable,
@@ -82,13 +84,34 @@ export async function resolveOfflineSource(db: Q, kind: OfflineContentKind, id: 
   return { ok: true, source_file: file, codec_label: r.codec_label ?? 'AAC' };
 }
 
+/** Antrean global penuh (`download.queue_max`) → 503 + Retry-After, tanpa menambah baris (melindungi disk/CPU VPS). */
+export const QUEUE_RETRY_AFTER_S = 60;
+async function assertQueueRoom(db: Q) {
+  const n = (await db.query(`SELECT count(*)::int AS n FROM offline_artifacts WHERE status IN ('pending', 'processing')`))[0]?.n ?? 0;
+  if (n >= settings.num('download.queue_max')) throw offlineDeny('queue_full', { retry_after_s: QUEUE_RETRY_AFTER_S });
+}
+
+/** Antre ulang artefak (sumber berganti / berkas hilang / kunci segel berganti / gagal lama). `bump` = versi & CEK baru. */
+async function requeueArtifact(db: Db, a: any, src: OfflineSource, bump: boolean) {
+  await assertQueueRoom(db);
+  await db.query(
+    `UPDATE offline_artifacts SET status = 'pending', attempts = 0, error = NULL, source_file = $2, codec_label = $4,
+            version = version + CASE WHEN $3 THEN 1 ELSE 0 END, updated_at = now()
+      WHERE id = $1 AND status IN ('ready', 'failed')`,
+    [a.id, src.source_file, bump, src.codec_label],
+  );
+  await wakeJob(db, OFFLINE_JOB);
+}
+
 /**
  * Pastikan artefak ada/antre (idempoten, aman paralel lewat UNIQUE + ON CONFLICT). Mengembalikan baris artefak
- * bila siap, atau null bila sedang/baru diantrekan. Sumber berganti / berkas hilang → dibuat ulang (versi baru, CEK baru).
+ * bila siap, atau null bila sedang/baru diantrekan. Sumber berganti / berkas hilang / kunci segel CEK berganti
+ * (`key_id` ≠ kunci aktif) → dibuat ulang (versi baru, CEK baru). Antrean global penuh → 503 `queue_full`.
  */
 export async function ensureArtifact(db: Db, kind: OfflineContentKind, id: string, rendition: string, src: OfflineSource): Promise<any | null> {
   let a = await db.one(`SELECT * FROM offline_artifacts WHERE content_kind = $1 AND content_id = $2 AND rendition = $3`, [kind, id, rendition]);
   if (!a) {
+    await assertQueueRoom(db);
     await db.query(
       `INSERT INTO offline_artifacts (id, content_kind, content_id, rendition, source_file, codec_label) VALUES ($1,$2,$3,$4,$5,$6)
        ON CONFLICT (content_kind, content_id, rendition) DO NOTHING`,
@@ -97,16 +120,12 @@ export async function ensureArtifact(db: Db, kind: OfflineContentKind, id: strin
     await wakeJob(db, OFFLINE_JOB);
     return null;
   }
-  const stale = a.source_file !== src.source_file || (a.status === 'ready' && (!a.path || !existsSync(join(UPLOAD_DIR, a.path))));
+  const stale =
+    a.source_file !== src.source_file ||
+    (a.status === 'ready' && (!a.path || !existsSync(join(UPLOAD_DIR, a.path)) || (a.key_id != null && a.key_id !== cekKeyId())));
   const retry = a.status === 'failed' && new Date(a.updated_at).getTime() < Date.now() - RETRY_FAILED_MIN * 60_000;
   if (stale || retry) {
-    await db.query(
-      `UPDATE offline_artifacts SET status = 'pending', attempts = 0, error = NULL, source_file = $2, codec_label = $4,
-              version = version + CASE WHEN $3 THEN 1 ELSE 0 END, updated_at = now()
-        WHERE id = $1 AND status IN ('ready', 'failed')`,
-      [a.id, src.source_file, stale, src.codec_label],
-    );
-    await wakeJob(db, OFFLINE_JOB);
+    await requeueArtifact(db, a, src, stale);
     return null;
   }
   if (a.status === 'failed') return 'failed';
@@ -146,7 +165,7 @@ export async function offlineRoutes(app: FastifyInstance, { db }: { db: Db }) {
    * Internal (playback): minta artefak + CEK terbungkus untuk satu perangkat.
    * 200 {status:'ready', artifact, wrapped_key} · 202 {status:'preparing', retry_after_s} · 403/404/409 Problem (code).
    */
-  app.post('/internal/offline/key', { preHandler: requireService }, async (req, reply) => {
+  app.post('/internal/offline/key', { preHandler: requireServiceOnly(db, 'catalog:/internal/offline/key') }, async (req, reply) => {
     if (!settings.bool('download.enabled')) throw offlineDeny('offline_disabled');
     const b = keyBody.parse(req.body ?? {});
     if (!parseDevicePublicKey(b.device_public_key)) throw unprocessable('Kunci publik perangkat tidak valid', { code: 'invalid_public_key' });
@@ -160,8 +179,21 @@ export async function offlineRoutes(app: FastifyInstance, { db }: { db: Db }) {
     const a = await ensureArtifact(db, b.kind, b.id, rendition, src);
     if (a === 'failed') throw offlineDeny('content_unavailable');
     if (!a) return preparing();
-    const wrapped = wrapCek(openCek(a.cek_encrypted), b.device_public_key, wrapAad(b.kind, b.id));
-    return { status: 'ready' as const, artifact: artifactOut(a), wrapped_key: wrapped };
+    let cek: Buffer;
+    try {
+      cek = openCek(a.cek_encrypted);
+    } catch (e) {
+      // Artefak lama tanpa key_id yang disegel bahan kunci lain (OFFLINE_KEY/KYC_KEY berganti) → bangun ulang, bukan 500.
+      req.log.warn({ artifactId: a.id, err: (e as Error).message }, 'CEK artefak offline tidak bisa dibuka — dibangun ulang');
+      await requeueArtifact(db, a, src, true);
+      return preparing();
+    }
+    try {
+      const wrapped = wrapCek(cek, b.device_public_key, wrapAad(b.kind, b.id));
+      return { status: 'ready' as const, artifact: artifactOut(a), wrapped_key: wrapped };
+    } finally {
+      cek.fill(0);
+    }
   });
 
   /** Internal (playback recheck): ketersediaan offline banyak konten sekaligus (2 query, bukan N). */
@@ -198,13 +230,16 @@ function hashTap() {
   return { t, done: () => ({ sha256: h.digest('hex'), size: n }) };
 }
 
-/** Enkripsi satu artefak secara streaming (memori ≈ 64 KiB) ke `<path>.part` lalu rename atomik. */
+/**
+ * Enkripsi satu artefak secara streaming (memori ≈ 64 KiB) ke `<path>.<acak>.part` lalu rename atomik. Nama `.part`
+ * unik per percobaan: dua worker (klaim basi setelah 15 menit) tidak pernah menulis/menghapus berkas sementara yang sama.
+ */
 export async function buildArtifact(srcPath: string, outPath: string): Promise<{ cek: Buffer; iv: Buffer; size: number; plainSize: number; sha256: string }> {
   const plainSize = (await stat(srcPath)).size;
   const cek = randomBytes(32);
   const iv = randomBytes(8);
   const tap = hashTap();
-  const part = `${outPath}.part`;
+  const part = `${outPath}.${randomBytes(6).toString('hex')}.part`;
   try {
     await pipeline(createReadStream(srcPath), createOflEncryptor(cek, plainSize, iv), tap.t, createWriteStream(part));
     await rename(part, outPath);
@@ -235,27 +270,44 @@ export const offlineArtifactJob: Job = {
         RETURNING id, content_kind, content_id, rendition, source_file, version, attempts, path`,
     );
     if (!job) return;
-    const name = `ofl-${job.id}-v${job.version}.rofl`;
+    // Nama akhir unik per percobaan (bukan hanya per versi): worker lama yang klaimnya basi tidak menimpa/menghapus berkas
+    // milik worker yang mengklaim ulang.
+    const name = `ofl-${job.id}-v${job.version}-${randomBytes(4).toString('hex')}.rofl`;
+    let built: Awaited<ReturnType<typeof buildArtifact>> | null = null;
     try {
       const src = join(UPLOAD_DIR, job.source_file);
       if (!existsSync(src)) throw new Error('berkas rendisi sumber tidak ditemukan');
-      const r = await buildArtifact(src, join(UPLOAD_DIR, name));
-      await db.query(
-        `UPDATE offline_artifacts SET status = 'ready', path = $2, cek_encrypted = $3, iv = $4, size = $5, plain_size = $6, sha256 = $7,
+      built = await buildArtifact(src, join(UPLOAD_DIR, name));
+      // Guard: hanya klaim INI (status processing + attempts sama) yang boleh menandai siap. Diklaim ulang / diantre ulang
+      // (sumber berganti) selama enkripsi → hasil dibuang.
+      const done = await db.query(
+        `UPDATE offline_artifacts SET status = 'ready', path = $2, cek_encrypted = $3, iv = $4, size = $5, plain_size = $6, sha256 = $7, key_id = $8,
                 codec_label = coalesce(codec_label, 'AAC'), error = NULL, ready_at = now(), updated_at = now()
-          WHERE id = $1`,
-        [job.id, name, sealCek(r.cek), r.iv.toString('hex'), r.size, r.plainSize, r.sha256],
+          WHERE id = $1 AND status = 'processing' AND attempts = $9 RETURNING id`,
+        [job.id, name, sealCek(built.cek), built.iv.toString('hex'), built.size, built.plainSize, built.sha256, cekKeyId(), job.attempts],
       );
-      r.cek.fill(0);
-      // Berkas versi lama (sumber berganti) tidak lagi dirujuk → hapus.
+      if (!done.length) {
+        await rm(join(UPLOAD_DIR, name), { force: true }).catch(() => {});
+        log.warn({ artifactId: job.id, attempt: job.attempts }, 'artefak offline selesai tetapi klaim sudah tidak berlaku — berkas dibuang');
+        return;
+      }
+      // Berkas versi/percobaan lama tidak lagi dirujuk → hapus.
       if (job.path && job.path !== name) await rm(join(UPLOAD_DIR, job.path), { force: true }).catch(() => {});
-      log.info({ artifactId: job.id, kind: job.content_kind, bytes: r.size }, 'artefak offline siap');
+      log.info({ artifactId: job.id, kind: job.content_kind, bytes: built.size }, 'artefak offline siap');
       await wakeJob(db, OFFLINE_JOB); // mungkin masih ada antrean
     } catch (e) {
       const msg = (e as Error).message.slice(0, 500);
       const final = job.attempts >= MAX_ATTEMPTS;
-      await db.query(`UPDATE offline_artifacts SET status = $2, error = $3, updated_at = now() WHERE id = $1`, [job.id, final ? 'failed' : 'pending', msg]);
+      if (built) await rm(join(UPLOAD_DIR, name), { force: true }).catch(() => {});
+      await db.query(`UPDATE offline_artifacts SET status = $2, error = $3, updated_at = now() WHERE id = $1 AND status = 'processing' AND attempts = $4`, [
+        job.id,
+        final ? 'failed' : 'pending',
+        msg,
+        job.attempts,
+      ]);
       log.error({ artifactId: job.id, attempt: job.attempts, err: msg }, final ? 'artefak offline gagal permanen' : 'artefak offline gagal, dicoba ulang');
+    } finally {
+      built?.cek.fill(0);
     }
   },
 };

@@ -26,6 +26,8 @@ export type OfflineDenyCode =
   | 'device_limit'
   | 'device_full'
   | 'rate_limited'
+  | 'device_rate_limited'
+  | 'queue_full'
   | 'content_not_found'
   | 'content_not_allowed'
   | 'content_unavailable';
@@ -43,11 +45,18 @@ export const OFFLINE_DENY: Record<OfflineDenyCode, { status: number; id: string;
   device_limit: { status: 409, id: 'Batas perangkat unduhan tercapai. Cabut salah satu perangkat terlebih dahulu', en: 'Download device limit reached. Remove one of your devices first' },
   device_full: { status: 409, id: 'Batas unduhan di perangkat ini tercapai. Hapus beberapa unduhan terlebih dahulu', en: 'Download limit reached on this device. Remove some downloads first' },
   rate_limited: { status: 429, id: 'Terlalu banyak unduhan baru dalam satu jam. Coba lagi nanti', en: 'Too many new downloads within an hour. Please try again later' },
+  device_rate_limited: { status: 429, id: 'Terlalu banyak pendaftaran perangkat hari ini. Coba lagi besok', en: 'Too many device registrations today. Please try again tomorrow' },
+  queue_full: { status: 503, id: 'Antrean penyiapan unduhan sedang penuh. Coba lagi beberapa saat lagi', en: 'The download preparation queue is full. Please try again shortly' },
   content_not_found: { status: 404, id: 'Konten tidak ditemukan', en: 'Content not found' },
   content_not_allowed: { status: 403, id: 'Pemilik konten tidak mengizinkan unduhan offline', en: 'The rights holder does not allow offline downloads' },
   content_unavailable: { status: 409, id: 'Konten ini belum tersedia untuk diunduh', en: 'This content is not available for download yet' },
 };
-export const OFFLINE_MESSAGES_EN: Record<string, string> = Object.fromEntries(Object.values(OFFLINE_DENY).map((m) => [m.id, m.en]));
+/** Galat service hulu (iam/catalog) yang tidak punya padanan kode §12 → 502 generik (detail internal tidak diteruskan). */
+export const OFFLINE_UPSTREAM_ERROR = { id: 'Layanan unduhan sedang bermasalah. Coba lagi beberapa saat lagi', en: 'The download service is having problems. Please try again shortly' };
+export const OFFLINE_MESSAGES_EN: Record<string, string> = {
+  ...Object.fromEntries(Object.values(OFFLINE_DENY).map((m) => [m.id, m.en])),
+  [OFFLINE_UPSTREAM_ERROR.id]: OFFLINE_UPSTREAM_ERROR.en,
+};
 
 export interface OfflinePolicy {
   enabled: boolean;
@@ -103,10 +112,24 @@ export function deviceDenial(d: OfflineDevice | null | undefined, userId: string
   return null;
 }
 
-/** Batas lisensi baru: kapasitas perangkat lalu laju per jam. */
-export function licenseQuota(q: { activeOnDevice: number; maxPerDevice: number; createdLastHour: number; ratePerHour: number }): OfflineDenyCode | null {
+/**
+ * Batas lisensi baru: kapasitas perangkat lalu laju per jam. Permintaan yang masih menunggu artefak (202 `preparing`)
+ * ikut dihitung (`pendingOthers` = konten LAIN yang sedang disiapkan untuk akun ini dalam 1 jam) dan dibatasi
+ * `maxPending` — tanpa ini 202 berulang untuk konten berbeda bisa memaksa seluruh katalog dienkripsi.
+ */
+export function licenseQuota(q: {
+  activeOnDevice: number;
+  maxPerDevice: number;
+  createdLastHour: number;
+  ratePerHour: number;
+  pendingOthers?: number;
+  maxPending?: number;
+  alreadyPending?: boolean;
+}): OfflineDenyCode | null {
   if (q.activeOnDevice >= q.maxPerDevice) return 'device_full';
-  if (q.createdLastHour >= q.ratePerHour) return 'rate_limited';
+  const pending = q.pendingOthers ?? 0;
+  if (q.createdLastHour + pending >= q.ratePerHour) return 'rate_limited';
+  if (!q.alreadyPending && q.maxPending !== undefined && pending >= q.maxPending) return 'rate_limited';
   return null;
 }
 

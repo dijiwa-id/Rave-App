@@ -26,4 +26,20 @@ describe('pengaturan unduhan offline (P-7)', () => {
     expect(() => coerceSetting('download.quality', 'lossless')).toThrow();
     expect(() => coerceSetting('download.quality', 'high')).toThrow();
   });
+
+  it('L5: download.tiers berbahaya & minimal satu paket (mematikan semua = lewat download.enabled)', () => {
+    expect(SETTINGS_BY_KEY['download.tiers'].dangerous).toBe(true);
+    expect(() => coerceSetting('download.tiers', [])).toThrow(/minimal 1/);
+    expect(() => coerceSetting('download.tiers', ' , ')).toThrow(/minimal 1/);
+    expect(coerceSetting('download.tiers', ['DUO'])).toEqual(['DUO']);
+    // `min` pada daftar lain tetap opsional (allowlist rollout boleh kosong).
+    expect(coerceSetting('download.allow_user_ids', [])).toEqual([]);
+  });
+
+  it('batas anti-penyalahgunaan (review keamanan): default & konsumen', () => {
+    const d = settingDefaults();
+    expect([d['download.pending_per_user'], d['download.queue_max'], d['download.recheck_per_minute'], d['download.devices_per_day'], d['download.device_reregister_block_days']]).toEqual([20, 200, 6, 10, 7]);
+    expect(SETTINGS_BY_KEY['download.queue_max'].consumers).toEqual(['catalog']);
+    expect(SETTINGS_BY_KEY['download.devices_per_day'].consumers).toEqual(['iam']);
+  });
 });

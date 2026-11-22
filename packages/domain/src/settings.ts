@@ -480,26 +480,33 @@ export const SETTINGS: SettingDef[] = [
 
   // ---- Unduhan offline Premium (P-7, ADR-0004). Batas perangkat: subscription.download_devices. ----
   { key: 'download.enabled', group: 'download', label: 'Unduhan offline aktif', description: 'Saklar induk. Mati: pendaftaran perangkat & penerbitan/cek ulang lisensi ditolak (403); unduhan yang sudah ada tetap bisa diputar sampai lisensinya kedaluwarsa.', type: 'boolean', default: false, public: true, consumers: ['iam', 'catalog', 'playback', 'web'], dangerous: true },
-  { key: 'download.allow_user_ids', group: 'download', label: 'Rollout terbatas (ID pengguna)', description: 'Daftar ID akun yang boleh memakai unduhan offline selama uji coba. Kosong = semua pelanggan Premium yang memenuhi syarat.', type: 'list', default: [], consumers: ['playback'], dangerous: true },
+  { key: 'download.allow_user_ids', group: 'download', label: 'Rollout terbatas (ID pengguna)', description: 'Daftar ID akun yang boleh memakai unduhan offline selama uji coba. Kosong = semua pelanggan Premium yang memenuhi syarat.', type: 'list', default: [], consumers: ['iam', 'playback'], dangerous: true },
   {
     key: 'download.tiers',
     group: 'download',
     label: 'Paket yang boleh mengunduh',
-    description: 'Jenis member Premium aktif yang berhak atas unduhan offline. Gratis tidak pernah berhak. Paket yang dikeluarkan dari daftar → lisensinya dicabut saat cek ulang.',
+    description: 'Jenis member Premium aktif yang berhak atas unduhan offline. Gratis tidak pernah berhak. Paket yang dikeluarkan dari daftar → lisensinya dicabut saat cek ulang. Minimal satu paket (untuk menghentikan semua unduhan, matikan "Unduhan offline aktif").',
     type: 'list',
     default: ['INDIVIDUAL', 'STUDENT', 'DUO'],
+    min: 1,
+    dangerous: true,
     options: [
       { value: 'INDIVIDUAL', label: 'Individu' },
       { value: 'STUDENT', label: 'Pelajar' },
       { value: 'DUO', label: 'Duo' },
     ],
     public: true,
-    consumers: ['playback', 'web'],
+    consumers: ['iam', 'playback', 'web'],
   },
   { key: 'download.max_tracks_per_device', group: 'download', label: 'Unduhan maksimum per perangkat', description: 'Jumlah lisensi aktif (lagu + episode) per perangkat.', type: 'number', default: 500, min: 10, max: 10_000, unit: 'item', public: true, consumers: ['playback', 'web'] },
   { key: 'download.license_ttl_days', group: 'download', label: 'Masa berlaku lisensi', description: 'Lisensi kedaluwarsa bila perangkat tidak cek ulang selama ini — batas risiko pencabutan saat perangkat terus offline.', type: 'number', default: 30, min: 1, max: 90, unit: 'hari', public: true, consumers: ['playback', 'web'] },
   { key: 'download.recheck_hours', group: 'download', label: 'Interval cek ulang', description: 'Aplikasi memeriksa ulang lisensi ke server setiap selang ini saat online (memperpanjang yang masih berhak, menerima daftar yang dicabut).', type: 'number', default: 72, min: 1, max: 720, unit: 'jam', public: true, consumers: ['playback', 'web'] },
   { key: 'download.rate_per_user_hour', group: 'download', label: 'Lisensi baru per jam', description: 'Batas lisensi baru per akun per jam (anti-scraping). Perpanjangan lisensi yang sudah ada tidak dihitung.', type: 'number', default: 60, min: 1, max: 1000, unit: 'lisensi/jam', consumers: ['playback'] },
+  { key: 'download.pending_per_user', group: 'download', label: 'Unduhan menunggu per akun', description: 'Batas konten berbeda yang sedang disiapkan (berkas terenkripsi belum siap, respons 202) per akun dalam satu jam. Permintaan yang menunggu juga dihitung ke "Lisensi baru per jam".', type: 'number', default: 20, min: 1, max: 200, unit: 'konten', consumers: ['playback'] },
+  { key: 'download.queue_max', group: 'download', label: 'Antrean penyiapan maksimum', description: 'Batas global berkas terenkripsi yang menunggu dibuat (seluruh platform). Penuh → permintaan konten yang belum pernah diunduh dijawab 503 + Retry-After tanpa menambah antrean (melindungi disk & CPU server).', type: 'number', default: 200, min: 10, max: 10_000, unit: 'berkas', consumers: ['catalog'] },
+  { key: 'download.recheck_per_minute', group: 'download', label: 'Cek ulang per menit', description: 'Batas permintaan cek ulang lisensi per akun per menit (aplikasi normal hanya cek ulang tiap beberapa jam).', type: 'number', default: 6, min: 1, max: 60, unit: 'permintaan/menit', consumers: ['playback'] },
+  { key: 'download.devices_per_day', group: 'download', label: 'Pendaftaran perangkat per hari', description: 'Batas pendaftaran perangkat unduhan baru per akun dalam 24 jam (termasuk yang kemudian dicabut) — mencegah daftar-cabut berulang.', type: 'number', default: 10, min: 1, max: 100, unit: 'perangkat/hari', consumers: ['iam'] },
+  { key: 'download.device_reregister_block_days', group: 'download', label: 'Blokir daftar ulang perangkat dicabut', description: 'Kunci perangkat yang sudah dicabut tidak bisa didaftarkan ulang di akun yang sama selama ini. 0 = tanpa blokir.', type: 'number', default: 7, min: 0, max: 90, unit: 'hari', consumers: ['iam'] },
   { key: 'download.podcast_enabled', group: 'download', label: 'Episode podcast bisa diunduh', description: 'Selain lagu, episode podcast/audio fiksi unggahan kreator boleh diunduh. Episode embed tidak pernah bisa diunduh.', type: 'boolean', default: true, public: true, consumers: ['playback', 'web'] },
   {
     key: 'download.quality',
@@ -750,6 +757,8 @@ export function coerceSetting(key: string, value: unknown): unknown {
       // Daftar dengan pilihan tetap (mis. izin per peran): setiap item wajib salah satu pilihan.
       const bad = def.options ? items.filter((x) => !def.options!.some((o) => o.value === x)) : [];
       if (bad.length) throw new Error(`${def.label}: pilihan tidak dikenal (${bad.join(', ')})`);
+      // Untuk daftar, `min` = jumlah item minimal (mis. paket unduhan: minimal satu).
+      if (def.min !== undefined && items.length < def.min) throw new Error(`${def.label}: minimal ${def.min} item`);
       return items;
     }
     case 'image': {

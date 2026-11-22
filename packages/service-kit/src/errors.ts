@@ -116,5 +116,7 @@ export function errorHandler(err: FastifyError | Error, req: FastifyRequest, rep
     if (typeof body.title === 'string' && EN_TITLE[body.title]) body.title = EN_TITLE[body.title];
   }
   body.instance = req.url;
+  // Problem 429/503 yang menyebut `retry_after_s` (mis. kode unduhan offline) → header Retry-After standar juga.
+  if ((status === 429 || status === 503) && typeof body.retry_after_s === 'number') reply.header('retry-after', String(Math.max(1, Math.ceil(body.retry_after_s))));
   reply.status(status).type('application/problem+json').send(body);
 }

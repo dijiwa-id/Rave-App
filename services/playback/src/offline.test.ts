@@ -2,7 +2,8 @@ import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fromB64u, settings, unwrapCek, verifyLicense, verifyMediaSig, wrapAad, wrapCek } from '@rave/service-kit';
 import { authAs, fakeDb, testApp } from '@rave/service-kit/testing';
-import { offlineConsumers, offlineExpireJob, offlineRoutes, type Entitlement, type KeyResult, type OfflineDeps } from './offline.js';
+import { HttpError, offlineDeny } from '@rave/service-kit';
+import { mapIamUpstream, mapUpstream, offlineConsumers, offlineExpireJob, offlineRoutes, type Entitlement, type KeyResult, type OfflineDeps } from './offline.js';
 
 const U1 = '0190a000-0000-7000-8000-0000000000e1';
 const U2 = '0190a000-0000-7000-8000-0000000000e2';
@@ -19,6 +20,9 @@ const CEK = randomBytes(32);
 /** Tabel offline_licenses di memori — mencukupi SQL yang dipakai offline.ts. */
 function licenseDb() {
   const rows: any[] = [];
+  const reqs: { user_id: string; content_id: string; created_at: Date }[] = [];
+  const revs = new Map<string, Date>();
+  const rate = new Map<string, { w: number; n: number }>();
   const now = () => Date.now();
   const where = (sql: string, p: any[]) => {
     const w = sql.split("WHERE status = 'ACTIVE' AND ")[1].replace(/ RETURNING id$/, '');
@@ -36,10 +40,38 @@ function licenseDb() {
         {
           active: rows.filter((r) => r.device_id === p[0] && r.status === 'ACTIVE').length,
           recent: rows.filter((r) => r.user_id === p[1] && r.created_at.getTime() > now() - 3600_000).length,
+          pending: reqs.filter((q) => q.user_id === p[1] && q.content_id !== p[2] && q.created_at.getTime() > now() - 3600_000).length,
+          mine_pending: reqs.some((q) => q.user_id === p[1] && q.content_id === p[2] && q.created_at.getTime() > now() - 3600_000),
           existing: rows.find((r) => r.device_id === p[0] && (r.track_id ?? r.episode_id) === p[2] && r.status === 'ACTIVE')?.id ?? null,
         },
       ];
     }
+    if (sql.startsWith('INSERT INTO offline_requests')) {
+      if (reqs.some((q) => q.user_id === p[0] && q.content_id === p[1])) return [{ inserted: false }];
+      reqs.push({ user_id: p[0], content_id: p[1], created_at: new Date() });
+      return [{ inserted: true }];
+    }
+    if (sql.startsWith('DELETE FROM offline_requests WHERE user_id')) {
+      for (let i = reqs.length - 1; i >= 0; i--) if (reqs[i].user_id === p[0] && reqs[i].content_id === p[1]) reqs.splice(i, 1);
+      return [];
+    }
+    if (sql.startsWith('INSERT INTO offline_revocations')) {
+      for (const id of p[1]) revs.set(`${p[0]}:${id}`, new Date());
+      return [];
+    }
+    if (sql.startsWith('SELECT 1 FROM offline_revocations')) {
+      const since = (p[4] as Date).getTime();
+      const keys = [`user:${p[0]}`, `device:${p[1]}`, `${p[2]}:${p[3]}`];
+      return keys.some((k) => (revs.get(k)?.getTime() ?? 0) >= since) ? [{ '?column?': 1 }] : [];
+    }
+    if (sql.startsWith('INSERT INTO offline_rate')) {
+      const w = Math.floor(now() / 60_000);
+      const cur = rate.get(p[0]);
+      const n = cur && cur.w === w ? cur.n + 1 : 1;
+      rate.set(p[0], { w, n });
+      return [{ n }];
+    }
+    if (sql.startsWith('DELETE FROM offline_')) return [];
     if (sql.startsWith('INSERT INTO offline_licenses')) {
       const r = { id: p[0], user_id: p[1], device_id: p[2], track_id: p[3], episode_id: p[4], artifact_id: p[5], artifact: JSON.parse(p[6]), wrapped_key: JSON.parse(p[7]), issued_at: p[8], expires_at: p[9], recheck_at: p[10], status: 'ACTIVE', created_at: new Date(), revoked_at: null, revoke_reason: null };
       rows.push(r);
@@ -68,7 +100,7 @@ function licenseDb() {
     if (sql.startsWith('SELECT * FROM offline_licenses WHERE user_id = $1')) return rows.filter((r) => r.user_id === p[0] && (!p[1] || r.device_id === p[1]) && (p[2] === 'all' || r.status === p[2]));
     return undefined;
   });
-  return { ...f, rows };
+  return { ...f, rows, reqs, revs, rate };
 }
 
 const artifact = (id: string) => ({ id: `art-${id}`, version: 1, format: 'RAVEOFL1' as const, rendition: 'normal', codec_label: 'AAC 160 kbps', mime: 'audio/mp4', size: 1000, plain_size: 900, sha256: 'ab'.repeat(32), url: `/v1/catalog/media/ofl-${id}-v1.rofl` });
@@ -226,6 +258,7 @@ describe('playback: lisensi unduhan offline', () => {
       const l2 = (await issue(a, { device_id: D1, track_id: T2 })).json();
       const l3 = (await issue(a, { device_id: D1, episode_id: EP })).json();
       s.rows.find((r) => r.id === l3.id).expires_at = new Date(Date.now() - 1000);
+      for (const r of s.rows) r.recheck_at = new Date(Date.now() - 1000); // sudah waktunya cek ulang
       const unknown = '0190a000-0000-7000-8000-00000000dead';
       const r = await recheck(await app(deps({ available: { [T2]: false } }).d), [l1.id, l2.id, l3.id, unknown]);
       expect(r.statusCode).toBe(200);
@@ -305,6 +338,154 @@ describe('playback: lisensi unduhan offline', () => {
       s.rows[0].expires_at = new Date(Date.now() - 1);
       await offlineExpireJob.run({ db: s.db, log: { info() {} } } as any);
       expect(s.rows.map((r) => r.status)).toEqual(['EXPIRED', 'ACTIVE']);
+    });
+  });
+  // ---------------- Review keamanan P-7 ----------------
+  describe('M2: banjir artefak lewat jalur 202', () => {
+    const uuid = (i: number) => `0190a000-0000-7000-8000-${String(i).padStart(12, '0')}`;
+    const preparing = () => deps({ key: () => ({ status: 'preparing', retry_after_s: 15 }) });
+
+    it('N permintaan 202 untuk konten berbeda → setelah download.pending_per_user → 429 rate_limited, catalog tidak dipanggil lagi', async () => {
+      settings.apply({ 'download.pending_per_user': 3 });
+      const { d, calls } = preparing();
+      const a = await app(d);
+      for (let i = 1; i <= 3; i++) expect((await issue(a, { device_id: D1, track_id: uuid(i) })).statusCode).toBe(202);
+      const r = await issue(a, { device_id: D1, track_id: uuid(4) });
+      expect(r.statusCode).toBe(429);
+      expect(r.json()).toMatchObject({ code: 'rate_limited', retry_after_s: 60 });
+      expect(r.headers['retry-after']).toBe('60');
+      expect(calls.key).toBe(3);
+      // Polling konten yang SAMA tidak menambah hitungan & tetap dilayani.
+      expect((await issue(a, { device_id: D1, track_id: uuid(2) })).statusCode).toBe(202);
+      expect(s.reqs).toHaveLength(3);
+      settings.apply({ 'download.pending_per_user': 20 });
+    });
+
+    it('permintaan menunggu ikut dihitung ke rate_per_user_hour; lisensi terbit menggantikan reservasinya (tidak dihitung dua kali)', async () => {
+      settings.apply({ 'download.rate_per_user_hour': 3 });
+      const a = await app(preparing().d);
+      expect((await issue(a, { device_id: D1, track_id: T1 })).statusCode).toBe(202);
+      expect((await issue(a, { device_id: D1, track_id: T2 })).statusCode).toBe(202);
+      const ready = await app(); // artefak T1 siap
+      expect((await issue(ready, { device_id: D1, track_id: T1 })).statusCode).toBe(201);
+      expect(s.reqs.map((q) => q.content_id)).toEqual([T2]);
+      // 1 lisensi + 1 menunggu = 2 < 3 → konten ketiga boleh; keempat ditolak.
+      expect((await issue(a, { device_id: D1, episode_id: EP })).statusCode).toBe(202);
+      const r = await issue(a, { device_id: D1, track_id: uuid(9) });
+      expect([r.statusCode, r.json().code, r.json().retry_after_s]).toEqual([429, 'rate_limited', 3600]);
+    });
+
+    it('antrean catalog penuh (503 queue_full, tiba sebagai 502 dari callService) → 503 + Retry-After, reservasi dilepas', async () => {
+      const upstream = new HttpError(502, 'Upstream error', 'Antrean penyiapan unduhan sedang penuh. Coba lagi beberapa saat lagi');
+      const { d } = deps({ key: () => mapUpstream(upstream) });
+      const r = await issue(await app(d), { device_id: D1, track_id: T1 });
+      expect(r.statusCode).toBe(503);
+      expect(r.json()).toMatchObject({ code: 'queue_full', retry_after_s: 60 });
+      expect(r.headers['retry-after']).toBe('60');
+      expect(s.reqs).toHaveLength(0);
+      expect(s.rows).toHaveLength(0);
+    });
+
+    it('konten ditolak final (403 content_not_allowed) → reservasi dilepas', async () => {
+      const { d } = deps({ key: () => { throw offlineDeny('content_not_allowed'); } });
+      expect((await issue(await app(d), { device_id: D1, track_id: T1 })).statusCode).toBe(403);
+      expect(s.reqs).toHaveLength(0);
+    });
+  });
+
+  describe('L2: pencabutan bersamaan dengan penerbitan', () => {
+    it('perangkat dicabut saat artefak diminta → hak diperiksa ulang → 403 device_revoked, tidak ada lisensi ACTIVE', async () => {
+      let revoked = false;
+      const base = deps().d;
+      const d: OfflineDeps = {
+        ...base,
+        entitlement: async (u, dev) => {
+          const e = await base.entitlement(u, dev);
+          return revoked && e.device ? { ...e, device: { ...e.device, revoked_at: new Date().toISOString() } } : e;
+        },
+        contentKey: async (kind, id, pk) => {
+          const out = await base.contentKey(kind, id, pk);
+          // Event iam.device.revoked dikonsumsi di antara pemeriksaan hak & transaksi penerbitan.
+          revoked = true;
+          await s.db.tx((tx) => (offlineConsumers() as any)['iam.device.revoked']({ payload: { deviceId: D1, userId: U1, reason: 'USER' } }, tx));
+          return out;
+        },
+      };
+      const r = await issue(await app(d), { device_id: D1, track_id: T1 });
+      expect([r.statusCode, r.json().code]).toEqual([403, 'device_revoked']);
+      expect(s.rows).toHaveLength(0);
+    });
+
+    it('konten ditarik saat penerbitan → tidak terbit (409 content_unavailable bila sumber masih menjawab siap)', async () => {
+      const base = deps().d;
+      const d: OfflineDeps = {
+        ...base,
+        contentKey: async (kind, id, pk) => {
+          const out = await base.contentKey(kind, id, pk);
+          await s.db.tx((tx) => (offlineConsumers() as any)['catalog.offline.revoked']({ payload: { contentKind: 'track', contentIds: [T1], reason: 'OFFLINE_DISABLED' } }, tx));
+          return out;
+        },
+      };
+      const r = await issue(await app(d), { device_id: D1, track_id: T1 });
+      expect([r.statusCode, r.json().code]).toEqual([409, 'content_unavailable']);
+      expect(s.rows.filter((x) => x.status === 'ACTIVE')).toHaveLength(0);
+      expect(s.queries.some((q) => q.includes("hashtext('playback.offline.rev')"))).toBe(true);
+    });
+  });
+
+  describe('L1: akun ditangguhkan / dihapus', () => {
+    it.each(['iam.user.suspended', 'iam.user.deleted'])('%s → semua lisensi pengguna REVOKED (ACCOUNT_SUSPENDED), idempoten', async (topic) => {
+      const a = await app();
+      await issue(a, { device_id: D1, track_id: T1 });
+      await issue(a, { device_id: D1, episode_id: EP });
+      const h = (offlineConsumers() as any)[topic];
+      await s.db.tx((tx) => h({ payload: { userId: U1 } }, tx));
+      await s.db.tx((tx) => h({ payload: { userId: U1 } }, tx));
+      expect(s.rows.map((r) => [r.status, r.revoke_reason])).toEqual([['REVOKED', 'ACCOUNT_SUSPENDED'], ['REVOKED', 'ACCOUNT_SUSPENDED']]);
+      expect(s.revs.has(`user:${U1}`)).toBe(true);
+    });
+  });
+
+  describe('L6: recheck', () => {
+    const recheck = async (a: any, ids: string[]) => a.inject({ method: 'POST', url: '/v1/offline/recheck', headers: await authAs({ sub: U1 }), payload: { device_id: D1, license_ids: ids } });
+
+    it('lisensi yang belum waktunya → unchanged (tidak ditandatangani ulang / ditulis ulang)', async () => {
+      const a = await app();
+      const l1 = (await issue(a, { device_id: D1, track_id: T1 })).json();
+      const before = s.rows[0].expires_at;
+      const b = (await recheck(a, [l1.id])).json();
+      expect(b).toMatchObject({ renewed: [], revoked: [], expired: [], unknown: [], unchanged: [l1.id] });
+      expect(s.rows[0].expires_at).toBe(before);
+    });
+
+    it('> download.recheck_per_minute per akun → 429 + Retry-After', async () => {
+      settings.apply({ 'download.recheck_per_minute': 2 });
+      const a = await app();
+      expect((await recheck(a, [])).statusCode).toBe(200);
+      expect((await recheck(a, [])).statusCode).toBe(200);
+      const r = await recheck(a, []);
+      expect(r.statusCode).toBe(429);
+      expect(r.headers['retry-after']).toBe('60');
+      settings.apply({ 'download.recheck_per_minute': 6 });
+    });
+  });
+
+  describe('L8: galat hulu', () => {
+    const codeOf = (fn: () => never) => {
+      try {
+        fn();
+      } catch (e) {
+        return [(e as HttpError).status, (e as HttpError).extra?.code, (e as HttpError).detail];
+      }
+    };
+    it('4xx catalog tanpa padanan §12 → 502 generik (detail internal tidak bocor); 404/409 dipetakan; 5xx diteruskan', () => {
+      expect(codeOf(() => mapUpstream(new HttpError(403, 'Upstream error', 'Khusus antar-service')))?.slice(0, 2)).toEqual([502, 'upstream_error']);
+      expect(codeOf(() => mapUpstream(new HttpError(422, 'Upstream error', 'Kunci publik perangkat tidak valid')))?.[2]).not.toMatch(/Kunci/);
+      expect(codeOf(() => mapUpstream(new HttpError(404, 'Upstream error', 'x')))?.slice(0, 2)).toEqual([404, 'content_not_found']);
+      expect(codeOf(() => mapUpstream(new HttpError(403, 'Upstream error', 'Pemilik konten tidak mengizinkan unduhan offline')))?.slice(0, 2)).toEqual([403, 'content_not_allowed']);
+      expect(codeOf(() => mapUpstream(new HttpError(504, 'Gateway Timeout', 'catalog tidak merespons')))?.[0]).toBe(504);
+      expect(codeOf(() => mapIamUpstream(new HttpError(404, 'Upstream error', 'Pengguna tidak ditemukan')))?.slice(0, 2)).toEqual([403, 'account_suspended']);
+      expect(codeOf(() => mapIamUpstream(new HttpError(400, 'Upstream error', 'x')))?.slice(0, 2)).toEqual([502, 'upstream_error']);
     });
   });
 });

@@ -51,6 +51,15 @@ describe('perangkat & kuota', () => {
     expect(licenseQuota({ activeOnDevice: 500, maxPerDevice: 500, createdLastHour: 0, ratePerHour: 60 })).toBe('device_full');
     expect(licenseQuota({ activeOnDevice: 0, maxPerDevice: 500, createdLastHour: 60, ratePerHour: 60 })).toBe('rate_limited');
   });
+
+  it('M2: permintaan yang menunggu artefak dihitung ke laju & dibatasi per akun', () => {
+    const base = { activeOnDevice: 0, maxPerDevice: 500, ratePerHour: 60, maxPending: 20 };
+    expect(licenseQuota({ ...base, createdLastHour: 50, pendingOthers: 10 })).toBe('rate_limited');
+    expect(licenseQuota({ ...base, createdLastHour: 0, pendingOthers: 19 })).toBeNull();
+    expect(licenseQuota({ ...base, createdLastHour: 0, pendingOthers: 20 })).toBe('rate_limited');
+    // Polling konten yang sudah menunggu tidak ditolak oleh batas menunggu.
+    expect(licenseQuota({ ...base, createdLastHour: 0, pendingOthers: 20, alreadyPending: true })).toBeNull();
+  });
 });
 
 describe('pencabutan karena perubahan member', () => {

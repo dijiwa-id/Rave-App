@@ -25,7 +25,7 @@ import { HttpError } from './errors.js';
 /** Problem Details penolakan unduhan offline: status & pesan ID (EN lewat localizeDetail) + `code` untuk klien. */
 export function offlineDeny(code: OfflineDenyCode, extra?: Record<string, unknown>): HttpError {
   const m = OFFLINE_DENY[code];
-  const title = m.status === 404 ? 'Not Found' : m.status === 409 ? 'Conflict' : m.status === 429 ? 'Too Many Requests' : 'Forbidden';
+  const title = m.status === 404 ? 'Not Found' : m.status === 409 ? 'Conflict' : m.status === 429 ? 'Too Many Requests' : m.status === 503 ? 'Service Unavailable' : 'Forbidden';
   return new HttpError(m.status, title, m.id, { type: `https://rave.id/problems/offline/${code.replace(/_/g, '-')}`, code, ...extra });
 }
 

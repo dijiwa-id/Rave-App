@@ -1,5 +1,5 @@
 import { generateKeyPairSync, randomBytes, createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 // UPLOAD_DIR dibaca saat modul dimuat → set sebelum import dinamis.
 const DIR = mkdtempSync(join(tmpdir(), 'rave-ofl-'));
 process.env.UPLOAD_DIR = DIR;
-const { settings, decryptOfl, unwrapCek, wrapAad, sealCek, openCek } = await import('@rave/service-kit');
+const { settings, decryptOfl, unwrapCek, wrapAad, sealCek, openCek, cekKeyId } = await import('@rave/service-kit');
 const { asService, authAs, fakeDb, testApp } = await import('@rave/service-kit/testing');
 const { buildArtifact, offlineArtifactJob, offlineRoutes, publishOfflineRevoked } = await import('./offline.js');
 
@@ -19,10 +19,11 @@ const dev = () => {
 
 type Row = { offline_allowed: boolean; visible: boolean; uploaded: boolean; renditions: any; transcode_status: string };
 
-function catalogDb(content: Row | null) {
+function catalogDb(content: Row | null, extraQueued = 0) {
   const artifacts: any[] = [];
   const f = fakeDb((sql, p) => {
     if (sql.startsWith('SELECT t.offline_allowed') || sql.startsWith('SELECT e.offline_allowed')) return content ? [content] : [];
+    if (sql.startsWith('SELECT count(*)::int AS n FROM offline_artifacts')) return [{ n: artifacts.filter((a) => a.status === 'pending' || a.status === 'processing').length + extraQueued }];
     if (sql.startsWith('SELECT * FROM offline_artifacts')) return artifacts.filter((a) => a.content_kind === p[0] && a.content_id === p[1] && a.rendition === p[2]);
     if (sql.startsWith('INSERT INTO offline_artifacts')) {
       artifacts.push({ id: p[0], content_kind: p[1], content_id: p[2], rendition: p[3], source_file: p[4], codec_label: p[5], status: 'pending', version: 1, attempts: 0, updated_at: new Date() });
@@ -36,11 +37,19 @@ function catalogDb(content: Row | null) {
       return [{ ...a }];
     }
     if (sql.startsWith("UPDATE offline_artifacts SET status = 'ready'")) {
-      Object.assign(artifacts.find((x) => x.id === p[0]), { status: 'ready', path: p[1], cek_encrypted: p[2], iv: p[3], size: p[4], plain_size: p[5], sha256: p[6] });
-      return [];
+      const a = artifacts.find((x) => x.id === p[0] && x.status === 'processing' && x.attempts === p[8]);
+      if (!a) return [];
+      Object.assign(a, { status: 'ready', path: p[1], cek_encrypted: p[2], iv: p[3], size: p[4], plain_size: p[5], sha256: p[6], key_id: p[7] });
+      return [{ id: a.id }];
     }
     if (sql.startsWith('UPDATE offline_artifacts SET status = $2')) {
-      Object.assign(artifacts.find((x) => x.id === p[0]), { status: p[1], error: p[2] });
+      const a = artifacts.find((x) => x.id === p[0] && x.status === 'processing' && x.attempts === p[3]);
+      if (a) Object.assign(a, { status: p[1], error: p[2] });
+      return [];
+    }
+    if (sql.startsWith("UPDATE offline_artifacts SET status = 'pending'")) {
+      const a = artifacts.find((x) => x.id === p[0] && ['ready', 'failed'].includes(x.status));
+      if (a) Object.assign(a, { status: 'pending', attempts: 0, error: null, source_file: p[1], codec_label: p[3], version: a.version + (p[2] ? 1 : 0) });
       return [];
     }
     if (sql.startsWith('SELECT t.id FROM tracks')) return p[0].filter((id: string) => id === TRACK && content?.offline_allowed && content.visible).map((id: string) => ({ id }));
@@ -101,7 +110,8 @@ describe('catalog: artefak offline & kunci terbungkus', () => {
     await offlineArtifactJob.run({ db: s.db, log } as any);
     const a = s.artifacts[0];
     expect(a.status).toBe('ready');
-    expect(a.path).toMatch(/^ofl-.+-v1\.rofl$/);
+    expect(a.path).toMatch(/^ofl-.+-v1-[0-9a-f]{8}\.rofl$/);
+    expect(a.key_id).toBe(cekKeyId());
     expect(a.cek_encrypted).toBeTruthy();
 
     const r2 = await call(s.db, { kind: 'track', id: TRACK, device_public_key: d.pub });
@@ -136,9 +146,79 @@ describe('catalog: artefak offline & kunci terbungkus', () => {
     const src = join(DIR, 'x.normal.m4a');
     writeFileSync(src, randomBytes(70_000));
     const r = await buildArtifact(src, join(DIR, 'out.rofl'));
-    expect(existsSync(join(DIR, 'out.rofl.part'))).toBe(false);
+    expect(readdirSync(DIR).filter((f) => f.endsWith('.part'))).toEqual([]);
     expect(openCek(sealCek(r.cek)).equals(r.cek)).toBe(true);
     expect(decryptOfl(readFileSync(join(DIR, 'out.rofl')), r.cek).length).toBe(70_000);
+  });
+
+  // ---- Review keamanan P-7 ----
+  it('L7: Super Admin tidak boleh memanggil /internal/offline/key (403 + audit internal.denied); tanpa token 401', async () => {
+    const s = catalogDb(LIVE);
+    const r = await call(s.db, { kind: 'track', id: TRACK, device_public_key: dev().pub }, await authAs({ sub: '0190a000-0000-7000-8000-0000000000c7', roles: ['superadmin', 'admin'] as any }));
+    expect(r.statusCode).toBe(403);
+    expect(s.queries.some((q) => q.startsWith('INSERT INTO audit_logs'))).toBe(true);
+    expect(s.artifacts).toHaveLength(0);
+    expect((await call(s.db, { kind: 'track', id: TRACK, device_public_key: dev().pub }, {})).statusCode).toBe(401);
+  });
+
+  it('M2: antrean global penuh → 503 queue_full + Retry-After, tanpa menambah antrean; artefak siap tetap dilayani', async () => {
+    settings.apply({ 'download.queue_max': 10 });
+    try {
+      const s = catalogDb(LIVE, 10);
+      const r = await call(s.db, { kind: 'track', id: TRACK, device_public_key: dev().pub });
+      expect(r.statusCode).toBe(503);
+      expect(r.json()).toMatchObject({ code: 'queue_full', retry_after_s: 60 });
+      expect(r.headers['retry-after']).toBe('60');
+      expect(s.artifacts).toHaveLength(0);
+      expect(s.queries.some((q) => q.includes('pg_notify'))).toBe(false);
+      // Antrean lega → masuk antrean, diproses; kemudian antrean penuh lagi tidak menghalangi artefak yang sudah siap.
+      const ok = catalogDb(LIVE);
+      await call(ok.db, { kind: 'track', id: TRACK, device_public_key: dev().pub });
+      await offlineArtifactJob.run({ db: ok.db, log } as any);
+      settings.apply({ 'download.queue_max': 0 });
+      expect((await call(ok.db, { kind: 'track', id: TRACK, device_public_key: dev().pub })).statusCode).toBe(200);
+    } finally {
+      settings.apply({ 'download.queue_max': 200 });
+    }
+  });
+
+  it('L5: kunci segel berganti (key_id beda / CEK tak bisa dibuka) → artefak dibangun ulang (202), bukan 500', async () => {
+    const s = catalogDb(LIVE);
+    const d = dev();
+    await call(s.db, { kind: 'track', id: TRACK, device_public_key: d.pub });
+    await offlineArtifactJob.run({ db: s.db, log } as any);
+    const a = s.artifacts[0];
+    a.key_id = 'ffffffffffffffff';
+    const r1 = await call(s.db, { kind: 'track', id: TRACK, device_public_key: d.pub });
+    expect(r1.statusCode).toBe(202);
+    expect(a).toMatchObject({ status: 'pending', version: 2 });
+    await offlineArtifactJob.run({ db: s.db, log } as any);
+    expect(a.key_id).toBe(cekKeyId());
+    // Baris lama tanpa key_id yang tersegel kunci lain
+    a.key_id = null;
+    a.cek_encrypted = Buffer.alloc(60, 1).toString('base64');
+    const r2 = await call(s.db, { kind: 'track', id: TRACK, device_public_key: d.pub });
+    expect(r2.statusCode).toBe(202);
+    expect(a).toMatchObject({ status: 'pending', version: 3 });
+  });
+
+  it('L4: klaim basi diambil worker lain selama enkripsi → hasil worker lama dibuang (guard attempts), berkas tidak tertinggal', async () => {
+    const s = catalogDb(LIVE);
+    await call(s.db, { kind: 'track', id: TRACK, device_public_key: dev().pub });
+    const before = new Set(readdirSync(DIR));
+    // Simulasikan: setelah klaim, worker lain mengklaim ulang (attempts naik) sebelum UPDATE akhir.
+    const orig = s.db.one;
+    (s.db as any).one = async (sql: string, p?: any[]) => {
+      const out = await orig(sql, p);
+      if (sql.startsWith("UPDATE offline_artifacts SET status = 'processing'")) s.artifacts[0].attempts++;
+      return out;
+    };
+    await offlineArtifactJob.run({ db: s.db, log } as any);
+    (s.db as any).one = orig;
+    expect(s.artifacts[0]).toMatchObject({ status: 'processing' });
+    expect(s.artifacts[0].path).toBeUndefined();
+    const added = readdirSync(DIR).filter((f) => !before.has(f));
+    expect(added).toEqual([]);
   });
 
   it('publishOfflineRevoked: no-op bila kosong, dipecah per 500 id', async () => {

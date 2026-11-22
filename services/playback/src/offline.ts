@@ -10,6 +10,7 @@ import {
   offlineGate,
   offlinePolicy,
   OFFLINE_DENY,
+  OFFLINE_UPSTREAM_ERROR,
   type OfflineContentKind,
   type OfflineDenyCode,
   type OfflineLicensePayload,
@@ -53,24 +54,77 @@ export interface OfflineDeps {
   contentStatus(tracks: string[], episodes: string[]): Promise<Record<string, boolean>>;
 }
 
-/** Galat catalog (403/404/409 + pesan dari OFFLINE_DENY) → kode penolakan yang sama ke klien. */
-function mapUpstream(e: unknown): never {
+/** 502 generik untuk galat hulu yang tidak punya padanan §12 (detail internal — mis. "Khusus antar-service" — tidak bocor). */
+export const upstreamFailure = () => new HttpError(502, 'Bad Gateway', OFFLINE_UPSTREAM_ERROR.id, { type: 'https://rave.id/problems/offline/upstream', code: 'upstream_error' });
+const offlineCodeOf = (e: HttpError) => (Object.keys(OFFLINE_DENY) as OfflineDenyCode[]).find((c) => OFFLINE_DENY[c].id === e.detail);
+
+/**
+ * Galat catalog → kode penolakan §12 yang sama ke klien (dicocokkan lewat pesan OFFLINE_DENY, termasuk 503 `queue_full`
+ * yang sampai sebagai 502 dari callService). 404/409 tanpa padanan → content_not_found / content_unavailable;
+ * 4xx lain (400/401/403/422 karena salah konfigurasi antar-service) → 502 generik. Timeout/tak terjangkau tetap 502/504.
+ */
+export function mapUpstream(e: unknown): never {
+  if (e instanceof HttpError) {
+    const code = offlineCodeOf(e);
+    if (code) throw offlineDeny(code, code === 'queue_full' ? { retry_after_s: 60 } : undefined);
+    if (e.status < 500) {
+      if (e.status === 404) throw offlineDeny('content_not_found');
+      if (e.status === 409) throw offlineDeny('content_unavailable');
+      throw upstreamFailure();
+    }
+  }
+  throw e;
+}
+/** Galat iam (entitlement): pengguna tidak ada → akun tidak berhak; 4xx lain → 502 generik. */
+export function mapIamUpstream(e: unknown): never {
   if (e instanceof HttpError && e.status < 500) {
-    const code = (Object.keys(OFFLINE_DENY) as OfflineDenyCode[]).find((c) => OFFLINE_DENY[c].id === e.detail);
-    if (code) throw offlineDeny(code);
-    if (e.status === 404) throw offlineDeny('content_not_found');
-    if (e.status === 409) throw offlineDeny('content_unavailable');
+    if (e.status === 404) throw offlineDeny('account_suspended');
+    throw upstreamFailure();
   }
   throw e;
 }
 
 export function serviceDeps(name: string): OfflineDeps {
   return {
-    entitlement: (userId, deviceId) => callService<Entitlement>(name, 'iam', `/internal/offline/entitlement?user_id=${userId}&device_id=${deviceId}`),
+    entitlement: (userId, deviceId) => callService<Entitlement>(name, 'iam', `/internal/offline/entitlement?user_id=${userId}&device_id=${deviceId}`).catch(mapIamUpstream),
     contentKey: (kind, id, pk) => callService<KeyResult>(name, 'catalog', '/internal/offline/key', { method: 'POST', body: { kind, id, device_public_key: pk } }).catch(mapUpstream),
     contentStatus: async (tracks, episodes) =>
-      (await callService<{ available: Record<string, boolean> }>(name, 'catalog', '/internal/offline/status', { method: 'POST', body: { tracks, episodes } })).available,
+      (await callService<{ available: Record<string, boolean> }>(name, 'catalog', '/internal/offline/status', { method: 'POST', body: { tracks, episodes } }).catch(mapUpstream)).available,
   };
+}
+
+// ---------------- Kunci & watermark pencabutan (L2) ----------------
+/** Kunci per pengguna (penerbitan & pencabutan level akun). */
+const lockUser = (tx: Client, userId: string) => tx.query(`SELECT pg_advisory_xact_lock(hashtext('playback.offline'), hashtext($1))`, [userId]);
+type RevScope = 'device' | 'track' | 'episode';
+/** Kunci per perangkat/konten — diambil terurut dalam SATU pernyataan (tanpa deadlock antar-konsumen). */
+const lockRev = (tx: Client, scope: RevScope, ids: string[]) =>
+  tx.query(`SELECT pg_advisory_xact_lock(hashtext('playback.offline.rev'), hashtext($1 || ':' || x::text)) FROM unnest($2::uuid[]) AS x ORDER BY x`, [scope, ids]);
+/** Catat watermark pencabutan (dipanggil konsumen di tx handler, setelah mengambil kunci yang sama dengan penerbitan). */
+async function markRevoked(tx: Client, scope: 'user' | RevScope, ids: string[]) {
+  await tx.query(
+    `INSERT INTO offline_revocations (scope, id, revoked_at) SELECT $1, x, now() FROM unnest($2::uuid[]) AS x
+     ON CONFLICT (scope, id) DO UPDATE SET revoked_at = now()`,
+    [scope, ids],
+  );
+}
+/** Pencabutan level akun (member/ditangguhkan/dihapus): kunci pengguna → watermark → cabut lisensi ACTIVE. */
+async function revokeUser(tx: Client, userId: string, reason: OfflineRevokeReason) {
+  await lockUser(tx, userId);
+  await markRevoked(tx, 'user', [userId]);
+  await revokeLicenses(tx, 'user_id = $2', [userId], reason);
+}
+
+/** Ember laju per kunci & menit (tahan multi-replika). True = melebihi batas. */
+export async function rateExceeded(db: Db, key: string, max: number): Promise<boolean> {
+  const r = await db.query(
+    `INSERT INTO offline_rate (key, window_start, n) VALUES ($1, date_trunc('minute', now()), 1)
+     ON CONFLICT (key) DO UPDATE SET n = CASE WHEN offline_rate.window_start = EXCLUDED.window_start THEN offline_rate.n + 1 ELSE 1 END,
+                                     window_start = EXCLUDED.window_start
+     RETURNING n`,
+    [key],
+  );
+  return (r[0]?.n ?? 0) > max;
 }
 
 // ---------------- Lisensi ----------------
@@ -153,69 +207,120 @@ export async function offlineRoutes(app: FastifyInstance, { db, name }: { db: Db
       const b = issueBody.parse(req.body ?? {});
       const kind: OfflineContentKind = b.track_id ? 'track' : 'episode';
       const contentId = (b.track_id ?? b.episode_id)!;
+      const quotaDeny = (code: OfflineDenyCode, pendingCap = false) =>
+        offlineDeny(code, code === 'rate_limited' ? { retry_after_s: pendingCap ? 60 : 3600 } : { limit: settings.num('download.max_tracks_per_device') });
 
-      const ent = await deps.entitlement(userId, b.device_id);
-      const deny =
-        offlineAccess(p, { userId, memberType: ent.user.member_type, premiumActive: ent.user.premium_active, suspended: ent.user.suspended }, kind) ??
-        deviceDenial(ent.device, userId);
-      if (deny) throw offlineDeny(deny, deny === 'premium_required' ? { upgrade_url: '/premium' } : undefined);
-
-      // Pra-cek kuota (tanpa kunci) agar permintaan yang pasti ditolak tidak memicu pembuatan artefak.
+      // Kuota dihitung dari lisensi baru 1 jam terakhir + permintaan LAIN yang masih menunggu artefak (M2).
       const quotaArgs = async (q: Client | Db) => {
         const r: any = await (q as any).query(
           `SELECT (SELECT count(*) FROM offline_licenses WHERE device_id = $1 AND status = 'ACTIVE')::int AS active,
                   (SELECT count(*) FROM offline_licenses WHERE user_id = $2 AND created_at > now() - interval '1 hour')::int AS recent,
+                  (SELECT count(*) FROM offline_requests WHERE user_id = $2 AND content_id <> $3 AND created_at > now() - interval '1 hour')::int AS pending,
+                  EXISTS (SELECT 1 FROM offline_requests WHERE user_id = $2 AND content_id = $3 AND created_at > now() - interval '1 hour') AS mine_pending,
                   (SELECT id FROM offline_licenses WHERE device_id = $1 AND coalesce(track_id, episode_id) = $3 AND status = 'ACTIVE') AS existing`,
           [b.device_id, userId, contentId],
         );
         const row = (Array.isArray(r) ? r : r.rows)[0];
+        const maxPending = settings.num('download.pending_per_user');
         const quota = licenseQuota({
           activeOnDevice: row.active,
           maxPerDevice: settings.num('download.max_tracks_per_device'),
           createdLastHour: row.recent,
           ratePerHour: settings.num('download.rate_per_user_hour'),
+          pendingOthers: row.pending,
+          maxPending,
+          alreadyPending: row.mine_pending,
         });
-        return { existing: row.existing as string | null, quota };
+        const pendingCap = quota === 'rate_limited' && row.recent + row.pending < settings.num('download.rate_per_user_hour');
+        return { existing: row.existing as string | null, quota, pendingCap };
       };
-      const pre = await quotaArgs(db);
-      if (!pre.existing && pre.quota) throw offlineDeny(pre.quota, pre.quota === 'rate_limited' ? { retry_after_s: 3600 } : { limit: settings.num('download.max_tracks_per_device') });
 
-      const key = await deps.contentKey(kind, contentId, ent.device!.public_key);
-      if (key.status === 'preparing') {
-        reply.status(202).header('retry-after', String(key.retry_after_s));
-        return { status: 'preparing', retry_after_s: key.retry_after_s };
-      }
-      const { url, ...artifact } = key.artifact;
-      const w = windows();
-      const out = await db.tx(async (tx) => {
-        // Serialkan per pengguna: kuota & keunikan dihitung ulang di bawah kunci.
-        await tx.query(`SELECT pg_advisory_xact_lock(hashtext('playback.offline'), hashtext($1))`, [userId]);
-        const again = await quotaArgs(tx);
-        if (again.existing) {
+      // Pencabutan bersamaan (L2) terdeteksi lewat watermark → periksa ulang hak sekali dari sumbernya.
+      for (let attempt = 0; ; attempt++) {
+        const checkedFrom = new Date(Date.now() - 2000); // margin jam app ↔ DB
+        const ent = await deps.entitlement(userId, b.device_id);
+        const deny =
+          offlineAccess(p, { userId, memberType: ent.user.member_type, premiumActive: ent.user.premium_active, suspended: ent.user.suspended }, kind) ??
+          deviceDenial(ent.device, userId);
+        if (deny) throw offlineDeny(deny, deny === 'premium_required' ? { upgrade_url: '/premium' } : undefined);
+
+        // Reservasi kuota SEBELUM catalog diminta menyiapkan artefak (di bawah kunci per pengguna): permintaan 202 untuk
+        // konten berbeda ikut dihitung sehingga tidak bisa memaksa seluruh katalog dienkripsi.
+        const pre = await db.tx(async (tx) => {
+          await lockUser(tx, userId);
+          const q = await quotaArgs(tx);
+          if (q.existing) return { existing: q.existing, reserved: false };
+          if (q.quota) throw quotaDeny(q.quota, q.pendingCap);
+          const ins = await tx.query(
+            `INSERT INTO offline_requests (user_id, content_id, content_kind) VALUES ($1,$2,$3)
+             ON CONFLICT (user_id, content_id) DO UPDATE SET created_at = CASE WHEN offline_requests.created_at <= now() - interval '1 hour' THEN now() ELSE offline_requests.created_at END
+             RETURNING (xmax = 0 OR offline_requests.created_at = now()) AS inserted`,
+            [userId, contentId, kind],
+          );
+          return { existing: null, reserved: !!ins.rows[0]?.inserted };
+        });
+        const release = () => db.query(`DELETE FROM offline_requests WHERE user_id = $1 AND content_id = $2`, [userId, contentId]);
+
+        let key: KeyResult;
+        try {
+          key = await deps.contentKey(kind, contentId, ent.device!.public_key);
+        } catch (e) {
+          // Ditolak final (4xx) atau antrean penuh/gangguan untuk reservasi baru → reservasi dilepas (tidak memakan kuota).
+          if (pre.reserved || (e instanceof HttpError && e.status < 500)) await release().catch((err) => req.log.error({ err: (err as Error).message }, 'gagal melepas reservasi unduhan'));
+          throw e;
+        }
+        if (key.status === 'preparing') {
+          reply.status(202).header('retry-after', String(key.retry_after_s));
+          return { status: 'preparing', retry_after_s: key.retry_after_s };
+        }
+        const { url, ...artifact } = key.artifact;
+        const w = windows();
+        const out = await db.tx(async (tx) => {
+          // Urutan kunci tetap (pengguna → perangkat → konten); konsumen pencabutan mengambil kunci yang sama.
+          await lockUser(tx, userId);
+          await lockRev(tx, 'device', [b.device_id]);
+          await lockRev(tx, kind, [contentId]);
+          const hit = (
+            await tx.query(
+              `SELECT 1 FROM offline_revocations
+                WHERE revoked_at >= $5 AND ((scope = 'user' AND id = $1) OR (scope = 'device' AND id = $2) OR (scope = $3 AND id = $4)) LIMIT 1`,
+              [userId, b.device_id, kind, contentId, checkedFrom],
+            )
+          ).rows.length;
+          if (hit) return null;
+          const again = await quotaArgs(tx);
+          await tx.query(`DELETE FROM offline_requests WHERE user_id = $1 AND content_id = $2`, [userId, contentId]);
+          if (again.existing) {
+            const row = (
+              await tx.query(
+                `UPDATE offline_licenses SET artifact_id = $2, artifact = $3, wrapped_key = $4, issued_at = $5, expires_at = $6, recheck_at = $7, updated_at = now()
+                  WHERE id = $1 RETURNING *`,
+                [again.existing, artifact.id, JSON.stringify(artifact), JSON.stringify(key.wrapped_key), w.issued, w.expires, w.recheck],
+              )
+            ).rows[0];
+            return { status: 200, row };
+          }
+          if (again.quota) throw quotaDeny(again.quota, again.pendingCap);
           const row = (
             await tx.query(
-              `UPDATE offline_licenses SET artifact_id = $2, artifact = $3, wrapped_key = $4, issued_at = $5, expires_at = $6, recheck_at = $7, updated_at = now()
-                WHERE id = $1 RETURNING *`,
-              [again.existing, artifact.id, JSON.stringify(artifact), JSON.stringify(key.wrapped_key), w.issued, w.expires, w.recheck],
+              `INSERT INTO offline_licenses (id, user_id, device_id, track_id, episode_id, artifact_id, artifact, wrapped_key, issued_at, expires_at, recheck_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+              [uuidv7(), userId, b.device_id, b.track_id ?? null, b.episode_id ?? null, artifact.id, JSON.stringify(artifact), JSON.stringify(key.wrapped_key), w.issued, w.expires, w.recheck],
             )
           ).rows[0];
-          return { status: 200, row };
+          return { status: 201, row };
+        });
+        if (!out) {
+          req.log.info({ attempt }, 'lisensi offline: pencabutan bersamaan terdeteksi, hak diperiksa ulang');
+          if (attempt === 0) continue;
+          throw offlineDeny('content_unavailable');
         }
-        if (again.quota) throw offlineDeny(again.quota, again.quota === 'rate_limited' ? { retry_after_s: 3600 } : { limit: settings.num('download.max_tracks_per_device') });
-        const row = (
-          await tx.query(
-            `INSERT INTO offline_licenses (id, user_id, device_id, track_id, episode_id, artifact_id, artifact, wrapped_key, issued_at, expires_at, recheck_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-            [uuidv7(), userId, b.device_id, b.track_id ?? null, b.episode_id ?? null, artifact.id, JSON.stringify(artifact), JSON.stringify(key.wrapped_key), w.issued, w.expires, w.recheck],
-          )
-        ).rows[0];
-        return { status: 201, row };
-      });
-      reply.status(out.status).header('cache-control', 'private, no-store');
-      return {
-        ...licenseOut(out.row),
-        download: { url: signMediaUrl(url, DOWNLOAD_URL_TTL_SEC), expires_at: new Date(Date.now() + DOWNLOAD_URL_TTL_SEC * 1000).toISOString(), size: artifact.size, sha256: artifact.sha256 },
-      };
+        reply.status(out.status).header('cache-control', 'private, no-store');
+        return {
+          ...licenseOut(out.row),
+          download: { url: signMediaUrl(url, DOWNLOAD_URL_TTL_SEC), expires_at: new Date(Date.now() + DOWNLOAD_URL_TTL_SEC * 1000).toISOString(), size: artifact.size, sha256: artifact.sha256 },
+        };
+      }
     });
 
     s.get('/v1/offline/licenses', async (req, reply) => {
@@ -257,6 +362,9 @@ export async function offlineRoutes(app: FastifyInstance, { db, name }: { db: Db
       const p = policy();
       if (!p.enabled) throw offlineDeny('offline_disabled');
       const b = recheckBody.parse(req.body ?? {});
+      // L6: aplikasi normal cek ulang tiap beberapa jam; banjir recheck = beban iam/catalog/DB tanpa manfaat.
+      if (await rateExceeded(db, `recheck:${userId}`, settings.num('download.recheck_per_minute')))
+        throw new HttpError(429, 'Too Many Requests', 'Terlalu banyak permintaan. Coba lagi dalam 60 detik.', { type: 'https://rave.id/problems/offline/rate-limited', code: 'rate_limited', retry_after_s: 60 });
       const ent = await deps.entitlement(userId, b.device_id);
       const dev = deviceDenial(ent.device, userId);
       if (dev === 'device_not_found') throw offlineDeny(dev);
@@ -282,8 +390,14 @@ export async function offlineRoutes(app: FastifyInstance, { db, name }: { db: Db
       }
       const withdrawnSet = new Set<string>(active.filter((r: any) => !available[r.track_id ?? r.episode_id] || (r.episode_id && !p.podcastEnabled)).map((r: any) => r.id));
       const withdrawn = [...withdrawnSet];
-      const keep = active.filter((r: any) => !withdrawnSet.has(r.id)).map((r: any) => r.id);
       const w = windows();
+      // L6: hanya perpanjang yang sudah melewati separuh interval cek ulang; sisanya `unchanged` (lisensi lama tetap
+      // berlaku) — recheck beruntun tidak menandatangani ulang & menulis ulang ribuan baris.
+      const dueBefore = Date.now() + (w.recheck.getTime() - w.issued.getTime()) / 2;
+      const valid = active.filter((r: any) => !withdrawnSet.has(r.id));
+      const keep = valid.filter((r: any) => new Date(r.recheck_at).getTime() <= dueBefore).map((r: any) => r.id);
+      const unchanged = valid.filter((r: any) => new Date(r.recheck_at).getTime() > dueBefore).map((r: any) => r.id as string);
+      const unchangedSet = new Set(unchanged);
       const renewed = await db.tx(async (tx) => {
         if (withdrawn.length) await revokeLicenses(tx, 'id = ANY($2::uuid[])', [withdrawn], 'CONTENT_WITHDRAWN');
         if (!keep.length) return [];
@@ -299,7 +413,7 @@ export async function offlineRoutes(app: FastifyInstance, { db, name }: { db: Db
       const revoked: { license_id: string; reason: string }[] = [];
       const expired: string[] = [];
       for (const r of result as any[]) {
-        if (renewedIds.has(r.id)) continue;
+        if (renewedIds.has(r.id) || unchangedSet.has(r.id)) continue;
         if (r.status === 'EXPIRED') expired.push(r.id);
         else revoked.push({ license_id: r.id, reason: withdrawnSet.has(r.id) ? 'CONTENT_WITHDRAWN' : (r.revoke_reason ?? 'MEMBERSHIP') });
       }
@@ -311,6 +425,8 @@ export async function offlineRoutes(app: FastifyInstance, { db, name }: { db: Db
         revoked,
         expired,
         unknown: ids.filter((id) => !byId.has(id)),
+        /** Aditif: masih ACTIVE & belum waktunya diperpanjang — simpan lisensi yang ada. */
+        unchanged,
       };
     });
   });
@@ -320,14 +436,25 @@ export async function offlineRoutes(app: FastifyInstance, { db, name }: { db: Db
 export function offlineConsumers(): Consumers {
   return {
     'iam.user.member_changed': async (e, tx) => {
-      if (memberChangeRevokes(policy(), e.payload)) await revokeLicenses(tx, 'user_id = $2', [e.payload.userId], 'MEMBERSHIP');
+      if (memberChangeRevokes(policy(), e.payload)) await revokeUser(tx, e.payload.userId, 'MEMBERSHIP');
+    },
+    // L1: akun ditangguhkan / dihapus → semua lisensi dicabut (alasan sama dengan recheck: ACCOUNT_SUSPENDED).
+    'iam.user.suspended': async (e, tx) => {
+      await revokeUser(tx, e.payload.userId, 'ACCOUNT_SUSPENDED');
+    },
+    'iam.user.deleted': async (e, tx) => {
+      await revokeUser(tx, e.payload.userId, 'ACCOUNT_SUSPENDED');
     },
     'iam.device.revoked': async (e, tx) => {
+      await lockRev(tx, 'device', [e.payload.deviceId]);
+      await markRevoked(tx, 'device', [e.payload.deviceId]);
       await revokeLicenses(tx, 'device_id = $2', [e.payload.deviceId], 'DEVICE_REVOKED');
     },
     'catalog.offline.revoked': async (e, tx) => {
-      const col = e.payload.contentKind === 'track' ? 'track_id' : 'episode_id';
-      await revokeLicenses(tx, `${col} = ANY($2::uuid[])`, [e.payload.contentIds], 'CONTENT_WITHDRAWN');
+      const kind = e.payload.contentKind === 'track' ? 'track' : 'episode';
+      await lockRev(tx, kind, e.payload.contentIds);
+      await markRevoked(tx, kind, e.payload.contentIds);
+      await revokeLicenses(tx, `${kind}_id = ANY($2::uuid[])`, [e.payload.contentIds], 'CONTENT_WITHDRAWN');
     },
   };
 }
@@ -343,5 +470,9 @@ export const offlineExpireJob: Job = {
         RETURNING id`,
     );
     if (r.length) log.info({ expired: r.length }, 'lisensi offline kedaluwarsa');
+    // Pembersihan tabel penjaga (kecil, berindeks waktu): reservasi menunggu, watermark pencabutan, ember laju.
+    await db.query(`DELETE FROM offline_requests WHERE created_at < now() - interval '1 hour'`);
+    await db.query(`DELETE FROM offline_revocations WHERE revoked_at < now() - interval '1 hour'`);
+    await db.query(`DELETE FROM offline_rate WHERE window_start < now() - interval '1 hour'`);
   },
 };

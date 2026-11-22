@@ -15,6 +15,10 @@ export interface DomainEvents {
   'iam.waitlist.joined': { email: string; segment: string; city?: string | null };
   /** Perangkat unduhan offline dicabut (pemilik/admin) → playback mencabut semua lisensi perangkat itu (P-7). */
   'iam.device.revoked': { deviceId: string; userId: string; reason: 'USER' | 'ADMIN' };
+  /** Akun ditangguhkan Super Admin → playback mencabut semua lisensi offline (P-7). Tidak dikirim saat penangguhan dicabut. */
+  'iam.user.suspended': { userId: string };
+  /** Akun dihapus/dianonimkan (UU PDP; mandiri atau Super Admin) → playback mencabut semua lisensi offline (P-7). */
+  'iam.user.deleted': { userId: string };
 
   // Catalog
   'catalog.release.submitted': { releaseId: string; artistId: string; title: string };

@@ -60,6 +60,22 @@ export async function audit(
   ]);
 }
 
+/**
+ * preHandler endpoint internal yang membuka material rahasia (mis. kunci konten offline, status entitlement): HANYA token
+ * service + `x-internal-secret`. Berbeda dengan `requireService`, Super Admin TIDAK lolos; percobaan oleh pengguna
+ * terautentikasi non-service dicatat di audit_logs (`internal.denied`) lalu 403.
+ */
+export function requireServiceOnly(db: Db, label: string) {
+  return async (req: FastifyRequest) => {
+    if (!req.user) throw new HttpError(401, 'Unauthorized', 'Autentikasi diperlukan');
+    if (req.user.roles.includes('service')) return;
+    await audit(db, { actorId: req.user.sub, action: 'internal.denied', entity: 'endpoint', entityId: label, data: { method: req.method }, ip: req.ip }).catch((e) =>
+      req.log.error({ err: (e as Error).message, label }, 'gagal mencatat audit akses internal'),
+    );
+    throw new HttpError(403, 'Forbidden', 'Khusus antar-service');
+  };
+}
+
 /** Panggilan sinkron antar-service (pakai seperlunya; utamakan event). */
 export async function callService<T = any>(
   from: string,
