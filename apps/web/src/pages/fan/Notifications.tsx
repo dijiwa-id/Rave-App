@@ -67,13 +67,13 @@ export default function Notifications() {
   const groups = useMemo(() => {
     const today = dayKey(new Date().toISOString());
     const yesterday = dayKey(new Date(Date.now() - 86400_000).toISOString());
-    const out: { label: string; items: Notification[] }[] = [];
+    const out: { key: 'today' | 'yesterday' | 'earlier'; label: string; items: Notification[] }[] = [];
     for (const n of items) {
       const k = dayKey(n.created_at);
-      const label = k === today ? t.today : k === yesterday ? t.yesterday : t.earlier;
+      const key = k === today ? 'today' : k === yesterday ? 'yesterday' : 'earlier';
       const last = out[out.length - 1];
-      if (last?.label === label) last.items.push(n);
-      else out.push({ label, items: [n] });
+      if (last?.key === key) last.items.push(n);
+      else out.push({ key, label: t[key], items: [n] });
     }
     return out;
   }, [items, t]);
@@ -148,7 +148,7 @@ export default function Notifications() {
               </Button>
             )}
             <Link
-              to="/app/settings#notifications"
+              to="/app/settings#set-notifications"
               aria-label={t.preferences}
               title={t.preferences}
               className="inline-flex size-8 items-center justify-center border-2 border-transparent text-rave-muted hover:text-white focus-visible:outline-2 focus-visible:outline-white"
@@ -195,8 +195,8 @@ export default function Notifications() {
         )}
 
         {groups.map((g) => (
-          <section key={g.label} className="mb-6" aria-labelledby={`notif-${g.label}`}>
-            <h2 id={`notif-${g.label}`} className="mb-2 text-xs font-bold tracking-[0.12em] text-rave-subtle uppercase">
+          <section key={g.key} className="mb-6" aria-labelledby={`notif-${g.key}`}>
+            <h2 id={`notif-${g.key}`} className="mb-2 text-xs font-bold tracking-[0.12em] text-rave-subtle uppercase">
               {g.label}
             </h2>
             <ul className="space-y-1.5">
