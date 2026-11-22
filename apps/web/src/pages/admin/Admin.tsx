@@ -473,15 +473,19 @@ export function AdminKyc() {
   const [status, setStatus] = useState('PENDING');
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['admin-kyc', status], queryFn: () => api<{ data: any[] }>('/v1/admin/iam/kyc', { query: { status } }) });
-  async function decide(id: string, approve: boolean) {
-    const reason = approve ? undefined : prompt(t.rejectPrompt) ?? undefined;
-    if (!approve && !reason) return;
+  const [rejecting, setRejecting] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function decide(id: string, approve: boolean, reason?: string) {
+    setBusy(true);
     try {
       await api(`/v1/admin/iam/kyc/${id}/decision`, { body: { approve, reason } });
       toast.success(approve ? t.approved : t.rejected);
+      setRejecting(null);
       qc.invalidateQueries({ queryKey: ['admin-kyc'] });
     } catch (e) {
       toast.error(e);
+    } finally {
+      setBusy(false);
     }
   }
   return (
@@ -516,7 +520,7 @@ export function AdminKyc() {
                     <Button size="sm" variant="ink" onClick={() => decide(k.id, true)}>
                       {d.common.approve}
                     </Button>
-                    <Button size="sm" variant="outline-ink" onClick={() => decide(k.id, false)}>
+                    <Button size="sm" variant="outline-ink" onClick={() => setRejecting(k.id)}>
                       {d.common.reject}
                     </Button>
                   </div>
@@ -526,6 +530,7 @@ export function AdminKyc() {
           ))}
         </Table>
       </QueryState>
+      <ReasonDialog open={!!rejecting} title={t.rejectTitle} body={t.rejectBody} confirmLabel={t.reject} danger busy={busy} onClose={() => setRejecting(null)} onSubmit={(r) => rejecting && decide(rejecting, false, r)} />
     </div>
   );
 }
@@ -1791,28 +1796,24 @@ export function AdminVerifications() {
     void qc.invalidateQueries({ queryKey: ['admin-verifications'] });
     void qc.invalidateQueries({ queryKey: ['admin-users'] });
   };
-  async function decide(id: string, approve: boolean) {
-    const reason = approve ? undefined : (prompt(t.rejectPrompt) ?? undefined);
-    if (!approve && !reason) return;
+  const [pending, setPending] = useState<{ kind: 'reject' | 'revoke'; id: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function run(fn: () => Promise<unknown>, ok: string) {
+    setBusy(true);
     try {
-      await api(`/v1/admin/iam/verifications/${id}/decision`, { body: { approve, reason } });
-      toast.success(approve ? t.approved : t.rejected);
+      await fn();
+      toast.success(ok);
+      setPending(null);
       reload();
     } catch (e) {
       toast.error(e);
+    } finally {
+      setBusy(false);
     }
   }
-  async function revoke(userId: string) {
-    const reason = prompt(t.revokePrompt);
-    if (!reason) return;
-    try {
-      await api(`/v1/admin/iam/users/${userId}/verification/revoke`, { body: { reason } });
-      toast.success(t.revoked);
-      reload();
-    } catch (e) {
-      toast.error(e);
-    }
-  }
+  const decide = (id: string, approve: boolean, reason?: string) =>
+    run(() => api(`/v1/admin/iam/verifications/${id}/decision`, { body: { approve, reason } }), approve ? t.approved : t.rejected);
+  const revoke = (userId: string, reason: string) => run(() => api(`/v1/admin/iam/users/${userId}/verification/revoke`, { body: { reason } }), t.revoked);
   return (
     <div>
       <PageHeader
@@ -1881,13 +1882,13 @@ export function AdminVerifications() {
                       <Button size="sm" variant="ink" onClick={() => decide(v.id, true)}>
                         {t.approve}
                       </Button>
-                      <Button size="sm" variant="outline-ink" onClick={() => decide(v.id, false)}>
+                      <Button size="sm" variant="outline-ink" onClick={() => setPending({ kind: 'reject', id: v.id })}>
                         {t.reject}
                       </Button>
                     </div>
                   )}
                   {v.status === 'APPROVED' && v.verified && (
-                    <Button size="sm" variant="outline-ink" onClick={() => revoke(v.user_id)}>
+                    <Button size="sm" variant="outline-ink" onClick={() => setPending({ kind: 'revoke', id: v.user_id })}>
                       {t.revoke}
                     </Button>
                   )}
@@ -1897,6 +1898,16 @@ export function AdminVerifications() {
           })}
         </Table>
       </QueryState>
+      <ReasonDialog
+        open={!!pending}
+        title={pending?.kind === 'revoke' ? t.revokeTitle : t.rejectTitle}
+        body={pending?.kind === 'revoke' ? t.revokeBody : t.rejectBody}
+        confirmLabel={pending?.kind === 'revoke' ? t.revoke : t.reject}
+        danger
+        busy={busy}
+        onClose={() => setPending(null)}
+        onSubmit={(r) => pending && (pending.kind === 'revoke' ? revoke(pending.id, r) : decide(pending.id, false, r))}
+      />
     </div>
   );
 }
