@@ -26,8 +26,22 @@ export interface ServiceReport {
   kpis: ReportKpi[];
   /** Tren harian (hari tanpa data = 0), urut menaik. */
   series?: { label: L10n; format?: 'num' | 'idr'; points: { date: string; value: number }[] };
-  table: { title: L10n; columns: ReportColumn[]; rows: Record<string, unknown>[]; empty?: L10n; link?: { label: L10n; href: string } };
+  table: ReportTable;
+  /**
+   * Opsional (aditif): deret & tabel tambahan bila satu layanan punya lebih dari satu tren/daftar (mis. Unduhan offline).
+   * Klien lama mengabaikannya; `series`/`table` utama tetap berisi data terpenting.
+   */
+  extra_series?: NonNullable<ServiceReport['series']>[];
+  extra_tables?: ReportTable[];
   generated_at: string;
+}
+
+export interface ReportTable {
+  title: L10n;
+  columns: ReportColumn[];
+  rows: Record<string, unknown>[];
+  empty?: L10n;
+  link?: { label: L10n; href: string };
 }
 
 export const REPORT_SERIES_DAYS = 14;

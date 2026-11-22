@@ -9,6 +9,7 @@ import { reportRoutes } from './reports.js';
 import { sessionRoutes } from './sessions.js';
 import { offlineExpireJob, offlineRoutes } from './offline.js';
 import { offlinePlayRoutes } from './offline-plays.js';
+import { offlineReportRoutes } from './offline-report.js';
 
 async function routes(app: FastifyInstance, ctx: ServiceContext) {
   await sessionRoutes(app, ctx);
@@ -17,6 +18,7 @@ async function routes(app: FastifyInstance, ctx: ServiceContext) {
   await reportRoutes(app, ctx);
   await offlineRoutes(app, ctx);
   await offlinePlayRoutes(app, ctx);
+  await offlineReportRoutes(app, ctx);
 }
 
 const svc = createService({

@@ -780,6 +780,32 @@ body hanya `{ offline_allowed }`; body yang memuat `offline_allowed` wajib peran
 anggota manajemen yang diberi akses artis — VIEWER/FINANCE/MEMBER `403`) dan Episode (`PATCH /v1/studio/podcasts/:id/episodes/:episodeId`, tidak memicu tinjauan
 ulang). Mematikan → event `catalog.offline.revoked` → lisensi dicabut. Track publik kini memuat `offline_allowed` (aditif).
 
+### 12.2 Laporan layanan — `GET /v1/admin/reports/downloads` (Super Admin)
+
+| Method & Path | Auth | Respons |
+|---|---|---|
+| `GET /v1/admin/reports/downloads` | **Super Admin** (sama dengan laporan layanan lain; admin biasa `403`, tanpa token `401`) | `ServiceReport` (`packages/domain/src/reports.ts`) |
+
+Dilayani **playback** (gateway → playback), yang mengagregasi data lokal + `GET /internal/reports/downloads` (iam,
+hitungan perangkat) + `POST /internal/reports/downloads` `{ tracks ≤ 50, episodes ≤ 50 }` (catalog, artefak + judul
+konten teratas). Kedua endpoint internal hanya token service (Super Admin `403` + audit `internal.denied`). Tidak
+di-gate `download.enabled`: flag mati / data kosong → laporan valid berangka 0. iam/catalog tak terjangkau → KPI terkait
+`value: null` + `hint` "Data … tidak tersedia" (bukan 5xx).
+
+- **KPI**: perangkat aktif, perangkat dicabut (30 hari); lisensi aktif (belum lewat `expires_at`), lisensi baru (30 hari),
+  dicabut (30 hari, total + satu KPI per `revoke_reason`: `MEMBERSHIP`, `DEVICE_REVOKED`, `CONTENT_WITHDRAWN`,
+  `ACCOUNT_SUSPENDED`, `USER_REMOVED`), kedaluwarsa (30 hari); artefak siap / diproses (pending+processing) / gagal
+  (`hint` = galat terakhir) + ukuran artefak siap (`bytes`); putar offline diterima / ditolak (`hint` = 3 alasan
+  terbanyak) / qualified (30 hari, menurut waktu diterima); permintaan menunggu artefak (`offline_requests`, 1 jam).
+- **`series`**: lisensi baru per hari (14 hari, WIB). **`extra_series[0]`** (aditif): putar offline diterima per hari.
+- **`table`**: 10 konten paling banyak diunduh 30 hari (lisensi baru, pengguna unik, masih aktif, status artefak).
+  **`extra_tables[0]`** (aditif): 10 artefak gagal terbaru (rendisi, percobaan, galat ringkas ≤ 160 karakter, waktu).
+
+`extra_series` / `extra_tables` adalah field opsional baru di kontrak `ServiceReport` (aditif; klien lama mengabaikannya —
+komponen web saat ini merender `series`/`table` utama dan galat artefak terakhir lewat `hint` KPI).
+Indeks: playback `008_offline_report` (BRIN `created_at`/`received_at`, parsial REVOKED/EXPIRED), catalog
+`022_offline_report` (parsial `failed`), iam `017_device_report` (parsial `revoked_at`).
+
 ## Audio master & rendisi streaming (catalog + playback)
 
 - **Format master** Artist Studio: WAV, FLAC, AIFF, ALAC/AAC (M4A), MP3, OGG, Opus — divalidasi dengan ffmpeg (`transcoding.min_sample_rate_hz`, `transcoding.min_bit_depth` untuk master lossless). Master lossy diterima dengan peringatan (tanpa Lossless; AAC 320 hanya bila ≥ 256 kbps).

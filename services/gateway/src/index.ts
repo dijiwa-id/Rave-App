@@ -51,6 +51,7 @@ export const ROUTES: [prefix: string, upstream: Upstream][] = [
   ['/v1/admin/reports/payout', 'finance'],
   ['/v1/admin/reports/subscription', 'iam'],
   ['/v1/admin/reports/pro', 'finance'],
+  ['/v1/admin/reports/downloads', 'playback'], // Unduhan offline (P-7): agregasi playback + iam + catalog
   ['/v1/library', 'library'],
   ['/v1/admin/library', 'library'],
   ['/v1/playback', 'playback'],

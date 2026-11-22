@@ -42,7 +42,7 @@ export const RAVE_SERVICES: RaveService[] = [
   { id: 'podcast', type: 'music', icon: Mic, status: 'ready', groups: ['podcast'] },
   { id: 'share', report: true, type: 'music', icon: Share2, status: 'ready', groups: ['share'] },
   { id: 'royalty', report: true, type: 'music', icon: Coins, status: 'ready', groups: ['royalty'] },
-  { id: 'downloads', report: 'soon', type: 'music', icon: Download, status: 'ready', groups: ['download', 'subscription'], keys: isDownloadService },
+  { id: 'downloads', report: true, type: 'music', icon: Download, status: 'ready', groups: ['download', 'subscription'], keys: isDownloadService },
   // Event & live
   { id: 'live', report: true, type: 'event', icon: Radio, status: 'ready', groups: ['live'] },
   { id: 'booking', report: true, type: 'event', icon: CalendarCheck, status: 'ready', groups: ['booking', 'commission'] },

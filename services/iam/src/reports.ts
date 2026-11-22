@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { L, dailySql, fillDaily, type ServiceReport } from '@rave/domain/reports';
-import { requireSuperAdmin, type ServiceContext } from '@rave/service-kit';
+import { requireServiceOnly, requireSuperAdmin, type ServiceContext } from '@rave/service-kit';
 
 const ACTIVE = `member_type <> 'FREE' AND (member_until IS NULL OR member_until > now())`;
 
@@ -47,4 +47,16 @@ export async function reportRoutes(app: FastifyInstance, { db }: ServiceContext)
     };
   });
   // Laporan RAVE Pro dilayani finance (pemilik data langganan): GET /v1/admin/reports/pro.
+
+  /**
+   * Internal (playback → laporan Unduhan offline, GET /v1/admin/reports/downloads): hitungan perangkat saja, tanpa
+   * data pribadi. Aktif = indeks parsial user_devices_user_active_idx; dicabut 30 hari = user_devices_revoked_idx.
+   */
+  app.get('/internal/reports/downloads', { preHandler: requireServiceOnly(db, 'iam:/internal/reports/downloads') }, async () => {
+    const r = await db.one(
+      `SELECT (SELECT count(*) FROM user_devices WHERE revoked_at IS NULL)::int AS active,
+              (SELECT count(*) FROM user_devices WHERE revoked_at IS NOT NULL AND revoked_at >= now() - interval '30 days')::int AS revoked_30d`,
+    );
+    return { devices: { active: r?.active ?? 0, revoked_30d: r?.revoked_30d ?? 0 } };
+  });
 }

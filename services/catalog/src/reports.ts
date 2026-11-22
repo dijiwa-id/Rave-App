@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { L, dailySql, fillDaily, type ServiceReport } from '@rave/domain/reports';
-import { requireService, requireSuperAdmin, z, type ServiceContext } from '@rave/service-kit';
+import { requireService, requireServiceOnly, requireSuperAdmin, z, type ServiceContext } from '@rave/service-kit';
 
 /** Laporan Transcoding Audio + lookup nama untuk laporan service lain. */
 export async function reportRoutes(app: FastifyInstance, { db }: ServiceContext) {
@@ -67,6 +67,74 @@ export async function reportRoutes(app: FastifyInstance, { db }: ServiceContext)
     const by = new Map<string, any[]>();
     for (const s of shares) by.set(s.track_id, [...(by.get(s.track_id) ?? []), { type: s.type, party_name: s.party_name, email: s.email, pct: Number(s.pct), approved: !!s.approved_at }]);
     return { data: tracks.map((t) => ({ ...t, shares: by.get(t.track_id) ?? [] })) };
+  });
+
+  /**
+   * Internal (playback → laporan Unduhan offline, GET /v1/admin/reports/downloads): ringkasan artefak terenkripsi,
+   * artefak gagal terbaru (indeks parsial offline_artifacts_failed_idx, maks 10), dan judul + status artefak untuk
+   * konten teratas yang dikirim playback (maks 50 per jenis, lewat PK / UNIQUE (content_kind, content_id, rendition)).
+   */
+  app.post('/internal/reports/downloads', { preHandler: requireServiceOnly(db, 'catalog:/internal/reports/downloads') }, async (req) => {
+    const b = z.object({ tracks: z.array(z.string().uuid()).max(50).default([]), episodes: z.array(z.string().uuid()).max(50).default([]) }).parse(req.body ?? {});
+    const ids = [...b.tracks, ...b.episodes];
+    const [k, failed, titles, status] = await Promise.all([
+      db.one(
+        // Tabel artefak = konten yang pernah diunduh × rendisi (dibatasi ukuran katalog); satu pindaian dengan FILTER.
+        `SELECT count(*) FILTER (WHERE status = 'ready')::int AS ready,
+                count(*) FILTER (WHERE status IN ('pending', 'processing'))::int AS processing,
+                count(*) FILTER (WHERE status = 'failed')::int AS failed,
+                coalesce(sum(size) FILTER (WHERE status = 'ready'), 0)::bigint AS bytes
+           FROM offline_artifacts`,
+      ),
+      db.query(
+        `SELECT a.content_kind, a.content_id, a.rendition, a.attempts, left(regexp_replace(coalesce(a.error, ''), '[[:space:]]+', ' ', 'g'), 160) AS error, a.updated_at,
+                c.title, c.subtitle
+           FROM (SELECT * FROM offline_artifacts WHERE status = 'failed' ORDER BY updated_at DESC LIMIT 10) a
+           -- LATERAL: maks 10 pencarian PK (bukan join hash ke seluruh tracks/episodes).
+           LEFT JOIN LATERAL (
+             SELECT t.title, ar.name AS subtitle FROM tracks t LEFT JOIN artists ar ON ar.id = t.artist_id WHERE a.content_kind = 'track' AND t.id = a.content_id
+             UNION ALL
+             SELECT e.title, sh.title FROM episodes e LEFT JOIN shows sh ON sh.id = e.show_id WHERE a.content_kind = 'episode' AND e.id = a.content_id
+           ) c ON true
+          ORDER BY a.updated_at DESC`,
+      ),
+      ids.length
+        ? db.query(
+            `SELECT t.id, t.title, ar.name AS subtitle FROM tracks t LEFT JOIN artists ar ON ar.id = t.artist_id WHERE t.id = ANY($1::uuid[])
+             UNION ALL
+             SELECT e.id, e.title, sh.title AS subtitle FROM episodes e LEFT JOIN shows sh ON sh.id = e.show_id WHERE e.id = ANY($2::uuid[])`,
+            [b.tracks, b.episodes],
+          )
+        : [],
+      ids.length
+        ? db.query(
+            `SELECT content_id, CASE WHEN bool_or(status = 'ready') THEN 'ready' WHEN bool_or(status IN ('pending', 'processing')) THEN 'processing' ELSE 'failed' END AS status
+               FROM offline_artifacts WHERE (content_kind = 'track' AND content_id = ANY($1::uuid[])) OR (content_kind = 'episode' AND content_id = ANY($2::uuid[]))
+              GROUP BY content_id`,
+            [b.tracks, b.episodes],
+          )
+        : [],
+    ]);
+    return {
+      artifacts: { ready: k?.ready ?? 0, processing: k?.processing ?? 0, failed: k?.failed ?? 0, bytes: Number(k?.bytes ?? 0) },
+      failed: failed.map((r: any) => ({
+        content_kind: r.content_kind,
+        content_id: r.content_id,
+        title: r.title ?? null,
+        subtitle: r.subtitle ?? null,
+        rendition: r.rendition,
+        attempts: Number(r.attempts ?? 0),
+        error: r.error || null,
+        updated_at: r.updated_at,
+      })),
+      content: Object.fromEntries(
+        ids.map((id) => {
+          const t = (titles as any[]).find((r) => r.id === id);
+          const s = (status as any[]).find((r) => r.content_id === id);
+          return [id, { title: t?.title ?? null, subtitle: t?.subtitle ?? null, artifact: s?.status ?? null }];
+        }),
+      ),
+    };
   });
 
   // Nama lagu & artis untuk laporan service lain (token service).

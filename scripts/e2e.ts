@@ -1935,6 +1935,20 @@ console.log('\n▶ Unduhan offline Premium (perangkat, lisensi, berkas terenkrip
     });
     check('offline-plays: download.enabled mati → laporan putar sah tetap diterima', r.status === 200 && r.data?.results?.[0]?.status === 'accepted', [r.status, r.data?.results ?? r.data?.detail]);
   }
+  // Laporan Super Admin (playback mengagregasi iam + catalog); flag mati tetap laporan valid.
+  const dlRep = await call(SA, 'GET', '/v1/admin/reports/downloads');
+  const kv = (id: string) => dlRep.data?.kpis?.find((k: any) => k.label?.id === id)?.value;
+  check(
+    'laporan Unduhan offline: KPI lintas service, deret 14 hari, tabel konten teratas',
+    dlRep.status === 200 &&
+      dlRep.data?.series?.points?.length === 14 &&
+      typeof kv('Perangkat aktif') === 'number' &&
+      typeof kv('Artefak siap') === 'number' &&
+      (!offlineReport || (kv('Lisensi baru (30 hari)') >= 1 && kv('Putar offline diterima (30 hari)') >= 1 && kv('Dicabut: perangkat dicabut') >= 1 && dlRep.data?.table?.rows?.length >= 1)),
+    [dlRep.status, dlRep.data?.kpis?.map((k: any) => [k.label?.id, k.value])],
+  );
+  const dlRepFan = await call(P, 'GET', '/v1/admin/reports/downloads');
+  check('laporan Unduhan offline: bukan Super Admin → 403', dlRepFan.status === 403, dlRepFan.status);
 }
 
 console.log(`\n${failed ? '\x1b[31m' : '\x1b[32m'}${passed} lulus, ${failed} gagal\x1b[0m\n`);
