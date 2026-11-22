@@ -311,7 +311,16 @@ const fan: Shape<typeof id> = {
     markAllRead: 'Mark all as read',
     empty: 'No notifications yet',
     emptyBody: 'New releases, gig schedules, and transactions will show up here.',
-    keyboardHint: 'Use the arrow keys & Enter to navigate with the keyboard.',
+    emptyUnread: 'No unread notifications',
+    filterLabel: 'Filter notifications',
+    filterAll: 'All',
+    filterUnread: 'Unread',
+    today: 'Today',
+    yesterday: 'Yesterday',
+    earlier: 'Earlier',
+    loadMore: 'Load more',
+    preferences: 'Notification preferences',
+    unreadSr: 'Unread:',
   },
   settings: {
     qualities: {

@@ -307,7 +307,16 @@ const fan = {
     markAllRead: 'Tandai semua dibaca',
     empty: 'Belum ada notifikasi',
     emptyBody: 'Kabar rilis baru, jadwal manggung, dan transaksi akan muncul di sini.',
-    keyboardHint: 'Gunakan tombol panah & Enter untuk navigasi keyboard.',
+    emptyUnread: 'Tidak ada notifikasi yang belum dibaca',
+    filterLabel: 'Saring notifikasi',
+    filterAll: 'Semua',
+    filterUnread: 'Belum dibaca',
+    today: 'Hari ini',
+    yesterday: 'Kemarin',
+    earlier: 'Sebelumnya',
+    loadMore: 'Muat lebih banyak',
+    preferences: 'Atur preferensi notifikasi',
+    unreadSr: 'Belum dibaca:',
   },
   settings: {
     qualities: {
