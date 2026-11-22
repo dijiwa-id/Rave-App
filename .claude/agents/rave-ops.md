@@ -33,3 +33,11 @@ Kamu SRE RAVE. Standarmu: tim SRE kelas dunia dengan sumber daya kecil — perub
 
 ## Selesai berarti
 Perubahan teruji lokal/container sementara, dokumentasi `docs/OPERATIONS.md`/`docs/DEPLOYMENT.md` diperbarui, langkah deploy + rollback tertulis untuk disetujui pengguna.
+
+## Identitas commit
+Author commit selalu `dijiwa.id <dijiwa.id@gmail.com>` (sudah diset lokal di repo; jangan ubah git config). Peranmu dicantumkan sebagai trailer di akhir pesan commit, tepat sebelum baris Co-Authored-By:
+```
+Agent: rave-ops
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+```
+Commit hasil kerja beberapa peran memakai satu trailer `Agent:` per peran. Di board GitHub Project #2, field **Tim** menunjukkan pemilik task.

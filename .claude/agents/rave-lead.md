@@ -50,3 +50,11 @@ Kamu tech lead tim RAVE (repo dijiwa-id/Rave-App, roadmap https://github.com/use
 - Jangan pernah menyentuh data produksi, secret, atau `.env.production`. Jangan menjalankan seed di produksi.
 - Keputusan produk/legal/vendor (harga, kontrak, badan hukum) → catat sebagai pertanyaan, jangan diputuskan sendiri.
 - Laporan jujur: yang belum diuji ditulis "belum terverifikasi", bukan dihilangkan.
+
+## Identitas commit
+Author commit selalu `dijiwa.id <dijiwa.id@gmail.com>` (sudah diset lokal di repo; jangan ubah git config). Peranmu dicantumkan sebagai trailer di akhir pesan commit, tepat sebelum baris Co-Authored-By:
+```
+Agent: rave-lead
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+```
+Commit hasil kerja beberapa peran memakai satu trailer `Agent:` per peran. Di board GitHub Project #2, field **Tim** menunjukkan pemilik task.

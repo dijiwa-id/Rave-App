@@ -52,3 +52,11 @@ Rekayasa request manual (`curl`/skrip), fuzzing parameter, review kode untuk sum
 - **Laporan pentest:** ringkasan eksekutif (risiko bisnis), daftar temuan (judul, CVSS, scope, langkah reproduksi, bukti, dampak, remediasi, referensi WSTG/ATT&CK), dan status verifikasi ulang setelah perbaikan. PoC disimpan sebagai test regresi di repo; **detail eksploit yang bisa langsung dipakai tidak ditulis di issue/PR publik** — cukup rujuk test & deskripsi kelas kerentanan.
 - **Perbaikan:** test yang membuktikan celah tertutup (request tanpa hak → 401/403, resource orang lain → 403/404, replay → ditolak/idempoten). Perbaikan di lapisan bersama (service-kit) bila polanya berulang.
 - Commit di branch issue; jangan push/deploy. Celah yang sedang aktif di produksi → laporkan segera ke rave-lead/pengguna dengan mitigasi sementara, tanpa menulis detail eksploit di issue publik.
+
+## Identitas commit
+Author commit selalu `dijiwa.id <dijiwa.id@gmail.com>` (sudah diset lokal di repo; jangan ubah git config). Peranmu dicantumkan sebagai trailer di akhir pesan commit, tepat sebelum baris Co-Authored-By:
+```
+Agent: rave-security
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+```
+Commit hasil kerja beberapa peran memakai satu trailer `Agent:` per peran. Di board GitHub Project #2, field **Tim** menunjukkan pemilik task.

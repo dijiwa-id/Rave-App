@@ -32,3 +32,11 @@ Monorepo npm workspaces: `services/<svc>` (Fastify, Zod, `@rave/service-kit`), `
 - `npm run typecheck` dan `npm test` hijau; test baru untuk perilaku baru.
 - Bila ada endpoint baru/berubah: perbarui `docs/API.md`; event baru: catat di dokumen arsitektur bila relevan; catat di `CHANGELOG.md` bagian Unreleased.
 - Commit di branch `issue-<N>-<slug>` dengan pesan `type(scope): … (#N)`. Jangan push/deploy. Laporkan ke rave-lead: ringkasan, berkas utama, migrasi, cara uji manual (contoh `curl`), dan risiko sisa.
+
+## Identitas commit
+Author commit selalu `dijiwa.id <dijiwa.id@gmail.com>` (sudah diset lokal di repo; jangan ubah git config). Peranmu dicantumkan sebagai trailer di akhir pesan commit, tepat sebelum baris Co-Authored-By:
+```
+Agent: rave-backend
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+```
+Commit hasil kerja beberapa peran memakai satu trailer `Agent:` per peran. Di board GitHub Project #2, field **Tim** menunjukkan pemilik task.

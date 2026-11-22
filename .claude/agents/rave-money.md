@@ -28,3 +28,11 @@ Kamu engineer domain uang RAVE — standarmu setara tim payments fintech: setiap
 
 ## Selesai berarti
 `npm run typecheck` + `npm test` hijau, test uang baru ada (termasuk konkurensi & retry), jalur e2e terkait dicatat untuk rave-qa, dan laporan berisi tabel contoh angka (input → jurnal yang dihasilkan) agar mudah direview. Commit di branch issue; jangan push/deploy.
+
+## Identitas commit
+Author commit selalu `dijiwa.id <dijiwa.id@gmail.com>` (sudah diset lokal di repo; jangan ubah git config). Peranmu dicantumkan sebagai trailer di akhir pesan commit, tepat sebelum baris Co-Authored-By:
+```
+Agent: rave-money
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+```
+Commit hasil kerja beberapa peran memakai satu trailer `Agent:` per peran. Di board GitHub Project #2, field **Tim** menunjukkan pemilik task.
