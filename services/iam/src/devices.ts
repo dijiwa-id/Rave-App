@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { DEVICE_PLATFORMS } from '@rave/domain/offline';
-import { audit, notFound, offlineDeny, parseDevicePublicKey, publish, requireAuth, requireService, settings, unprocessable, uuidv7, z, type Client, type Db } from '@rave/service-kit';
+import { DEVICE_PLATFORMS, offlineAccess, offlinePolicy } from '@rave/domain/offline';
+import { audit, notFound, offlineDeny, parseDevicePublicKey, publish, requireAuth, requireServiceOnly, settings, unprocessable, uuidv7, z, type Client, type Db } from '@rave/service-kit';
 import { memberActive } from './core.js';
 
 /**
@@ -52,6 +52,13 @@ export async function deviceRoutes(app: FastifyInstance, { db }: { db: Db }) {
       const key = parseDevicePublicKey(b.public_key);
       if (!key) throw unprocessable('Kunci publik perangkat harus ECDH P-256 (titik mentah 65 byte atau SPKI, base64)', { code: 'invalid_public_key' });
       const userId = req.user!.sub;
+      // L3: hanya akun yang berhak unduhan (Premium aktif, paket diizinkan, rollout, tidak ditangguhkan) yang bisa
+      // mendaftarkan perangkat — sumber yang sama dengan penerbitan lisensi (offlineAccess).
+      const u = await db.one(`SELECT id, member_type, member_until, premium, suspended_at, deleted_at FROM users WHERE id = $1`, [userId]);
+      const deny = u
+        ? offlineAccess(offlinePolicy((k) => settings.get(k)), { userId, memberType: u.member_type, premiumActive: !u.deleted_at && memberActive(u), suspended: !!u.suspended_at || !!u.deleted_at })
+        : 'account_suspended';
+      if (deny) throw offlineDeny(deny, deny === 'premium_required' ? { upgrade_url: '/premium' } : undefined);
       const limit = settings.num('subscription.download_devices');
       const out = await db.tx(async (tx) => {
         // Serialkan pendaftaran per akun agar dua permintaan paralel tidak melampaui batas.
@@ -64,6 +71,28 @@ export async function deviceRoutes(app: FastifyInstance, { db }: { db: Db }) {
           )
         ).rows[0];
         if (same) return { status: 200, device: deviceOut(same) };
+        // L3: kunci yang baru dicabut tidak bisa langsung didaftarkan ulang (siklus daftar-cabut).
+        const blockDays = settings.num('download.device_reregister_block_days');
+        if (blockDays > 0) {
+          const blocked = (
+            await tx.query(
+              `SELECT ceil(extract(epoch FROM (max(revoked_at) + make_interval(days => $3) - now())))::int AS retry_s
+                 FROM user_devices WHERE user_id = $1 AND key_fingerprint = $2 AND revoked_at > now() - make_interval(days => $3)`,
+              [userId, key.fingerprint, blockDays],
+            )
+          ).rows[0];
+          if (blocked?.retry_s > 0) throw offlineDeny('device_revoked', { retry_after_s: blocked.retry_s });
+        }
+        // L3: laju pendaftaran perangkat baru per 24 jam (termasuk yang kemudian dicabut).
+        const perDay = settings.num('download.devices_per_day');
+        const recent = (
+          await tx.query(
+            `SELECT count(*)::int AS n, ceil(extract(epoch FROM (min(created_at) + interval '24 hours' - now())))::int AS retry_s
+               FROM user_devices WHERE user_id = $1 AND created_at > now() - interval '24 hours'`,
+            [userId],
+          )
+        ).rows[0];
+        if ((recent?.n ?? 0) >= perDay) throw offlineDeny('device_rate_limited', { retry_after_s: Math.max(60, recent.retry_s ?? 86400) });
         const active = await activeDevices(tx, userId);
         if (active.length >= limit) throw offlineDeny('device_limit', { limit, devices: active });
         const id = uuidv7();
@@ -102,7 +131,7 @@ export async function deviceRoutes(app: FastifyInstance, { db }: { db: Db }) {
    * Internal (playback): status member + perangkat untuk penerbitan/cek ulang lisensi offline — satu panggilan per
    * permintaan. Perangkat milik akun lain dikembalikan `null` (pemanggil menjawab 404). Memperbarui last_seen_at (≤ 1×/jam).
    */
-  app.get('/internal/offline/entitlement', { preHandler: requireService }, async (req) => {
+  app.get('/internal/offline/entitlement', { preHandler: requireServiceOnly(db, 'iam:/internal/offline/entitlement') }, async (req) => {
     const q = z.object({ user_id: z.string().uuid(), device_id: z.string().uuid().optional() }).parse(req.query ?? {});
     const u = await db.one(`SELECT id, member_type, member_until, premium, suspended_at, deleted_at FROM users WHERE id = $1`, [q.user_id]);
     if (!u) throw notFound('Pengguna');

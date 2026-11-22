@@ -142,6 +142,8 @@ export function parseDevicePublicKey(input: string): { raw: Buffer; spki: string
     const key = createPublicKey({ key: der, format: 'der', type: 'spki' });
     if (key.asymmetricKeyType !== 'ec' || key.asymmetricKeyDetails?.namedCurve !== 'prime256v1') return null;
     const spki = key.export({ format: 'der', type: 'spki' }) as Buffer;
+    // SPKI P-256 tak terkompresi selalu 91 byte (26 prefiks + 65 titik) — cek eksplisit sebelum memotong titik mentah.
+    if (spki.length !== 91) return null;
     const raw = spki.subarray(-65);
     if (raw[0] !== 0x04) return null;
     return { raw, spki: spki.toString('base64'), fingerprint: createHash('sha256').update(raw).digest('hex') };

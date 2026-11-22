@@ -257,6 +257,8 @@ export async function adminRoutes(app: FastifyInstance, { db }: ServiceContext) 
           await tx.query(`UPDATE users SET suspended_at = ${b.suspended ? 'now()' : 'NULL'}, updated_at = now() WHERE id = $1`, [u.id]);
           // Tangguhkan = cabut semua sesi; access token yang tersisa kedaluwarsa ≤ 15 menit.
           if (b.suspended) await tx.query(`UPDATE refresh_tokens SET revoked_at = coalesce(revoked_at, now()) WHERE user_id = $1`, [u.id]);
+          // Lisensi unduhan offline dicabut playback saat ditangguhkan (tidak dipulihkan otomatis saat penangguhan dicabut).
+          if (b.suspended) await publish(tx, 'iam.user.suspended', u.id, { userId: u.id });
           await audit(tx, { actorId: req.user!.sub, action: b.suspended ? 'user.suspend' : 'user.unsuspend', entity: 'user', entityId: u.id, data: { reason: b.reason } });
         }
         if (b.member_type !== undefined || b.member_until !== undefined) {

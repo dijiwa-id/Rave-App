@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomInt } from 'node:crypto';
 import { adminPermissions } from '@rave/domain/settings';
-import { config, settings, signAccessToken, uuidv7, ACCESS_TOKEN_TTL_SEC, type OrgClaim, type PlatformRole } from '@rave/service-kit';
+import { config, publish, settings, signAccessToken, uuidv7, ACCESS_TOKEN_TTL_SEC, type Client, type OrgClaim, type PlatformRole } from '@rave/service-kit';
 
 /** Pool atau client transaksi — keduanya punya .query() yang mengembalikan { rows }. */
 export interface Q {
@@ -187,6 +187,16 @@ export async function anonymizeUser(q: Q, id: string) {
   await q.query(`DELETE FROM mfa_recovery_codes WHERE user_id = $1`, [id]);
   await q.query(`DELETE FROM mfa_challenges WHERE user_id = $1`, [id]);
   await q.query(`UPDATE verification_requests SET status = 'CANCELLED', decided_at = now() WHERE user_id = $1 AND status = 'PENDING'`, [id]);
+  // Perangkat unduhan offline (P-7): cabut & hapus data pengenal perangkat (nama, versi aplikasi, kunci publik & sidik
+  // jarinya). Baris tetap ada agar laporan putar offline sebelum penghapusan tetap bisa divalidasi (waktu cabut).
+  await q.query(
+    `UPDATE user_devices SET revoked_at = coalesce(revoked_at, now()), revoked_by = coalesce(revoked_by, $1),
+            name = 'Perangkat dihapus', app_version = NULL, public_key = '', key_fingerprint = ''
+      WHERE user_id = $1`,
+    [id],
+  );
+  // Playback mencabut semua lisensi offline akun ini (konsumen idempoten).
+  await publish(q as unknown as Client, 'iam.user.deleted', id, { userId: id });
 }
 
 export async function buildMe(q: Q, userId: string) {
