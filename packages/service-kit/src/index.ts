@@ -14,3 +14,4 @@ export * from './version.js';
 export * from './media-sign.js';
 export * from './messaging.js';
 export * from './integrations.js';
+export * from './offline.js';

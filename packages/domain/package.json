@@ -24,6 +24,7 @@
     "./pro": "./src/pro.ts",
     "./royalty": "./src/royalty.ts",
     "./news": "./src/news.ts",
-    "./share": "./src/share.ts"
+    "./share": "./src/share.ts",
+    "./offline": "./src/offline.ts"
   }
 }

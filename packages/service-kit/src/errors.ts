@@ -1,5 +1,6 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
+import { OFFLINE_MESSAGES_EN } from '@rave/domain/offline';
 
 /** Error HTTP yang dirender sebagai RFC 9457 Problem Details. */
 export class HttpError extends Error {
@@ -39,6 +40,8 @@ const EN_DETAIL: Record<string, string> = {
   'Body JSON tidak valid': 'Invalid JSON body',
   'Layanan sedang sibuk, coba lagi sebentar': 'The service is busy, please try again shortly',
   'Token tidak valid atau kedaluwarsa': 'Invalid or expired token',
+  // Unduhan offline (P-7)
+  ...OFFLINE_MESSAGES_EN,
 };
 const EN_TITLE: Record<string, string> = {
   'Validasi gagal': 'Validation failed',

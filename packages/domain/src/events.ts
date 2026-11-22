@@ -13,6 +13,8 @@ export interface DomainEvents {
   // Jenis member diubah Super Admin (Free/Individu/Pelajar/Duo); premium = efektif saat perubahan.
   'iam.user.member_changed': { userId: string; memberType: 'FREE' | 'INDIVIDUAL' | 'STUDENT' | 'DUO'; memberUntil: string | null; premium: boolean };
   'iam.waitlist.joined': { email: string; segment: string; city?: string | null };
+  /** Perangkat unduhan offline dicabut (pemilik/admin) → playback mencabut semua lisensi perangkat itu (P-7). */
+  'iam.device.revoked': { deviceId: string; userId: string; reason: 'USER' | 'ADMIN' };
 
   // Catalog
   'catalog.release.submitted': { releaseId: string; artistId: string; title: string };
@@ -26,6 +28,11 @@ export interface DomainEvents {
   'catalog.release.changes_reviewed': { releaseId: string; artistId: string; title: string; approved: boolean; reason: string | null };
   // Undangan persetujuan split hak (REQ-STU-02): dikirim ke email pihak yang diundang.
   'catalog.split.invited': { splitId: string; trackId: string; trackTitle: string; artistName: string; email: string; type: 'MASTER' | 'PUBLISHING'; pct: number; invitedBy: string };
+  /**
+   * Konten tidak boleh lagi disimpan offline (P-7): rilis ditarik (TAKEN_DOWN), offline_allowed dimatikan, episode/acara
+   * disembunyikan, tidak tayang lagi, atau dihapus → playback mencabut lisensi offline konten ini.
+   */
+  'catalog.offline.revoked': { contentKind: 'track' | 'episode'; contentIds: string[]; reason: 'TAKEN_DOWN' | 'OFFLINE_DISABLED' | 'UNPUBLISHED' | 'DELETED' };
   'catalog.artist.upserted': { artistId: string; name: string; slug: string; city: string | null; genres: string[]; orgId: string | null; imageUrl: string | null };
 
   // Library
