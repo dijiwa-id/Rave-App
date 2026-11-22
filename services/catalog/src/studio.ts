@@ -28,7 +28,7 @@ import {
 } from '@rave/service-kit';
 import { isUuid, releaseFull, releasesFull } from './queries.js';
 import { publishOfflineRevoked } from './offline.js';
-import { canManageArtist } from './routes.js';
+import { canAdminArtist, canManageArtist } from './routes.js';
 import { imageSize, UPLOAD_DIR, uploadsBytes, wavInfo } from './storage.js';
 import { ffmpegPath, initialTranscodeStatus, probeAudio } from './audio.js';
 import { AUDIO_UPLOAD_TYPES, type AudioMeta } from '@rave/domain/audio';
@@ -635,6 +635,9 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       const t = await loadTrack(req, id);
       // Izin unduhan offline (P-7) boleh diubah kapan saja, termasuk rilis yang sudah tayang; bidang lain hanya saat draf.
       const raw = (req.body ?? {}) as Record<string, unknown>;
+      // Mematikan izin offline mencabut lisensi SEMUA pendengar → wajib OWNER/ADMIN org artis (bukan VIEWER/FINANCE).
+      if (raw && typeof raw === 'object' && 'offline_allowed' in raw && !canAdminArtist(req.user, t.artist_id))
+        throw forbidden('Hanya pemilik/admin artis yang dapat mengubah izin unduhan offline');
       if (raw && typeof raw === 'object' && Object.keys(raw).length === 1 && 'offline_allowed' in raw) {
         const { offline_allowed } = z.object({ offline_allowed: z.boolean() }).parse(raw);
         await db.tx(async (tx) => {

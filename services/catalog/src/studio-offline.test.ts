@@ -44,6 +44,35 @@ describe('studio: offline_allowed per lagu (P-7)', () => {
     expect(d.events).toHaveLength(0);
   });
 
+  // Regresi M3 (BFLA): VIEWER/FINANCE/MEMBER org artis lolos canManageArtist tetapi tidak boleh mencabut lisensi semua pendengar.
+  it.each(['VIEWER', 'FINANCE', 'MEMBER'] as const)('peran %s di org artis → 403, tanpa perubahan & tanpa event', async (role) => {
+    const d = db('LIVE');
+    const user = { ...OWNER, sub: '0190a000-0000-7000-8000-0000000000d4', orgs: [{ id: 'o1', type: 'ARTIST' as const, role, artistId: ARTIST }] };
+    const r = await patch(d, { offline_allowed: false }, user as any);
+    expect(r.statusCode).toBe(403);
+    expect(d.track.offline_allowed).toBe(true);
+    expect(d.events).toHaveLength(0);
+  });
+
+  it('ADMIN org artis (mis. anggota manajemen yang diberi akses) → 200', async () => {
+    const d = db('LIVE');
+    const user = { sub: '0190a000-0000-7000-8000-0000000000d5', roles: ['manager' as const], orgs: [{ id: 'o1', type: 'ARTIST' as const, role: 'ADMIN' as const, artistId: ARTIST }] };
+    expect((await patch(d, { offline_allowed: false }, user as any)).statusCode).toBe(200);
+    expect(d.events).toHaveLength(1);
+  });
+
+  it('OWNER/ADMIN org artis LAIN → 403', async () => {
+    const d = db('LIVE');
+    const user = { ...OWNER, orgs: [{ id: 'o2', type: 'ARTIST' as const, role: 'OWNER' as const, artistId: '0190a000-0000-7000-8000-0000000000ff' }] };
+    expect((await patch(d, { offline_allowed: false }, user as any)).statusCode).toBe(403);
+  });
+
+  it('VIEWER menyelipkan offline_allowed di PATCH rilis draf → 403 (bukan lolos lewat jalur edit biasa)', async () => {
+    const d = db('DRAFT');
+    const user = { ...OWNER, orgs: [{ id: 'o1', type: 'ARTIST' as const, role: 'VIEWER' as const, artistId: ARTIST }] };
+    expect((await patch(d, { offline_allowed: false, title: 'baru' }, user as any)).statusCode).toBe(403);
+  });
+
   it('nilai bukan boolean → 400', async () => {
     expect((await patch(db(), { offline_allowed: 'tidak' })).statusCode).toBe(400);
   });

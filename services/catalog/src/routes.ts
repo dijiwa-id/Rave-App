@@ -15,6 +15,15 @@ export function canManageArtist(u: AuthUser | null, artistId: string) {
   return !!u?.roles.includes('service') || managedArtistIds(u).includes(artistId);
 }
 
+/**
+ * Keputusan berdampak ke pendengar (mis. izin unduhan offline yang mencabut lisensi semua pendengar): hanya OWNER/ADMIN
+ * org artis itu — termasuk anggota manajemen yang diberi akses artis (klaim ADMIN). VIEWER/FINANCE/MEMBER tidak boleh.
+ */
+export function canAdminArtist(u: AuthUser | null, artistId: string) {
+  if (u?.roles.includes('service')) return true;
+  return !!u?.orgs.some((o) => (o.artistId ?? o.artist_id) === artistId && (o.role === 'OWNER' || o.role === 'ADMIN'));
+}
+
 const media = {
   release: (r: any) => ({ id: r.id, kind: 'release', title: r.title, subtitle: `${r.type === 'SINGLE' ? 'Single' : r.type} • ${r.artist_name}`, image_url: r.cover_url, href: `/app/album/${r.id}` }),
   artist: (a: any) => ({ id: a.id, kind: 'artist', title: a.name, subtitle: 'Artis', image_url: a.image_url, href: `/app/artist/${a.slug}` }),
