@@ -70,6 +70,11 @@ export const SETTING_GROUPS = {
   payout: { label: 'Payout', description: 'Penarikan saldo wallet ke rekening bank: batas, kontrol ganda, dan jadwal pemrosesan.' },
   royalty: { label: 'Royalti', description: 'Perhitungan & statement royalti bulanan dari stream qualified (model user-centric, BRD §6.3).' },
   subscription: { label: 'Langganan Premium & RAVE Pro', description: 'Harga paket, masa coba, masa tenggang Premium, serta paket, harga, take rate, dan batas roster RAVE Pro (REQ-PAY-03).' },
+  download: {
+    label: 'Unduhan Offline Premium',
+    description:
+      'Unduhan lagu & episode untuk didengar offline di aplikasi desktop/mobile: lisensi per perangkat bertanda tangan server, berkas AAC terenkripsi, kedaluwarsa & cek ulang berkala. Perlindungan lisensi, bukan DRM penuh (ADR-0004).',
+  },
   refund: { label: 'Refund Tiket', description: 'Kebijakan pengembalian dana tiket: pembatalan event, permintaan pembeli, dan pembayaran terlambat.' },
   transcoding: { label: 'Transcoding Audio', description: 'Pengolahan master: standar kualitas upload, normalisasi loudness, dan rendisi streaming.' },
   streaming: { label: 'Streaming', description: 'Pratinjau, kualitas audio, dan anti-fraud (§6.3, REQ-ADM-03).' },
@@ -453,7 +458,7 @@ export const SETTINGS: SettingDef[] = [
   { key: 'subscription.price_duo_idr', group: 'subscription', label: 'Harga Duo', description: 'Per bulan untuk dua akun dalam satu rumah, sudah termasuk PPN.', type: 'number', default: 64_900, min: 0, max: 2_000_000, step: 100, unit: 'Rp/bln', public: true, consumers: ['web'] },
   { key: 'subscription.trial_days', group: 'subscription', label: 'Masa coba gratis', description: 'Untuk pelanggan baru, satu kali per akun. 0 = tanpa masa coba.', type: 'number', default: 30, min: 0, max: 90, unit: 'hari', public: true, consumers: ['web'] },
   { key: 'subscription.student_verify_months', group: 'subscription', label: 'Masa berlaku verifikasi pelajar', description: 'Status pelajar wajib diverifikasi ulang setelah periode ini.', type: 'number', default: 12, min: 1, max: 48, unit: 'bulan', public: true, consumers: ['web'] },
-  { key: 'subscription.download_devices', group: 'subscription', label: 'Perangkat unduhan', description: 'Jumlah perangkat yang boleh menyimpan unduhan offline per akun Premium.', type: 'number', default: 5, min: 1, max: 10, unit: 'perangkat', public: true, consumers: ['web'] },
+  { key: 'subscription.download_devices', group: 'subscription', label: 'Perangkat unduhan', description: 'Jumlah perangkat aktif yang boleh menyimpan unduhan offline per akun Premium. Perangkat ke-(n+1) ditolak sampai salah satu dicabut.', type: 'number', default: 5, min: 1, max: 10, unit: 'perangkat', public: true, consumers: ['iam', 'web'] },
   { key: 'subscription.grace_days', group: 'subscription', label: 'Masa tenggang gagal bayar', description: 'Akses Premium tetap aktif selama sekian hari sejak perpanjangan gagal, sambil penagihan diulang.', type: 'number', default: 7, min: 0, max: 30, unit: 'hari', consumers: ['iam', 'finance'], planned: 'Butuh billing langganan berulang.' },
   { key: 'subscription.renewal_reminder_days', group: 'subscription', label: 'Pengingat perpanjangan', description: 'Notifikasi dikirim sekian hari sebelum tagihan berikutnya (wajib untuk perpanjangan otomatis).', type: 'number', default: 3, min: 1, max: 14, unit: 'hari', consumers: ['notification'], planned: 'Butuh billing langganan berulang.' },
   // ---- RAVE Pro (B2B SaaS, BRD §4.1) — kunci `subscription.pro_*` diedit di Pengaturan Layanan → RAVE Pro ----
@@ -472,6 +477,44 @@ export const SETTINGS: SettingDef[] = [
   { key: 'subscription.pro_grace_days', group: 'subscription', label: 'Masa tenggang RAVE Pro', description: 'Hak Pro tetap aktif sekian hari setelah periode berakhir sambil menunggu pembayaran perpanjangan.', type: 'number', default: 7, min: 0, max: 30, unit: 'hari', public: true, consumers: ['finance', 'web'] },
   { key: 'subscription.pro_renewal_invoice_days', group: 'subscription', label: 'Tagihan perpanjangan terbit', description: 'Tagihan perpanjangan diterbitkan & dikirim ke pemilik organisasi sekian hari sebelum periode berakhir.', type: 'number', default: 7, min: 1, max: 30, unit: 'hari', public: true, consumers: ['finance', 'web'] },
   { key: 'subscription.pro_checkout_hours', group: 'subscription', label: 'Batas bayar checkout', description: 'Tagihan langganan baru/upgrade kedaluwarsa bila tidak dibayar dalam sekian jam.', type: 'number', default: 24, min: 1, max: 168, unit: 'jam', consumers: ['finance'] },
+
+  // ---- Unduhan offline Premium (P-7, ADR-0004). Batas perangkat: subscription.download_devices. ----
+  { key: 'download.enabled', group: 'download', label: 'Unduhan offline aktif', description: 'Saklar induk. Mati: pendaftaran perangkat & penerbitan/cek ulang lisensi ditolak (403); unduhan yang sudah ada tetap bisa diputar sampai lisensinya kedaluwarsa.', type: 'boolean', default: false, public: true, consumers: ['iam', 'catalog', 'playback', 'web'], dangerous: true },
+  { key: 'download.allow_user_ids', group: 'download', label: 'Rollout terbatas (ID pengguna)', description: 'Daftar ID akun yang boleh memakai unduhan offline selama uji coba. Kosong = semua pelanggan Premium yang memenuhi syarat.', type: 'list', default: [], consumers: ['playback'], dangerous: true },
+  {
+    key: 'download.tiers',
+    group: 'download',
+    label: 'Paket yang boleh mengunduh',
+    description: 'Jenis member Premium aktif yang berhak atas unduhan offline. Gratis tidak pernah berhak. Paket yang dikeluarkan dari daftar → lisensinya dicabut saat cek ulang.',
+    type: 'list',
+    default: ['INDIVIDUAL', 'STUDENT', 'DUO'],
+    options: [
+      { value: 'INDIVIDUAL', label: 'Individu' },
+      { value: 'STUDENT', label: 'Pelajar' },
+      { value: 'DUO', label: 'Duo' },
+    ],
+    public: true,
+    consumers: ['playback', 'web'],
+  },
+  { key: 'download.max_tracks_per_device', group: 'download', label: 'Unduhan maksimum per perangkat', description: 'Jumlah lisensi aktif (lagu + episode) per perangkat.', type: 'number', default: 500, min: 10, max: 10_000, unit: 'item', public: true, consumers: ['playback', 'web'] },
+  { key: 'download.license_ttl_days', group: 'download', label: 'Masa berlaku lisensi', description: 'Lisensi kedaluwarsa bila perangkat tidak cek ulang selama ini — batas risiko pencabutan saat perangkat terus offline.', type: 'number', default: 30, min: 1, max: 90, unit: 'hari', public: true, consumers: ['playback', 'web'] },
+  { key: 'download.recheck_hours', group: 'download', label: 'Interval cek ulang', description: 'Aplikasi memeriksa ulang lisensi ke server setiap selang ini saat online (memperpanjang yang masih berhak, menerima daftar yang dicabut).', type: 'number', default: 72, min: 1, max: 720, unit: 'jam', public: true, consumers: ['playback', 'web'] },
+  { key: 'download.rate_per_user_hour', group: 'download', label: 'Lisensi baru per jam', description: 'Batas lisensi baru per akun per jam (anti-scraping). Perpanjangan lisensi yang sudah ada tidak dihitung.', type: 'number', default: 60, min: 1, max: 1000, unit: 'lisensi/jam', consumers: ['playback'] },
+  { key: 'download.podcast_enabled', group: 'download', label: 'Episode podcast bisa diunduh', description: 'Selain lagu, episode podcast/audio fiksi unggahan kreator boleh diunduh. Episode embed tidak pernah bisa diunduh.', type: 'boolean', default: true, public: true, consumers: ['playback', 'web'] },
+  {
+    key: 'download.quality',
+    group: 'download',
+    label: 'Kualitas berkas unduhan',
+    description: 'Rendisi yang dienkripsi untuk unduhan. Master asli & Lossless tidak pernah diunduh. Mengubah nilai membuat berkas baru untuk unduhan berikutnya; unduhan lama tetap berlaku.',
+    type: 'enum',
+    default: 'normal',
+    options: [
+      { value: 'normal', label: 'AAC 160 kbps (Normal)' },
+      { value: 'low', label: 'AAC 64 kbps (Hemat)' },
+    ],
+    public: true,
+    consumers: ['catalog', 'web'],
+  },
 
   // ---- Refund tiket ----
   { key: 'refund.event_cancel_sla_days', group: 'refund', label: 'Batas waktu refund event batal', description: 'Janji ke pembeli: dana kembali paling lambat sekian hari sejak event dibatalkan. Refund ini selalu penuh, termasuk biaya layanan, dan diajukan otomatis (sandbox: dana langsung kembali).', type: 'number', default: 14, min: 1, max: 30, unit: 'hari', public: true, consumers: ['ticketing', 'finance', 'web'] },
