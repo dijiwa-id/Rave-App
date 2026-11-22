@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, ArrowRight, BadgeCheck, Briefcase, Coins, Crown, Mic2, Podcast, Ticket, Headphones, Images, ListMusic, Shapes, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow, Newspaper } from 'lucide-react';
+import { Activity, ArrowRight, BadgeCheck, Copy, Briefcase, Coins, Crown, Mic2, Podcast, Ticket, Headphones, Images, ListMusic, Shapes, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow, Newspaper } from 'lucide-react';
 import { ADMIN_PERMISSIONS, ADMIN_ROLE_LABEL, type AdminPermission, type AdminRole } from '@rave/domain/settings';
 import { can, isSuperAdmin, useAuth } from '@/stores/auth';
 import { B2BLayout, type B2BNavItem } from '@/layouts/B2BLayout';
@@ -1159,40 +1159,150 @@ function KV({ k, children }: { k: string; children: ReactNode }) {
     </div>
   );
 }
-function DetailSection({ title, children, tone }: { title: string; children: ReactNode; tone?: 'danger' }) {
+function DetailSection({ title, children, tone, action }: { title: string; children: ReactNode; tone?: 'danger'; action?: ReactNode }) {
   return (
     <section className={cx('border-2 p-4', tone === 'danger' ? 'border-red-500/40 bg-red-500/[0.04]' : 'border-b2b-line bg-b2b-card')}>
-      <h3 className={cx('mb-2 font-label text-[11px] font-bold tracking-[0.12em] uppercase', tone === 'danger' ? 'text-red-600' : 'text-b2b-muted')}>{title}</h3>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h3 className={cx('font-label text-[11px] font-bold tracking-[0.12em] uppercase', tone === 'danger' ? 'text-red-600' : 'text-b2b-muted')}>{title}</h3>
+        {action}
+      </div>
       {children}
     </section>
   );
 }
 
+/** Ringkasan satu angka/nilai di strip atas detail pengguna. */
+function MiniStat({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
+  return (
+    <div className="min-w-0 border-2 border-b2b-line bg-b2b-card px-3 py-2" title={hint}>
+      <p className="font-label text-[10px] font-bold tracking-[0.12em] text-b2b-muted uppercase">{label}</p>
+      <p className="mt-0.5 truncate text-sm font-bold">{value}</p>
+    </div>
+  );
+}
+
+/** Tombol salin kecil (ID, email, nomor) dengan umpan balik toast. */
+function CopyText({ value, label, mono, className }: { value: string; label: string; mono?: boolean; className?: string }) {
+  const t = useDict('admin').users;
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(value);
+        toast.success(t.copiedValue(label));
+      }}
+      title={t.copyValue(label)}
+      className={cx('inline-flex max-w-full items-center gap-1 truncate text-left hover:text-b2b-ink', mono && 'font-mono', className)}
+    >
+      <span className="truncate">{value}</span>
+      <Copy className="size-3 shrink-0 opacity-60" aria-hidden />
+    </button>
+  );
+}
+
+/** Dialog alasan (pengganti prompt bawaan): alasan wajib ≥ 5 karakter, tercatat di audit log. */
+function ReasonDialog({
+  open,
+  title,
+  body,
+  confirmLabel,
+  danger,
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  title: string;
+  body: string;
+  confirmLabel: string;
+  danger?: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (reason: string) => void;
+}) {
+  const t = useDict('admin').users;
+  const [reason, setReason] = useState('');
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setReason('');
+  }
+  const ok = reason.trim().length >= 5;
+  return (
+    <Modal open={open} onClose={onClose} title={title}>
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (ok && !busy) onSubmit(reason.trim());
+        }}
+      >
+        <p className="text-sm">{body}</p>
+        <Field label={t.reason} hint={t.reasonHint}>
+          <Textarea autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t.reasonPlaceholderAction} />
+        </Field>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline-ink" onClick={onClose}>
+            {t.cancel}
+          </Button>
+          <Button type="submit" variant={danger ? 'danger' : 'ink'} loading={busy} disabled={!ok}>
+            {confirmLabel}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+const ORG_ROLE_TONE: Record<string, 'purple' | 'blue' | 'neutral'> = { OWNER: 'purple', ADMIN: 'blue' };
+const KYC_TONE: Record<string, 'green' | 'blue' | 'red' | 'neutral'> = { APPROVED: 'green', VERIFIED: 'green', PENDING: 'blue', REJECTED: 'red' };
+
+/** Ringkas `data` audit menjadi satu baris yang terbaca (alasan / perubahan); sisanya tersedia di Audit Log. */
+function auditSummary(data: unknown): string | null {
+  if (!data || typeof data !== 'object') return null;
+  const o = data as Record<string, unknown>;
+  const parts: string[] = [];
+  if (typeof o.reason === 'string' && o.reason) parts.push(`“${o.reason}”`);
+  for (const [k, v] of Object.entries(o)) {
+    if (k === 'reason' || v == null || typeof v === 'object') continue;
+    if (parts.length >= 3) break;
+    parts.push(`${k}: ${String(v)}`);
+  }
+  return parts.length ? parts.join(' · ') : null;
+}
+
+type PendingAction = 'suspend' | 'unsuspend' | 'revoke' | null;
+
 /**
- * Detail pengguna (izin users.view): profil lengkap, akun & akses, metode masuk, organisasi, riwayat verifikasi,
- * persetujuan data, aktivitas terakhir. Aksi: ubah member · tangguhkan/pulihkan · hapus akun (Super Admin),
- * cabut verifikasi (users.verify). Semua aksi beralasan & tercatat di audit log.
+ * Detail pengguna (izin users.view): ringkasan status, profil lengkap, akun & akses, KYC, metode masuk, organisasi,
+ * riwayat verifikasi, persetujuan data, aktivitas terakhir. Aksi: ubah member · tangguhkan/pulihkan · hapus akun
+ * (Super Admin), cabut verifikasi (users.verify). Semua aksi beralasan (dialog, bukan prompt) & tercatat di audit log.
  */
 function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose: () => void; onEditMember: (u: Me) => void }) {
   const d = useDict('admin');
   const t = d.users;
   const f = t.fields;
+  const fanDict = useDict('fan');
   const me = useAuth((x) => x.user);
   const sup = isSuperAdmin(me);
   const canVerify = can(me, 'users.verify');
+  const canAudit = can(me, 'audit.view');
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['admin-user', id], enabled: !!id, queryFn: () => api<UserDetailData>(`/v1/admin/iam/users/${id}`) });
   const [reason, setReason] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<PendingAction>(null);
   const [opened, setOpened] = useState<string | null>(null);
   if (id && opened !== id) {
     setOpened(id);
     setReason('');
     setConfirm('');
+    setPending(null);
   }
   const close = () => {
     setOpened(null);
+    setPending(null);
     onClose();
   };
   const refresh = () => {
@@ -1208,6 +1318,7 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
     try {
       await fn();
       toast.success(ok);
+      setPending(null);
       refresh();
     } catch (e) {
       toast.error(e);
@@ -1215,18 +1326,11 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
       setBusy(false);
     }
   }
-  const suspend = () => {
+  function submitPending(r: string) {
     if (!u) return;
-    const r = prompt(u.suspended_at ? t.unsuspendPrompt : t.suspendPrompt);
-    if (!r) return;
-    void act(() => api(`/v1/admin/iam/users/${u.id}`, { method: 'PATCH', body: { suspended: !u.suspended_at, reason: r.trim() } }), u.suspended_at ? t.unsuspendedOk : t.suspendedOk);
-  };
-  const revokeVerify = () => {
-    if (!u) return;
-    const r = prompt(d.verifications.revokePrompt);
-    if (!r) return;
-    void act(() => api(`/v1/admin/iam/users/${u.id}/verification/revoke`, { body: { reason: r.trim() } }), d.verifications.revoked);
-  };
+    if (pending === 'revoke') void act(() => api(`/v1/admin/iam/users/${u.id}/verification/revoke`, { body: { reason: r } }), d.verifications.revoked);
+    else if (pending) void act(() => api(`/v1/admin/iam/users/${u.id}`, { method: 'PATCH', body: { suspended: pending === 'suspend', reason: r } }), pending === 'suspend' ? t.suspendedOk : t.unsuspendedOk);
+  }
   async function remove() {
     if (!u) return;
     setBusy(true);
@@ -1245,37 +1349,36 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
   const ownerOf = data?.orgs.filter((o) => o.role === 'OWNER').map((o) => o.name) ?? [];
   const blocked = !u ? null : u.id === me?.id ? t.deleteBlockedSelf : u.admin_role ? t.deleteBlockedAdmin : ownerOf.length ? t.deleteBlockedOwner(ownerOf.join(', ')) : null;
   const confirmKey = u?.email ?? u?.id ?? '';
+  const consentLabel = (p: string) => (fanDict.settings.consents as Record<string, readonly [string, string]>)[p]?.[0] ?? p;
+  const dialog: Record<Exclude<PendingAction, null>, { title: string; body: string; cta: string; danger?: boolean }> = {
+    suspend: { title: t.suspendTitle, body: t.suspendBody, cta: t.suspend, danger: true },
+    unsuspend: { title: t.unsuspendTitle, body: t.unsuspendBody, cta: t.unsuspend },
+    revoke: { title: t.revokeTitle, body: t.revokeBody, cta: t.revokeVerify, danger: true },
+  };
 
   return (
+    <>
     <Modal open={!!id} onClose={close} title={t.detailTitle} wide="xl">
       <QueryState q={q}>
         {u && data && (
           <div className="space-y-4">
-            {/* Kepala: avatar, nama + badge, kontak, status, aksi cepat */}
+            {/* Kepala: avatar, nama + badge, kontak (bisa disalin), aksi cepat */}
             <div className="flex flex-wrap items-start gap-4">
               <span className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full border-2 border-b2b-ink bg-rave-purple">
                 {u.avatar_url ? <img src={u.avatar_url} alt="" className="size-full object-cover" /> : <span className="font-display text-2xl text-rave-primary">{u.display_name.slice(0, 1).toUpperCase()}</span>}
               </span>
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-center gap-2 text-xl font-bold">
-                  {u.display_name}
+                  <span className="min-w-0 break-words">{u.display_name}</span>
                   {u.verified && <VerifiedBadge size={20} />}
                   <Badge tone={u.suspended_at ? 'red' : 'green'}>{u.suspended_at ? t.suspended : t.active}</Badge>
+                  {u.admin_role && <Badge tone="purple">{ADMIN_ROLE_LABEL[u.admin_role as AdminRole] ?? u.admin_role}</Badge>}
                 </p>
-                <p className="text-sm text-b2b-muted">
-                  {u.email ?? '—'} · {u.phone ?? '—'}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(u.id);
-                    toast.success(t.copied);
-                  }}
-                  title={t.copyId}
-                  className="mt-1 font-mono text-[11px] text-b2b-muted hover:text-b2b-ink"
-                >
-                  {u.id}
-                </button>
+                <div className="mt-1 flex flex-col gap-0.5 text-sm text-b2b-muted">
+                  {u.email && <CopyText value={u.email} label={t.copyLabels.email} />}
+                  {u.phone && <CopyText value={u.phone} label={t.copyLabels.phone} />}
+                  <CopyText value={u.id} label={t.copyLabels.id} mono className="text-[11px]" />
+                </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 {sup && (
@@ -1284,16 +1387,32 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
                   </Button>
                 )}
                 {canVerify && u.verified && (
-                  <Button size="sm" variant="outline-ink" loading={busy} onClick={revokeVerify}>
+                  <Button size="sm" variant="outline-ink" disabled={busy} onClick={() => setPending('revoke')}>
                     {t.revokeVerify}
                   </Button>
                 )}
                 {sup && u.id !== me?.id && (
-                  <Button size="sm" variant={u.suspended_at ? 'ink' : 'outline-ink'} loading={busy} onClick={suspend}>
+                  <Button size="sm" variant={u.suspended_at ? 'ink' : 'outline-ink'} disabled={busy} onClick={() => setPending(u.suspended_at ? 'unsuspend' : 'suspend')}>
                     {u.suspended_at ? t.unsuspend : t.suspend}
                   </Button>
                 )}
               </div>
+            </div>
+
+            {u.suspended_at && (
+              <p role="status" className="border-l-4 border-red-500 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-700">
+                {t.suspendedSince(fmt.dateTime(u.suspended_at))}
+              </p>
+            )}
+
+            {/* Strip ringkasan: status penting tanpa harus membaca semua bagian */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+              <MiniStat label={f.member} value={<MemberBadge u={u} />} />
+              <MiniStat label={f.verification} value={<VerificationBadge status={u.verification_status ?? 'NONE'} />} />
+              <MiniStat label={f.joined} value={fmt.date(u.created_at)} hint={fmt.dateTime(u.created_at)} />
+              <MiniStat label={f.lastSeen} value={data.sessions.last_seen_at ? fmt.date(data.sessions.last_seen_at) : '—'} hint={data.sessions.last_seen_at ? fmt.dateTime(data.sessions.last_seen_at) : undefined} />
+              <MiniStat label={f.sessions} value={data.sessions.active} />
+              <MiniStat label={t.sections.orgs} value={data.orgs.length} />
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -1303,7 +1422,7 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
                   <KV k={f.birthDate}>{u.birth_date ? fmt.date(u.birth_date) : null}</KV>
                   <KV k={f.gender}>{u.gender ? (t.genders[u.gender] ?? u.gender) : null}</KV>
                   <KV k={f.city}>{u.city}</KV>
-                  <KV k={f.bio}>{u.bio}</KV>
+                  <KV k={f.bio}>{u.bio ? <span className="line-clamp-4 whitespace-pre-line">{u.bio}</span> : null}</KV>
                   <KV k={f.socials}>
                     {u.socials?.length
                       ? u.socials.map((s) => (
@@ -1317,25 +1436,32 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
               </DetailSection>
               <DetailSection title={t.sections.account}>
                 <dl>
-                  <KV k={f.member}>
-                    <MemberBadge u={u} />
-                  </KV>
-                  <KV k={f.verification}>
-                    <VerificationBadge status={u.verification_status ?? 'NONE'} />
-                  </KV>
-                  <KV k={f.nik}>{u.id_number_masked ? <span className="font-mono text-xs">{u.id_number_masked}</span> : null}</KV>
                   <KV k={f.roles}>
                     <span className="flex flex-wrap gap-1">
                       {u.roles.map((r) => (
-                        <Badge key={r}>{r}</Badge>
+                        <Badge key={r}>{t.roleChips[r.toLowerCase()] ?? r}</Badge>
                       ))}
                     </span>
                   </KV>
                   <KV k={f.adminRole}>{u.admin_role ? (ADMIN_ROLE_LABEL[u.admin_role as AdminRole] ?? u.admin_role) : null}</KV>
+                  <KV k={f.nik}>{u.id_number_masked ? <span className="font-mono text-xs">{u.id_number_masked}</span> : null}</KV>
+                  <KV k={f.kyc}>
+                    {data.kyc ? (
+                      <span className="flex flex-col items-start gap-0.5">
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          <Badge tone={KYC_TONE[data.kyc.status] ?? 'neutral'}>{t.kycStatus[data.kyc.status] ?? data.kyc.status}</Badge>
+                          <span className="text-xs text-b2b-muted">{data.kyc.level}</span>
+                        </span>
+                        <span className="text-xs text-b2b-muted">
+                          {data.kyc.full_name} · <span className="font-mono">{data.kyc.id_number_masked}</span> · {fmt.date(data.kyc.created_at)}
+                        </span>
+                        {data.kyc.reason && <span className="text-xs">“{data.kyc.reason}”</span>}
+                      </span>
+                    ) : null}
+                  </KV>
                   <KV k={f.onboarded}>{u.onboarded ? t.yes : t.no}</KV>
                   <KV k={f.joined}>{fmt.dateTime(u.created_at)}</KV>
                   <KV k={f.lastSeen}>{data.sessions.last_seen_at ? fmt.dateTime(data.sessions.last_seen_at) : null}</KV>
-                  <KV k={f.sessions}>{data.sessions.active}</KV>
                 </dl>
               </DetailSection>
               <DetailSection title={t.sections.logins}>
@@ -1343,7 +1469,10 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
                   <ul className="space-y-1.5 text-sm">
                     {data.identities.map((i) => (
                       <li key={i.provider + i.subject} className="flex items-center justify-between gap-3">
-                        <span className="font-semibold">{t.providers[i.provider] ?? i.provider}</span>
+                        <span className="min-w-0">
+                          <span className="font-semibold">{t.providers[i.provider] ?? i.provider}</span>
+                          <span className="block text-xs text-b2b-muted">{t.linkedOn(fmt.date(i.created_at))}</span>
+                        </span>
                         <span className="truncate font-mono text-xs text-b2b-muted">{['email', 'whatsapp'].includes(i.provider) ? i.subject : `${i.subject.slice(0, 6)}…`}</span>
                       </li>
                     ))}
@@ -1360,10 +1489,10 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
                         <span className="min-w-0">
                           <span className="font-semibold">{o.name}</span> {o.verified && <VerifiedBadge size={12} />}
                           <span className="block text-xs text-b2b-muted">
-                            {o.type} · {o.city ?? '—'} · {t.members(o.members)}
+                            {t.orgTypes[o.type] ?? o.type} · {o.city ?? '—'} · {t.members(o.members)} · {t.joinedOn(fmt.date(o.joined_at))}
                           </span>
                         </span>
-                        <Badge tone={o.role === 'OWNER' ? 'purple' : 'neutral'}>{o.role}</Badge>
+                        <Badge tone={ORG_ROLE_TONE[o.role] ?? 'neutral'}>{t.orgRoles[o.role] ?? o.role}</Badge>
                       </li>
                     ))}
                   </ul>
@@ -1378,6 +1507,7 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
                       <li key={v.id} className="flex items-start justify-between gap-3">
                         <span className="text-xs text-b2b-muted">
                           {fmt.dateTime(v.created_at)}
+                          {v.decided_at && <span className="block">{t.decidedOn(fmt.dateTime(v.decided_at))}</span>}
                           {v.reason && <span className="block text-b2b-ink">“{v.reason}”</span>}
                         </span>
                         <Badge tone={v.status === 'APPROVED' ? 'green' : v.status === 'PENDING' ? 'blue' : v.status === 'CANCELLED' ? 'neutral' : 'red'}>{d.verifications.status[v.status] ?? v.status}</Badge>
@@ -1390,11 +1520,14 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
               </DetailSection>
               <DetailSection title={t.sections.consents}>
                 {data.consents.length ? (
-                  <ul className="space-y-1 text-sm">
+                  <ul className="space-y-1.5 text-sm">
                     {data.consents.map((c) => (
-                      <li key={c.purpose} className="flex justify-between gap-3">
-                        <span>{c.purpose}</span>
-                        <Badge tone={c.granted ? 'green' : 'neutral'}>{c.granted ? 'ON' : 'OFF'}</Badge>
+                      <li key={c.purpose} className="flex items-center justify-between gap-3">
+                        <span className="min-w-0">
+                          <span className="font-semibold">{consentLabel(c.purpose)}</span>
+                          <span className="block text-xs text-b2b-muted">{t.updatedOn(fmt.dateTime(c.updated_at))}</span>
+                        </span>
+                        <Badge tone={c.granted ? 'green' : 'neutral'}>{c.granted ? t.consentGranted : t.consentDenied}</Badge>
                       </li>
                     ))}
                   </ul>
@@ -1404,17 +1537,33 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
               </DetailSection>
             </div>
 
-            <DetailSection title={t.sections.activity}>
+            <DetailSection
+              title={t.sections.activity}
+              action={
+                canAudit ? (
+                  <Link to="/admin/audit" onClick={close} className="font-label text-[11px] font-bold tracking-[0.08em] text-rave-accent uppercase hover:underline">
+                    {t.seeAudit}
+                  </Link>
+                ) : undefined
+              }
+            >
               {data.activity.length ? (
                 <ul className="divide-y divide-b2b-line text-sm">
-                  {data.activity.map((a) => (
-                    <li key={a.id} className="flex items-baseline justify-between gap-4 py-1.5">
-                      <span className="font-mono text-xs font-semibold">{a.action}</span>
-                      <span className="text-xs whitespace-nowrap text-b2b-muted">
-                        {a.actor_name ?? (a.actor_id ? `${a.actor_id.slice(0, 8)}…` : 'system')} · {fmt.dateTime(a.created_at)}
-                      </span>
-                    </li>
-                  ))}
+                  {data.activity.map((a) => {
+                    const summary = auditSummary(a.data);
+                    return (
+                      <li key={a.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2">
+                        <span className="min-w-0">
+                          <span className="font-semibold">{t.actions[a.action] ?? a.action}</span>
+                          {t.actions[a.action] && <span className="ml-2 font-mono text-[10px] text-b2b-muted">{a.action}</span>}
+                          {summary && <span className="block truncate text-xs text-b2b-muted" title={summary}>{summary}</span>}
+                        </span>
+                        <span className="text-xs whitespace-nowrap text-b2b-muted">
+                          {a.actor_id === u.id ? t.actorSelf : (a.actor_name ?? (a.actor_id ? `${a.actor_id.slice(0, 8)}…` : t.actorSystem))} · {fmt.dateTime(a.created_at)}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : (
                 <p className="text-sm text-b2b-muted">{t.empty}</p>
@@ -1429,7 +1578,7 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
                 ) : (
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
                     <Field label={t.reason} hint={t.reasonHint}>
-                      <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t.reasonPlaceholder} />
+                      <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t.reasonPlaceholderAction} />
                     </Field>
                     <Field label={t.deleteConfirmLabel(confirmKey)}>
                       <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" spellCheck={false} />
@@ -1447,6 +1596,19 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
         )}
       </QueryState>
     </Modal>
+      {pending && (
+        <ReasonDialog
+          open
+          title={dialog[pending].title}
+          body={dialog[pending].body}
+          confirmLabel={dialog[pending].cta}
+          danger={dialog[pending].danger}
+          busy={busy}
+          onClose={() => setPending(null)}
+          onSubmit={submitPending}
+        />
+      )}
+    </>
   );
 }
 
