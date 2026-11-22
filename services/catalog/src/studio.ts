@@ -638,33 +638,42 @@ export async function studioRoutes(app: FastifyInstance, ctx: ServiceContext) {
       // Mematikan izin offline mencabut lisensi SEMUA pendengar → wajib OWNER/ADMIN org artis (bukan VIEWER/FINANCE).
       if (raw && typeof raw === 'object' && 'offline_allowed' in raw && !canAdminArtist(req.user, t.artist_id))
         throw forbidden('Hanya pemilik/admin artis yang dapat mengubah izin unduhan offline');
+      // Satu jalur untuk SETIAP perubahan offline_allowed (body murni maupun campuran, apa pun status rilis — S2):
+      // kunci baris, tulis hanya bila berubah, audit, dan event pencabutan bila dimatikan.
+      const setOfflineAllowed = async (tx: Client, offline_allowed: boolean) => {
+        const prev = (await tx.query(`SELECT offline_allowed FROM tracks WHERE id = $1 FOR UPDATE`, [id])).rows[0];
+        if (!prev || prev.offline_allowed === offline_allowed) return;
+        await tx.query(`UPDATE tracks SET offline_allowed = $2 WHERE id = $1`, [id, offline_allowed]);
+        await audit(tx, { actorId: req.user!.sub, action: 'track.offline_allowed', entity: 'track', entityId: id, data: { offline_allowed }, ip: req.ip });
+        // Dimatikan → lisensi offline yang sudah terbit dicabut playback.
+        if (!offline_allowed) await publishOfflineRevoked(tx, 'track', [id], 'OFFLINE_DISABLED');
+      };
       if (raw && typeof raw === 'object' && Object.keys(raw).length === 1 && 'offline_allowed' in raw) {
         const { offline_allowed } = z.object({ offline_allowed: z.boolean() }).parse(raw);
-        await db.tx(async (tx) => {
-          const prev = (await tx.query(`SELECT offline_allowed FROM tracks WHERE id = $1 FOR UPDATE`, [id])).rows[0];
-          if (prev.offline_allowed === offline_allowed) return;
-          await tx.query(`UPDATE tracks SET offline_allowed = $2 WHERE id = $1`, [id, offline_allowed]);
-          await audit(tx, { actorId: req.user!.sub, action: 'track.offline_allowed', entity: 'track', entityId: id, data: { offline_allowed }, ip: req.ip });
-          // Dimatikan → lisensi offline yang sudah terbit dicabut playback.
-          if (!offline_allowed) await publishOfflineRevoked(tx, 'track', [id], 'OFFLINE_DISABLED');
-        });
+        await db.tx((tx) => setOfflineAllowed(tx, offline_allowed));
         const out = await releaseFull(db, t.release_id);
         delete out.artist_id;
         return out;
       }
       if (!EDITABLE.includes(t.release_status)) throw conflict('Lagu pada rilis yang sudah diajukan tidak dapat diubah');
-      const b = trackInput.partial().extend({ track_number: z.number().int().min(1).optional(), offline_allowed: z.boolean().optional() }).parse(req.body);
+      const { offline_allowed, ...b } = trackInput
+        .partial()
+        .extend({ track_number: z.number().int().min(1).optional(), offline_allowed: z.boolean().optional() })
+        .parse(req.body);
       const sets: string[] = [];
       const vals: unknown[] = [];
       for (const [k, v] of Object.entries(b)) {
         vals.push(v);
         sets.push(`${k} = $${vals.length}`);
       }
-      if (!sets.length) throw badRequest('Tidak ada perubahan');
+      if (!sets.length && offline_allowed === undefined) throw badRequest('Tidak ada perubahan');
       if (b.audio_url && b.audio_url !== t.audio_url) await assertOwnAudioUpload(db, req.user!.sub, b.audio_url);
       vals.push(id);
-      await db.query(`UPDATE tracks SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
-      if ('audio_url' in b) await syncAudioDurations(db, t.release_id);
+      await db.tx(async (tx) => {
+        if (sets.length) await tx.query(`UPDATE tracks SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
+        if (offline_allowed !== undefined) await setOfflineAllowed(tx, offline_allowed);
+        if ('audio_url' in b) await syncAudioDurations(tx, t.release_id);
+      });
       const out = await releaseFull(db, t.release_id);
       delete out.artist_id;
       return out;

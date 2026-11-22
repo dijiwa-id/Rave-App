@@ -790,7 +790,9 @@ untuk `revoked`/`expired`/`unknown`. Simpan log putar lokal dengan `seq` naik pe
 
 Studio: `offline_allowed` (bool) di Track (`PATCH /v1/studio/tracks/:id` — boleh pada rilis yang sudah tayang bila
 body hanya `{ offline_allowed }`; body yang memuat `offline_allowed` wajib peran **OWNER/ADMIN** org artis, termasuk
-anggota manajemen yang diberi akses artis — VIEWER/FINANCE/MEMBER `403`) dan Episode (`PATCH /v1/studio/podcasts/:id/episodes/:episodeId`, tidak memicu tinjauan
+anggota manajemen yang diberi akses artis — VIEWER/FINANCE/MEMBER `403`; body campuran pada rilis draf/ditolak, mis.
+`{ title, offline_allowed }`, menyimpan keduanya dalam satu transaksi dan perubahan `offline_allowed` tetap diaudit &
+memicu pencabutan — sama dengan body murni) dan Episode (`PATCH /v1/studio/podcasts/:id/episodes/:episodeId`, tidak memicu tinjauan
 ulang). Mematikan → event `catalog.offline.revoked` → lisensi dicabut. Track publik kini memuat `offline_allowed` (aditif).
 
 ### 12.2 Laporan layanan — `GET /v1/admin/reports/downloads` (Super Admin)

@@ -12,6 +12,12 @@ function db(releaseStatus = 'LIVE') {
     if (sql.startsWith('SELECT t.*, r.status AS release_status')) return p[0] === TRACK ? [track] : [];
     if (sql.startsWith('SELECT offline_allowed FROM tracks')) return [{ offline_allowed: track.offline_allowed }];
     if (sql.startsWith('UPDATE tracks SET offline_allowed')) return (track.offline_allowed = p[1]), [];
+    // Jalur edit biasa (rilis draf): `UPDATE tracks SET title = $1, ... WHERE id = $n`.
+    if (sql.startsWith('UPDATE tracks SET ')) {
+      const cols = [...sql.matchAll(/(\w+) = \$(\d+)/g)].filter(([, c]) => c !== 'id');
+      for (const [, c, i] of cols) (track as any)[c] = p[Number(i) - 1];
+      return [];
+    }
     if (sql.startsWith('SELECT id FROM tracks WHERE release_id')) return [];
     if (sql.includes('FROM releases r JOIN artists a')) return [{ id: 'r1', artist_id: ARTIST, title: 'R' }];
     if (sql.includes('FROM tracks t JOIN releases r ON r.id = t.release_id JOIN artists a')) return [{ id: TRACK, offline_allowed: track.offline_allowed }];
@@ -102,5 +108,38 @@ describe('studio: offline_allowed per lagu (P-7)', () => {
 
   it('nilai bukan boolean → 400', async () => {
     expect((await patch(db(), { offline_allowed: 'tidak' })).statusCode).toBe(400);
+  });
+
+  // Regresi S2: body campuran di rilis DRAFT/REJECTED dulu menulis offline_allowed lewat UPDATE biasa — tanpa audit &
+  // tanpa catalog.offline.revoked. Kini setiap perubahan offline_allowed melewati jalur lengkap.
+  it.each(['DRAFT', 'REJECTED'])('rilis %s, body campuran {title, offline_allowed:false} → 200, audit + event pencabutan sekali', async (status) => {
+    const d = db(status);
+    const r = await patch(d, { title: 'Judul baru', offline_allowed: false });
+    expect(r.statusCode).toBe(200);
+    expect((d.track as any).title).toBe('Judul baru');
+    expect(d.track.offline_allowed).toBe(false);
+    expect(d.queries.some((q) => q.startsWith('INSERT INTO audit_logs'))).toBe(true);
+    expect(d.events).toEqual([{ topic: 'catalog.offline.revoked', key: TRACK, payload: { contentKind: 'track', contentIds: [TRACK], reason: 'OFFLINE_DISABLED' } }]);
+    // Ulangi body sama → offline_allowed tidak berubah → tanpa event baru.
+    expect((await patch(d, { title: 'Judul lagi', offline_allowed: false })).statusCode).toBe(200);
+    expect(d.events).toHaveLength(1);
+  });
+
+  it('rilis DRAFT, body campuran menyalakan offline_allowed → audit, tanpa event pencabutan', async () => {
+    const d = db('DRAFT');
+    d.track.offline_allowed = false;
+    expect((await patch(d, { title: 'x', offline_allowed: true })).statusCode).toBe(200);
+    expect(d.track.offline_allowed).toBe(true);
+    expect(d.queries.some((q) => q.startsWith('INSERT INTO audit_logs'))).toBe(true);
+    expect(d.events).toHaveLength(0);
+  });
+
+  it('rilis DRAFT, body tanpa offline_allowed → tidak menyentuh offline_allowed & tanpa audit offline', async () => {
+    const d = db('DRAFT');
+    expect((await patch(d, { title: 'x' })).statusCode).toBe(200);
+    expect(d.track.offline_allowed).toBe(true);
+    expect(d.queries.some((q) => q.startsWith('UPDATE tracks') && q.includes('offline_allowed'))).toBe(false);
+    expect(d.queries.some((q) => q.startsWith('INSERT INTO audit_logs'))).toBe(false);
+    expect(d.events).toHaveLength(0);
   });
 });
