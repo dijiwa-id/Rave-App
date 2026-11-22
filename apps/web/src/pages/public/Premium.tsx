@@ -18,8 +18,9 @@ import { PublicFooter, PublicNav } from './PublicChrome';
 
 /**
  * Halaman RAVE Premium. Prinsip produk (BRD + D-03): musik selalu gratis (AAC hingga 160) — Premium membuka AAC 320 &
- * Lossless/Hi-Res FLAC, bebas iklan, serta podcast & audio fiksi premium. Unduhan offline belum ada (ditandai "segera
- * hadir"); tidak ada janji akses tiket lebih awal. Billing langganan dibuka pada fase
+ * Lossless/Hi-Res FLAC, bebas iklan, serta podcast & audio fiksi premium. Unduhan offline (P-7) mengikuti saklar Super Admin
+ * `download.enabled`: mati → "segera hadir"; aktif → klaim di aplikasi desktop & mobile beserta batas perangkat/lagu (tanpa
+ * "tanpa batas", GO-LIVE-AUDIT C1). Tidak ada janji akses tiket lebih awal. Billing langganan dibuka pada fase
  * berikutnya (REQ-PAY-03), jadi CTA mengarah ke waitlist, bukan checkout palsu.
  *
  * Interaksi scroll mengikuti landing (LandingScroll.tsx): RAVE glass, kartu 3D yang tegak saat di-scroll, kartu
@@ -48,7 +49,13 @@ type Pricing = ReturnType<typeof usePricing>;
 
 // Harga, masa coba, verifikasi pelajar, dan jumlah perangkat dari Super Admin (`subscription.*`).
 const plans = (t: Pricing, d: PublicDict['premium']['plans']) => [
-  { name: d.individual.name, price: t.individual, who: d.individual.who, items: [d.individual.allBenefits, d.individual.quality, d.individual.downloadsSoon], popular: true },
+  {
+    name: d.individual.name,
+    price: t.individual,
+    who: d.individual.who,
+    items: [d.individual.allBenefits, d.individual.quality, t.downloads && t.downloadTiers.includes('INDIVIDUAL') ? d.individual.downloads(t.devices) : d.individual.downloadsSoon],
+    popular: true,
+  },
   { name: d.student.name, price: t.student, who: d.student.who, items: [d.student.allBenefits, d.student.verification, d.student.renewed(t.studentMonths)], popular: false },
   { name: d.duo.name, price: t.duo, who: d.duo.who, items: [...d.duo.items], popular: false },
 ];
@@ -201,6 +208,7 @@ function Mark({ v, highlight }: { v: Cell; highlight?: boolean }) {
 function Compare() {
   const reduce = useReducedMotion();
   const d = useDict('public').premium;
+  const t = usePricing();
   const cell = (v: boolean | CellKey): Cell => (typeof v === 'boolean' ? v : d.cells[v]);
   const COMPARE = COMPARE_CELLS.map((c, i) => ({ feature: d.compare[i], free: cell(c.free), premium: cell(c.premium) }));
   return (
@@ -253,7 +261,7 @@ function Compare() {
           </tbody>
         </table>
       </div>
-      <p className="mx-auto mt-4 max-w-4xl text-center text-sm text-white/55">{d.comingSoon}</p>
+      <p className="mx-auto mt-4 max-w-4xl text-center text-sm text-white/55">{t.downloads ? d.downloadsNote(t.devices, t.downloadItems) : d.comingSoon}</p>
     </Section>
   );
 }

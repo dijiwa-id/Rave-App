@@ -384,6 +384,7 @@ const dict = {
       'Bebas iklan',
     ],
     comingSoon: 'Segera hadir: unduhan offline di aplikasi ponsel.',
+    downloadsNote: (devices: number, items: number) => `Unduhan offline tersedia di aplikasi desktop & mobile untuk hingga ${devices} perangkat dan ${items} lagu/episode per perangkat. Sambungkan perangkat ke internet secara berkala agar unduhan tetap bisa diputar.`,
     cells: {
       selectedEpisodes: 'Episode pilihan',
     },
@@ -394,6 +395,7 @@ const dict = {
         allBenefits: 'Semua manfaat Premium',
         quality: 'AAC 320 & Lossless/Hi-Res (FLAC)',
         downloadsSoon: 'Unduhan offline — segera hadir',
+        downloads: (devices: number) => `Unduhan offline di aplikasi desktop & mobile (hingga ${devices} perangkat)`,
       },
       student: {
         name: 'Pelajar',

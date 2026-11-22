@@ -29,6 +29,12 @@ export function usePricing() {
     trial: !trialDays ? '' : trialDays % 30 === 0 ? t.months(trialDays / 30) : t.days(trialDays),
     studentMonths: num(cfg, 'subscription.student_verify_months'),
     devices: num(cfg, 'subscription.download_devices'),
+    /** Unduhan offline (P-7) dibuka Super Admin (`download.enabled`) — mati = tetap "segera hadir" di halaman publik. */
+    downloads: setting<boolean>(cfg, 'download.enabled', false),
+    /** Paket berbayar yang berhak mengunduh (`download.tiers`). */
+    downloadTiers: setting<string[]>(cfg, 'download.tiers', SETTINGS_BY_KEY['download.tiers'].default as string[]),
+    /** Batas lagu/episode per perangkat (`download.max_tracks_per_device`). */
+    downloadItems: num(cfg, 'download.max_tracks_per_device'),
     artistCommission: pct(num(cfg, 'commission.artist_commission_pct')),
     promotorFee: pct(num(cfg, 'commission.promotor_service_fee_pct')),
     proArtistCommission: pct(num(cfg, 'subscription.pro_artist_commission_pct')),

@@ -385,6 +385,7 @@ const dict: Shape<typeof id> = {
       'Ad-free',
     ],
     comingSoon: 'Coming soon: offline downloads in the mobile app.',
+    downloadsNote: (devices, items) => `Offline downloads are available in the desktop & mobile apps on up to ${devices} devices and ${items} songs/episodes per device. Connect your devices to the internet regularly to keep downloads playable.`,
     cells: {
       selectedEpisodes: 'Selected episodes',
     },
@@ -395,6 +396,7 @@ const dict: Shape<typeof id> = {
         allBenefits: 'All Premium benefits',
         quality: 'AAC 320 & Lossless/Hi-Res (FLAC)',
         downloadsSoon: 'Offline downloads — coming soon',
+        downloads: (devices) => `Offline downloads in the desktop & mobile apps (up to ${devices} devices)`,
       },
       student: {
         name: 'Student',
