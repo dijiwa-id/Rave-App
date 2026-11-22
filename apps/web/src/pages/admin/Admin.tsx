@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, ArrowRight, BadgeCheck, Briefcase, Coins, Crown, Mic2, Podcast, Ticket, Headphones, Images, ListMusic, Shapes, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow, Newspaper } from 'lucide-react';
+import { Activity, ArrowLeft, ArrowRight, BadgeCheck, Search, Briefcase, Coins, Crown, Mic2, Podcast, Ticket, Headphones, Images, ListMusic, Shapes, PlugZap, Radio, DatabaseBackup, Disc3, FileClock, Gauge, Gavel, HardDrive, IdCard, KeyRound, LayoutDashboard, Megaphone, Scale, ShieldCheck, PanelsTopLeft, SlidersHorizontal, Users, Workflow, Newspaper } from 'lucide-react';
 import { ADMIN_PERMISSIONS, ADMIN_ROLE_LABEL, type AdminPermission, type AdminRole } from '@rave/domain/settings';
 import { can, isSuperAdmin, useAuth } from '@/stores/auth';
 import { B2BLayout, type B2BNavItem } from '@/layouts/B2BLayout';
@@ -1173,12 +1173,46 @@ function auditSummary(data: unknown): string | null {
 
 type PendingAction = 'suspend' | 'unsuspend' | 'revoke' | null;
 
+const USER_TABS = ['overview', 'security', 'privacy', 'activity', 'danger'] as const;
+type UserTab = (typeof USER_TABS)[number];
+
+/** Tab halaman detail (gaya sama dengan tab Iklan). */
+function UserTabs({ value, options, onChange }: { value: UserTab; options: { value: UserTab; label: ReactNode }[]; onChange: (v: UserTab) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1 border-b-2 border-b2b-line pb-2" role="tablist">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="tab"
+          aria-selected={value === o.value}
+          onClick={() => onChange(o.value)}
+          className={cx(
+            'inline-flex items-center gap-1.5 rounded-none px-4 py-1.5 text-sm font-bold transition',
+            value === o.value ? 'bg-b2b-ink text-b2b-on-ink' : 'text-b2b-muted hover:bg-b2b-ink/5 hover:text-b2b-ink',
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Angka kecil di samping label tab. */
+const TabCount = ({ n }: { n: number }) => <span className="min-w-5 bg-b2b-ink/10 px-1 font-label text-[11px] tabular-nums">{n}</span>;
+
 /**
- * Detail pengguna (izin users.view): ringkasan status, profil lengkap, akun & akses, KYC, metode masuk, organisasi,
- * riwayat verifikasi, persetujuan data, aktivitas terakhir. Aksi: ubah member · tangguhkan/pulihkan · hapus akun
- * (Super Admin), cabut verifikasi (users.verify). Semua aksi beralasan (dialog, bukan prompt) & tercatat di audit log.
+ * Halaman detail pengguna `/admin/users/:id` (izin users.view). Tab (di URL `?tab=`): Ringkasan · Keamanan & verifikasi ·
+ * Privasi · Aktivitas · Zona bahaya (Super Admin). Aksi: ubah member · tangguhkan/pulihkan · hapus akun (Super Admin),
+ * cabut verifikasi (users.verify). Semua aksi beralasan (dialog, bukan prompt) & tercatat di audit log.
  */
-function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose: () => void; onEditMember: (u: Me) => void }) {
+export function AdminUserDetail() {
+  const { id = '' } = useParams();
+  const nav = useNavigate();
+  const loc = useLocation();
+  const backTo = `/admin/users${(loc.state as { from?: string } | null)?.from ?? ''}`;
+  const [params, setParams] = useSearchParams();
   const d = useDict('admin');
   const t = d.users;
   const f = t.fields;
@@ -1193,18 +1227,20 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PendingAction>(null);
-  const [opened, setOpened] = useState<string | null>(null);
-  if (id && opened !== id) {
-    setOpened(id);
-    setReason('');
-    setConfirm('');
-    setPending(null);
-  }
-  const close = () => {
-    setOpened(null);
-    setPending(null);
-    onClose();
-  };
+  const [editing, setEditing] = useState<Me | null>(null);
+  const tabs = USER_TABS.filter((x) => x !== 'danger' || sup);
+  const tab: UserTab = tabs.includes(params.get('tab') as UserTab) ? (params.get('tab') as UserTab) : 'overview';
+  const setTab = (v: UserTab) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (v === 'overview') n.delete('tab');
+        else n.set('tab', v);
+        return n;
+      },
+      { replace: true, state: loc.state },
+    );
+
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['admin-user', id] });
     void qc.invalidateQueries({ queryKey: ['admin-users'] });
@@ -1238,7 +1274,7 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
       await api(`/v1/admin/iam/users/${u.id}`, { method: 'DELETE', body: { reason: reason.trim() } });
       toast.success(t.deleted(u.display_name));
       void qc.invalidateQueries({ queryKey: ['admin-users'] });
-      close();
+      nav(backTo, { replace: true });
     } catch (e) {
       toast.error(e);
     } finally {
@@ -1249,25 +1285,28 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
   const ownerOf = data?.orgs.filter((o) => o.role === 'OWNER').map((o) => o.name) ?? [];
   const blocked = !u ? null : u.id === me?.id ? t.deleteBlockedSelf : u.admin_role ? t.deleteBlockedAdmin : ownerOf.length ? t.deleteBlockedOwner(ownerOf.join(', ')) : null;
   const confirmKey = u?.email ?? u?.id ?? '';
-  const consentLabel = (p: string) => (fanDict.settings.consents as Record<string, readonly [string, string]>)[p]?.[0] ?? p;
+  const consentLabel = (p: string) => (fanDict.settings.consents as Record<string, readonly [string, string]>)[p];
   const dialog: Record<Exclude<PendingAction, null>, { title: string; body: string; cta: string; danger?: boolean }> = {
     suspend: { title: t.suspendTitle, body: t.suspendBody, cta: t.suspend, danger: true },
     unsuspend: { title: t.unsuspendTitle, body: t.unsuspendBody, cta: t.unsuspend },
     revoke: { title: t.revokeTitle, body: t.revokeBody, cta: t.revokeVerify, danger: true },
   };
+  const empty = <p className="text-sm text-b2b-muted">{t.empty}</p>;
 
   return (
-    <>
-    <Modal open={!!id} onClose={close} title={t.detailTitle} wide="xl">
+    <div>
+      <Link to={backTo} className="mb-4 inline-flex items-center gap-1.5 font-label text-[11px] font-bold tracking-[0.08em] text-b2b-muted uppercase hover:text-b2b-ink">
+        <ArrowLeft className="size-3.5" /> {t.backToList}
+      </Link>
       <QueryState q={q}>
         {u && data && (
-          <div className="space-y-4">
+          <div className="space-y-5">
             <DetailHeader
               avatar={u.avatar_url ? <img src={u.avatar_url} alt="" className="size-full object-cover" /> : <Initial name={u.display_name} />}
-              title={u.display_name}
+              title={<span className="text-[clamp(1.5rem,3vw,2rem)] leading-tight">{u.display_name}</span>}
               badges={
                 <>
-                  {u.verified && <VerifiedBadge size={20} />}
+                  {u.verified && <VerifiedBadge size={22} />}
                   <Badge tone={u.suspended_at ? 'red' : 'green'}>{u.suspended_at ? t.suspended : t.active}</Badge>
                   {u.admin_role && <Badge tone="purple">{ADMIN_ROLE_LABEL[u.admin_role as AdminRole] ?? u.admin_role}</Badge>}
                 </>
@@ -1282,7 +1321,7 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
               actions={
                 <>
                   {sup && (
-                    <Button size="sm" variant="outline-ink" onClick={() => onEditMember(u)}>
+                    <Button size="sm" variant="outline-ink" onClick={() => setEditing(u)}>
                       {t.editMember}
                     </Button>
                   )}
@@ -1300,11 +1339,8 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
               }
             />
 
-            {u.suspended_at && (
-              <DetailNotice>{t.suspendedSince(fmt.dateTime(u.suspended_at))}</DetailNotice>
-            )}
+            {u.suspended_at && <DetailNotice>{t.suspendedSince(fmt.dateTime(u.suspended_at))}</DetailNotice>}
 
-            {/* Strip ringkasan: status penting tanpa harus membaca semua bagian */}
             <StatStrip>
               <MiniStat label={f.member} value={<MemberBadge u={u} />} />
               <MiniStat label={f.verification} value={<VerificationBadge status={u.verification_status ?? 'NONE'} />} />
@@ -1314,187 +1350,237 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
               <MiniStat label={t.sections.orgs} value={data.orgs.length} />
             </StatStrip>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <DetailSection title={t.sections.profile}>
-                <dl>
-                  <KV k={f.fullName}>{u.full_name}</KV>
-                  <KV k={f.birthDate}>{u.birth_date ? fmt.date(u.birth_date) : null}</KV>
-                  <KV k={f.gender}>{u.gender ? (t.genders[u.gender] ?? u.gender) : null}</KV>
-                  <KV k={f.city}>{u.city}</KV>
-                  <KV k={f.bio}>{u.bio ? <span className="line-clamp-4 whitespace-pre-line">{u.bio}</span> : null}</KV>
-                  <KV k={f.socials}>
-                    {u.socials?.length
-                      ? u.socials.map((s) => (
-                          <a key={s} href={s} target="_blank" rel="noreferrer noopener" className="block truncate font-semibold text-rave-accent hover:underline">
-                            {s.replace(/^https?:\/\/(www\.)?/, '')}
-                          </a>
-                        ))
-                      : null}
-                  </KV>
-                </dl>
-              </DetailSection>
-              <DetailSection title={t.sections.account}>
-                <dl>
-                  <KV k={f.roles}>
-                    <span className="flex flex-wrap gap-1">
-                      {u.roles.map((r) => (
-                        <Badge key={r}>{t.roleChips[r.toLowerCase()] ?? r}</Badge>
-                      ))}
-                    </span>
-                  </KV>
-                  <KV k={f.adminRole}>{u.admin_role ? (ADMIN_ROLE_LABEL[u.admin_role as AdminRole] ?? u.admin_role) : null}</KV>
-                  <KV k={f.nik}>{u.id_number_masked ? <span className="font-mono text-xs">{u.id_number_masked}</span> : null}</KV>
-                  <KV k={f.kyc}>
-                    {data.kyc ? (
-                      <span className="flex flex-col items-start gap-0.5">
-                        <span className="flex flex-wrap items-center gap-1.5">
-                          <Badge tone={KYC_TONE[data.kyc.status] ?? 'neutral'}>{t.kycStatus[data.kyc.status] ?? data.kyc.status}</Badge>
-                          <span className="text-xs text-b2b-muted">{data.kyc.level}</span>
-                        </span>
-                        <span className="text-xs text-b2b-muted">
-                          {data.kyc.full_name} · <span className="font-mono">{data.kyc.id_number_masked}</span> · {fmt.date(data.kyc.created_at)}
-                        </span>
-                        {data.kyc.reason && <span className="text-xs">“{data.kyc.reason}”</span>}
-                      </span>
-                    ) : null}
-                  </KV>
-                  <KV k={f.onboarded}>{u.onboarded ? t.yes : t.no}</KV>
-                  <KV k={f.joined}>{fmt.dateTime(u.created_at)}</KV>
-                  <KV k={f.lastSeen}>{data.sessions.last_seen_at ? fmt.dateTime(data.sessions.last_seen_at) : null}</KV>
-                </dl>
-              </DetailSection>
-              <DetailSection title={t.sections.logins}>
-                {data.identities.length ? (
-                  <ul className="space-y-1.5 text-sm">
-                    {data.identities.map((i) => (
-                      <li key={i.provider + i.subject} className="flex items-center justify-between gap-3">
-                        <span className="min-w-0">
-                          <span className="font-semibold">{t.providers[i.provider] ?? i.provider}</span>
-                          <span className="block text-xs text-b2b-muted">{t.linkedOn(fmt.date(i.created_at))}</span>
-                        </span>
-                        <span className="truncate font-mono text-xs text-b2b-muted">{['email', 'whatsapp'].includes(i.provider) ? i.subject : `${i.subject.slice(0, 6)}…`}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-b2b-muted">{t.empty}</p>
-                )}
-              </DetailSection>
-              <DetailSection title={t.sections.orgs}>
-                {data.orgs.length ? (
-                  <ul className="space-y-2 text-sm">
-                    {data.orgs.map((o) => (
-                      <li key={o.id} className="flex items-center justify-between gap-3">
-                        <span className="min-w-0">
-                          <span className="font-semibold">{o.name}</span> {o.verified && <VerifiedBadge size={12} />}
-                          <span className="block text-xs text-b2b-muted">
-                            {t.orgTypes[o.type] ?? o.type} · {o.city ?? '—'} · {t.members(o.members)} · {t.joinedOn(fmt.date(o.joined_at))}
-                          </span>
-                        </span>
-                        <Badge tone={ORG_ROLE_TONE[o.role] ?? 'neutral'}>{t.orgRoles[o.role] ?? o.role}</Badge>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-b2b-muted">{t.empty}</p>
-                )}
-              </DetailSection>
-              <DetailSection title={t.sections.verifications}>
-                {data.verifications.length ? (
-                  <ul className="space-y-1.5 text-sm">
-                    {data.verifications.map((v) => (
-                      <li key={v.id} className="flex items-start justify-between gap-3">
-                        <span className="text-xs text-b2b-muted">
-                          {fmt.dateTime(v.created_at)}
-                          {v.decided_at && <span className="block">{t.decidedOn(fmt.dateTime(v.decided_at))}</span>}
-                          {v.reason && <span className="block text-b2b-ink">“{v.reason}”</span>}
-                        </span>
-                        <Badge tone={v.status === 'APPROVED' ? 'green' : v.status === 'PENDING' ? 'blue' : v.status === 'CANCELLED' ? 'neutral' : 'red'}>{d.verifications.status[v.status] ?? v.status}</Badge>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-b2b-muted">{t.empty}</p>
-                )}
-              </DetailSection>
-              <DetailSection title={t.sections.consents}>
-                {data.consents.length ? (
-                  <ul className="space-y-1.5 text-sm">
-                    {data.consents.map((c) => (
-                      <li key={c.purpose} className="flex items-center justify-between gap-3">
-                        <span className="min-w-0">
-                          <span className="font-semibold">{consentLabel(c.purpose)}</span>
-                          <span className="block text-xs text-b2b-muted">{t.updatedOn(fmt.dateTime(c.updated_at))}</span>
-                        </span>
-                        <Badge tone={c.granted ? 'green' : 'neutral'}>{c.granted ? t.consentGranted : t.consentDenied}</Badge>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-b2b-muted">{t.empty}</p>
-                )}
-              </DetailSection>
-            </div>
+            <UserTabs
+              value={tab}
+              onChange={setTab}
+              options={tabs.map((v) => ({
+                value: v,
+                label: (
+                  <>
+                    {t.tabs[v]}
+                    {v === 'activity' && <TabCount n={data.activity.length} />}
+                    {v === 'security' && <TabCount n={data.identities.length} />}
+                  </>
+                ),
+              }))}
+            />
 
-            <DetailSection
-              title={t.sections.activity}
-              action={
-                canAudit ? (
-                  <Link to="/admin/audit" onClick={close} className="font-label text-[11px] font-bold tracking-[0.08em] text-rave-accent uppercase hover:underline">
-                    {t.seeAudit}
-                  </Link>
-                ) : undefined
-              }
-            >
-              {data.activity.length ? (
-                <ul className="divide-y divide-b2b-line text-sm">
-                  {data.activity.map((a) => {
-                    const summary = auditSummary(a.data);
-                    return (
-                      <li key={a.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2">
-                        <span className="min-w-0">
-                          <span className="font-semibold">{t.actions[a.action] ?? a.action}</span>
-                          {t.actions[a.action] && <span className="ml-2 font-mono text-[10px] text-b2b-muted">{a.action}</span>}
-                          {summary && <span className="block truncate text-xs text-b2b-muted" title={summary}>{summary}</span>}
+            <div role="tabpanel">
+              {tab === 'overview' && (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <DetailSection title={t.sections.profile}>
+                    <dl>
+                      <KV k={f.fullName}>{u.full_name}</KV>
+                      <KV k={f.birthDate}>{u.birth_date ? fmt.date(u.birth_date) : null}</KV>
+                      <KV k={f.gender}>{u.gender ? (t.genders[u.gender] ?? u.gender) : null}</KV>
+                      <KV k={f.city}>{u.city}</KV>
+                      <KV k={f.bio}>{u.bio ? <span className="line-clamp-6 whitespace-pre-line">{u.bio}</span> : null}</KV>
+                      <KV k={f.socials}>
+                        {u.socials?.length
+                          ? u.socials.map((s) => (
+                              <a key={s} href={s} target="_blank" rel="noreferrer noopener" className="block truncate font-semibold text-rave-accent hover:underline">
+                                {s.replace(/^https?:\/\/(www\.)?/, '')}
+                              </a>
+                            ))
+                          : null}
+                      </KV>
+                    </dl>
+                  </DetailSection>
+                  <DetailSection title={t.sections.account}>
+                    <dl>
+                      <KV k={f.roles}>
+                        <span className="flex flex-wrap gap-1">
+                          {u.roles.map((r) => (
+                            <Badge key={r}>{t.roleChips[r.toLowerCase()] ?? r}</Badge>
+                          ))}
                         </span>
-                        <span className="text-xs whitespace-nowrap text-b2b-muted">
-                          {a.actor_id === u.id ? t.actorSelf : (a.actor_name ?? (a.actor_id ? `${a.actor_id.slice(0, 8)}…` : t.actorSystem))} · {fmt.dateTime(a.created_at)}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <p className="text-sm text-b2b-muted">{t.empty}</p>
+                      </KV>
+                      <KV k={f.adminRole}>{u.admin_role ? (ADMIN_ROLE_LABEL[u.admin_role as AdminRole] ?? u.admin_role) : null}</KV>
+                      <KV k={f.onboarded}>{u.onboarded ? t.yes : t.no}</KV>
+                      <KV k={f.joined}>{fmt.dateTime(u.created_at)}</KV>
+                      <KV k={f.lastSeen}>{data.sessions.last_seen_at ? fmt.dateTime(data.sessions.last_seen_at) : null}</KV>
+                    </dl>
+                  </DetailSection>
+                  <DetailSection title={t.sections.orgs} className="lg:col-span-2">
+                    {data.orgs.length ? (
+                      <ul className="grid gap-2 sm:grid-cols-2">
+                        {data.orgs.map((o) => (
+                          <li key={o.id} className="flex items-center justify-between gap-3 border-2 border-b2b-line px-3 py-2.5 text-sm">
+                            <span className="min-w-0">
+                              <span className="font-semibold">{o.name}</span> {o.verified && <VerifiedBadge size={12} />}
+                              <span className="block text-xs text-b2b-muted">
+                                {t.orgTypes[o.type] ?? o.type} · {o.city ?? '—'} · {t.members(o.members)} · {t.joinedOn(fmt.date(o.joined_at))}
+                              </span>
+                            </span>
+                            <Badge tone={ORG_ROLE_TONE[o.role] ?? 'neutral'}>{t.orgRoles[o.role] ?? o.role}</Badge>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      empty
+                    )}
+                  </DetailSection>
+                </div>
               )}
-            </DetailSection>
 
-            {sup && (
-              <DetailSection title={t.sections.danger} tone="danger">
-                <p className="text-sm">{t.deleteBody}</p>
-                {blocked ? (
-                  <p className="mt-3 border-l-4 border-red-500 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-700">{blocked}</p>
-                ) : (
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    <Field label={t.reason} hint={t.reasonHint}>
-                      <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t.reasonPlaceholderAction} />
-                    </Field>
-                    <Field label={t.deleteConfirmLabel(confirmKey)}>
-                      <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" spellCheck={false} />
-                    </Field>
-                    <div className="flex justify-end md:col-span-2">
-                      <Button variant="danger" loading={busy} disabled={reason.trim().length < 5 || confirm.trim().toLowerCase() !== confirmKey.toLowerCase()} onClick={remove}>
-                        {t.deleteCta}
-                      </Button>
+              {tab === 'security' && (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <DetailSection title={t.sections.logins}>
+                    {data.identities.length ? (
+                      <ul className="space-y-2 text-sm">
+                        {data.identities.map((i) => (
+                          <li key={i.provider + i.subject} className="flex items-center justify-between gap-3">
+                            <span className="min-w-0">
+                              <span className="font-semibold">{t.providers[i.provider] ?? i.provider}</span>
+                              <span className="block text-xs text-b2b-muted">{t.linkedOn(fmt.date(i.created_at))}</span>
+                            </span>
+                            <span className="truncate font-mono text-xs text-b2b-muted">{['email', 'whatsapp'].includes(i.provider) ? i.subject : `${i.subject.slice(0, 6)}…`}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      empty
+                    )}
+                    <dl className="mt-3 border-t-2 border-dashed border-b2b-line pt-2">
+                      <KV k={f.sessions}>{data.sessions.active}</KV>
+                      <KV k={f.lastSeen}>{data.sessions.last_seen_at ? fmt.dateTime(data.sessions.last_seen_at) : null}</KV>
+                    </dl>
+                  </DetailSection>
+                  <DetailSection title={f.kyc}>
+                    <dl>
+                      <KV k={f.verification}>
+                        <VerificationBadge status={u.verification_status ?? 'NONE'} />
+                      </KV>
+                      <KV k={f.nik}>{u.id_number_masked ? <span className="font-mono text-xs">{u.id_number_masked}</span> : null}</KV>
+                      {data.kyc && (
+                        <>
+                          <KV k={f.status}>
+                            <span className="flex flex-wrap items-center gap-1.5">
+                              <Badge tone={KYC_TONE[data.kyc.status] ?? 'neutral'}>{t.kycStatus[data.kyc.status] ?? data.kyc.status}</Badge>
+                              <span className="text-xs text-b2b-muted">{data.kyc.level}</span>
+                            </span>
+                          </KV>
+                          <KV k={f.fullName}>{data.kyc.full_name}</KV>
+                          <KV k={t.submittedAt}>{fmt.dateTime(data.kyc.created_at)}</KV>
+                          {data.kyc.reason && <KV k={t.reason}>“{data.kyc.reason}”</KV>}
+                        </>
+                      )}
+                    </dl>
+                  </DetailSection>
+                  <DetailSection title={t.sections.verifications} className="lg:col-span-2">
+                    {data.verifications.length ? (
+                      <ol className="relative space-y-3 border-l-2 border-b2b-line pl-4 text-sm">
+                        {data.verifications.map((v) => (
+                          <li key={v.id} className="relative">
+                            <span aria-hidden className="absolute top-1.5 -left-[21px] size-2.5 rotate-45 border-2 border-b2b-ink bg-b2b-card" />
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-xs text-b2b-muted">
+                                {fmt.dateTime(v.created_at)}
+                                {v.decided_at && ` · ${t.decidedOn(fmt.dateTime(v.decided_at))}`}
+                              </span>
+                              <Badge tone={v.status === 'APPROVED' ? 'green' : v.status === 'PENDING' ? 'blue' : v.status === 'CANCELLED' ? 'neutral' : 'red'}>{d.verifications.status[v.status] ?? v.status}</Badge>
+                            </div>
+                            {v.reason && <p className="mt-0.5">“{v.reason}”</p>}
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      empty
+                    )}
+                  </DetailSection>
+                </div>
+              )}
+
+              {tab === 'privacy' && (
+                <DetailSection title={t.sections.consents}>
+                  {data.consents.length ? (
+                    <ul className="divide-y divide-b2b-line text-sm">
+                      {data.consents.map((c) => {
+                        const l = consentLabel(c.purpose);
+                        return (
+                          <li key={c.purpose} className="flex items-center justify-between gap-4 py-2.5">
+                            <span className="min-w-0">
+                              <span className="font-semibold">{l?.[0] ?? c.purpose}</span>
+                              {l?.[1] && <span className="block text-xs text-b2b-muted">{l[1]}</span>}
+                              <span className="block text-[11px] text-b2b-muted">{t.updatedOn(fmt.dateTime(c.updated_at))}</span>
+                            </span>
+                            <Badge tone={c.granted ? 'green' : 'neutral'}>{c.granted ? t.consentGranted : t.consentDenied}</Badge>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    empty
+                  )}
+                  <p className="mt-3 text-xs text-b2b-muted">{t.privacyNote}</p>
+                </DetailSection>
+              )}
+
+              {tab === 'activity' && (
+                <DetailSection
+                  title={t.sections.activity}
+                  action={
+                    canAudit ? (
+                      <Link to="/admin/audit" className="font-label text-[11px] font-bold tracking-[0.08em] text-rave-accent uppercase hover:underline">
+                        {t.seeAudit}
+                      </Link>
+                    ) : undefined
+                  }
+                >
+                  {data.activity.length ? (
+                    <ul className="divide-y divide-b2b-line text-sm">
+                      {data.activity.map((a) => {
+                        const summary = auditSummary(a.data);
+                        return (
+                          <li key={a.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2.5">
+                            <span className="min-w-0">
+                              <span className="font-semibold">{t.actions[a.action] ?? a.action}</span>
+                              {t.actions[a.action] && <span className="ml-2 font-mono text-[10px] text-b2b-muted">{a.action}</span>}
+                              {summary && (
+                                <span className="block truncate text-xs text-b2b-muted" title={summary}>
+                                  {summary}
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-xs whitespace-nowrap text-b2b-muted">
+                              {a.actor_id === u.id ? t.actorSelf : (a.actor_name ?? (a.actor_id ? `${a.actor_id.slice(0, 8)}…` : t.actorSystem))} · {fmt.dateTime(a.created_at)}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    empty
+                  )}
+                </DetailSection>
+              )}
+
+              {tab === 'danger' && sup && (
+                <DetailSection title={t.sections.danger} tone="danger">
+                  <p className="max-w-3xl text-sm">{t.deleteBody}</p>
+                  {blocked ? (
+                    <p className="mt-3 border-l-4 border-red-500 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-700">{blocked}</p>
+                  ) : (
+                    <div className="mt-4 grid max-w-3xl gap-3 md:grid-cols-2">
+                      <Field label={t.reason} hint={t.reasonHint}>
+                        <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t.reasonPlaceholderAction} />
+                      </Field>
+                      <Field label={t.deleteConfirmLabel(confirmKey)}>
+                        <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" spellCheck={false} />
+                      </Field>
+                      <div className="flex justify-end md:col-span-2">
+                        <Button variant="danger" loading={busy} disabled={reason.trim().length < 5 || confirm.trim().toLowerCase() !== confirmKey.toLowerCase()} onClick={remove}>
+                          {t.deleteCta}
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </DetailSection>
-            )}
+                  )}
+                </DetailSection>
+              )}
+            </div>
           </div>
         )}
       </QueryState>
-    </Modal>
       {pending && (
         <ReasonDialog
           open
@@ -1507,7 +1593,8 @@ function UserDetail({ id, onClose, onEditMember }: { id: string | null; onClose:
           onSubmit={submitPending}
         />
       )}
-    </>
+      <MemberModal user={editing} onClose={() => setEditing(null)} />
+    </div>
   );
 }
 
@@ -1518,34 +1605,62 @@ const ROLE_ICON: Record<RoleFilter, typeof Users> = { all: Users, fan: Headphone
 export function AdminUsers() {
   const t = useDict('admin').users;
   const sup = isSuperAdmin(useAuth((s) => s.user));
-  const [qstr, setQ] = useState('');
-  const [applied, setApplied] = useState('');
+  const loc = useLocation();
+  const nav = useNavigate();
   const [editing, setEditing] = useState<Me | null>(null);
-  const [detail, setDetail] = useState<string | null>(null);
-  // Filter peran disimpan di URL (?role=) → bisa dibagikan & bertahan saat kembali ke halaman.
+  // Filter peran & kata kunci disimpan di URL (?role=&q=) → bisa dibagikan & bertahan saat kembali dari halaman detail.
   const [params, setParams] = useSearchParams();
   const role = ROLE_FILTERS.includes(params.get('role') as RoleFilter) ? (params.get('role') as RoleFilter) : 'all';
-  const setRole = (r: RoleFilter) => setParams((p) => { const n = new URLSearchParams(p); if (r === 'all') n.delete('role'); else n.set('role', r); return n; }, { replace: true });
+  const applied = params.get('q') ?? '';
+  const [qstr, setQ] = useState(applied);
+  const setParam = (k: 'role' | 'q', v: string) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (!v || (k === 'role' && v === 'all')) n.delete(k);
+        else n.set(k, v);
+        return n;
+      },
+      { replace: true },
+    );
   const q = useQuery({
     queryKey: ['admin-users', applied, role],
     queryFn: () => api<{ data: Me[]; role_counts?: Record<RoleFilter, number> }>('/v1/admin/iam/users', { query: { q: applied || undefined, role: role === 'all' ? undefined : role } }),
     placeholderData: (prev) => prev,
   });
   const counts = q.data?.role_counts;
+  const rows = q.data?.data ?? [];
+  const detailLink = (id: string) => ({ to: `/admin/users/${id}`, state: { from: loc.search } });
   return (
     <div>
-      <PageHeader title={t.title} />
+      <PageHeader title={t.title} subtitle={t.subtitle} />
       <form
-        className="mb-4 flex gap-2"
+        className="mb-4 flex flex-wrap items-center gap-2"
+        role="search"
         onSubmit={(e) => {
           e.preventDefault();
-          setApplied(qstr);
+          setParam('q', qstr.trim());
         }}
       >
-        <Input value={qstr} onChange={(e) => setQ(e.target.value)} placeholder={t.searchPlaceholder} className="max-w-sm" />
+        <div className="relative w-full max-w-sm">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-b2b-muted" aria-hidden />
+          <Input value={qstr} onChange={(e) => setQ(e.target.value)} placeholder={t.searchPlaceholder} aria-label={t.searchPlaceholder} className="pl-9" />
+        </div>
         <Button variant="ink" type="submit">
           {t.search}
         </Button>
+        {applied && (
+          <Button
+            variant="outline-ink"
+            type="button"
+            onClick={() => {
+              setQ('');
+              setParam('q', '');
+            }}
+          >
+            {t.clearSearch}
+          </Button>
+        )}
       </form>
       {/* Chip peran: ikon + jumlah (mengikuti kata kunci); peran kosong diredupkan, tetap bisa dipilih. */}
       <div role="radiogroup" aria-label={t.roleFilter} className="-mt-1 mb-4 flex flex-wrap gap-2">
@@ -1560,7 +1675,7 @@ export function AdminUsers() {
               role="radio"
               aria-checked={on}
               title={t.roleHints[r]}
-              onClick={() => setRole(r)}
+              onClick={() => setParam('role', r)}
               className={cx(
                 'inline-flex h-9 items-center gap-2 border-2 px-3 text-[13px] font-bold transition',
                 on ? 'border-b2b-ink bg-b2b-ink text-b2b-on-ink shadow-[3px_3px_0_#F4C21F]' : 'border-b2b-line bg-b2b-card text-b2b-ink hover:border-b2b-ink',
@@ -1574,49 +1689,62 @@ export function AdminUsers() {
           );
         })}
       </div>
-      <QueryState q={q} empty={q.data && !q.data.data.length ? <Empty title={t.emptyRole} /> : undefined}>
+      {q.data && (
+        <p className="mb-2 text-xs text-b2b-muted" aria-live="polite">
+          {applied ? t.resultsFor(rows.length, applied) : t.results(rows.length)}
+        </p>
+      )}
+      <QueryState q={q} empty={q.data && !rows.length ? <Empty title={applied ? t.emptySearch : t.emptyRole} /> : undefined}>
         <Table head={[...t.head]}>
-          {q.data?.data.map((u) => (
-            <tr key={u.id}>
-              <td className="px-4 py-3 font-bold">
-                <button type="button" onClick={() => setDetail(u.id)} className="inline-flex items-center gap-1.5 text-left hover:underline">
-                  {u.display_name}
-                  {u.verified && <VerifiedBadge size={15} />}
-                </button>
+          {rows.map((u) => (
+            <tr key={u.id} className="transition hover:bg-b2b-ink/[0.03]">
+              <td className="px-4 py-3">
+                <Link {...detailLink(u.id)} className="group flex min-w-0 items-center gap-3">
+                  <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-full border-2 border-b2b-ink bg-rave-purple">
+                    {u.avatar_url ? <img src={u.avatar_url} alt="" className="size-full object-cover" loading="lazy" /> : <span className="font-display text-sm text-rave-primary">{u.display_name.slice(0, 1).toUpperCase()}</span>}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-1.5 font-bold group-hover:underline">
+                      <span className="truncate">{u.display_name}</span>
+                      {u.verified && <VerifiedBadge size={15} />}
+                    </span>
+                    <span className="block truncate text-xs text-b2b-muted">{u.email ?? u.phone ?? '—'}</span>
+                  </span>
+                </Link>
               </td>
-              <td className="px-4 py-3">{u.email}</td>
               <td className="px-4 py-3">
                 <MemberBadge u={u} />
               </td>
               <td className="px-4 py-3">
                 <div className="flex flex-wrap gap-1">
                   {u.roles.map((r) => (
-                    <Badge key={r}>{r}</Badge>
+                    <Badge key={r}>{t.roleChips[r.toLowerCase()] ?? r}</Badge>
                   ))}
                 </div>
               </td>
-              <td className="px-4 py-3 text-xs">{u.orgs?.map((o) => `${o.name} (${o.role})`).join(', ') || '—'}</td>
+              <td className="px-4 py-3 text-xs">
+                {u.orgs?.length
+                  ? u.orgs.map((o) => (
+                      <span key={`${o.name}-${o.role}`} className="block">
+                        {o.name} <span className="text-b2b-muted">· {t.orgRoles[o.role] ?? o.role}</span>
+                      </span>
+                    ))
+                  : '—'}
+              </td>
               <td className="px-4 py-3">
                 <VerificationBadge status={u.verification_status ?? 'NONE'} />
               </td>
-              <td className="px-4 py-3">{fmt.date(u.created_at)}</td>
+              <td className="px-4 py-3 whitespace-nowrap">{fmt.date(u.created_at)}</td>
               <td className="px-4 py-3 text-right whitespace-nowrap">
                 <div className="flex justify-end gap-2">
-                  <Button size="sm" variant="ink" onClick={() => setDetail(u.id)}>
-                    {t.detail}
-                  </Button>
-                  {sup && (
-                    <Button size="sm" variant="outline-ink" onClick={() => setEditing(u)}>
-                      {t.editMember}
-                    </Button>
-                  )}
+                  {sup && <Button size="sm" variant="outline-ink" icon={<Crown />} aria-label={`${t.editMember} · ${u.display_name}`} title={t.editMember} onClick={() => setEditing(u)} />}
+                  <Button size="sm" variant="ink" icon={<ArrowRight />} aria-label={`${t.detail} · ${u.display_name}`} title={t.detail} onClick={() => nav(`/admin/users/${u.id}`, { state: { from: loc.search } })} />
                 </div>
               </td>
             </tr>
           ))}
         </Table>
       </QueryState>
-      <UserDetail id={detail} onClose={() => setDetail(null)} onEditMember={(u) => setEditing(u)} />
       <MemberModal user={editing} onClose={() => setEditing(null)} />
     </div>
   );

@@ -160,7 +160,10 @@ export const b2bRoutes: RouteObject[] = [
               access(['finance.view', 'finance.refund', 'finance.payout'], [{ path: 'finance', element: named(admin, 'AdminFinance') }]),
               access(['finance.view', 'billing.manage'], [{ path: 'pro', element: named(adminPro, 'AdminPro') }]),
               access(['royalty.manage', 'finance.view'], [{ path: 'royalty', element: named(adminRoyalty, 'AdminRoyalty') }]),
-              access(['users.view'], [{ path: 'users', element: named(admin, 'AdminUsers') }]),
+              access(['users.view'], [
+                { path: 'users', element: named(admin, 'AdminUsers') },
+                { path: 'users/:id', element: named(admin, 'AdminUserDetail') },
+              ]),
               access(['users.verify'], [{ path: 'verifications', element: named(admin, 'AdminVerifications') }]),
               access(['audit.view'], [{ path: 'audit', element: named(admin, 'AdminAudit') }]),
               // Iklan tier Gratis (docs/API.md §11) — tab via ?tab=overview|campaigns|policy.

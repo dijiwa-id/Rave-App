@@ -13,14 +13,14 @@ export function DetailHeader({ avatar, title, badges, meta, actions }: { avatar:
   return (
     <div className="flex flex-wrap items-start gap-4">
       <span className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full border-2 border-b2b-ink bg-rave-purple">{avatar}</span>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-[12rem] flex-1">
         <p className="flex flex-wrap items-center gap-2 text-xl font-bold">
           <span className="min-w-0 break-words">{title}</span>
           {badges}
         </p>
         {meta && <div className="mt-1 flex flex-col gap-0.5 text-sm text-b2b-muted">{meta}</div>}
       </div>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+      {actions && <div className="flex w-full flex-wrap gap-2 sm:w-auto">{actions}</div>}
     </div>
   );
 }
