@@ -32,7 +32,14 @@ for n in JWT_SECRET INTERNAL_SERVICE_SECRET MEDIA_SIGNING_SECRET PG_WEBHOOK_SECR
   elif [ ${#v} -lt 32 ]; then err "$n terlalu pendek (${#v} < 32)"
   else ok "$n terisi (${#v} karakter)"; fi
 done
-dupes="$(for n in JWT_SECRET INTERNAL_SERVICE_SECRET MEDIA_SIGNING_SECRET PG_WEBHOOK_SECRET KYC_KEY; do get "$n"; done | grep -v '^$' | sort | uniq -d)"
+# OFFLINE_KEY opsional (ADR-0004): tidak ada baris = diturunkan dari KYC_KEY; baris ada tetapi kosong/pendek = service menolak start.
+if grep -qE '^OFFLINE_KEY=' "$ENV_FILE"; then
+  v="$(get OFFLINE_KEY)"; t="$(printf '%s' "$v" | tr -d '[:space:]')"
+  if [ -z "$t" ]; then err "OFFLINE_KEY ada tetapi kosong — isi nilai acak ≥ 32 karakter atau hapus barisnya (kunci offline dari string kosong bisa dihitung publik)"
+  elif [ ${#v} -lt 32 ]; then err "OFFLINE_KEY terlalu pendek (${#v} < 32)"
+  else ok "OFFLINE_KEY terisi (${#v} karakter)"; fi
+else ok "OFFLINE_KEY tidak diset — kunci unduhan offline diturunkan dari KYC_KEY"; fi
+dupes="$(for n in JWT_SECRET INTERNAL_SERVICE_SECRET MEDIA_SIGNING_SECRET PG_WEBHOOK_SECRET KYC_KEY OFFLINE_KEY; do get "$n"; done | grep -v '^$' | sort | uniq -d)"
 [ -z "$dupes" ] || err "ada secret yang sama dipakai ulang — buat nilai unik per secret"
 
 # 3. Database

@@ -64,7 +64,7 @@ const DEV_DEFAULTS: [name: string, value: string][] = [
 ];
 if (!config.isDev) {
   const bad = DEV_DEFAULTS.filter(([n, v]) => (process.env[n] ?? v) === v).map(([n]) => n);
-  if (!process.env.KYC_KEY) bad.push('KYC_KEY');
+  if (!process.env.KYC_KEY?.trim()) bad.push('KYC_KEY');
   if (process.env.RAVE_FAST_CLOCK === '1') bad.push('RAVE_FAST_CLOCK (tidak boleh 1 di produksi)');
   // Saklar uji yang memalsukan uang/periode: payout "selesai" tanpa transfer, royalti bulan berjalan.
   if (process.env.PAYOUT_AUTO_COMPLETE === '1') bad.push('PAYOUT_AUTO_COMPLETE (tidak boleh 1 di produksi)');
@@ -79,6 +79,12 @@ if (!config.isDev) {
     const v = process.env[n];
     if (v && v.length < 32) bad.push(`${n} (minimal 32 karakter)`);
   }
+  // OFFLINE_KEY opsional, tetapi bila barisnya ada (env_file `OFFLINE_KEY=` → string kosong) wajib nilai produksi:
+  // kunci segel CEK & seed tanda tangan lisensi yang diturunkan dari string kosong bisa dihitung publik.
+  const off = process.env.OFFLINE_KEY;
+  if (off !== undefined && off.trim().length < 32) bad.push('OFFLINE_KEY (kosong/kurang dari 32 karakter — isi nilai acak ≥ 32 karakter atau hapus barisnya agar diturunkan dari KYC_KEY)');
+  else if (off && [process.env.KYC_KEY, process.env.JWT_SECRET, process.env.INTERNAL_SERVICE_SECRET, process.env.MEDIA_SIGNING_SECRET, process.env.PG_WEBHOOK_SECRET].includes(off))
+    bad.push('OFFLINE_KEY (sama dengan secret lain — buat nilai unik)');
   if (bad.length) throw new Error(`NODE_ENV=${config.nodeEnv} (mode produksi): set nilai produksi untuk ${bad.join(', ')}`);
 }
 

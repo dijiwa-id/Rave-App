@@ -63,7 +63,7 @@ Status implementasi: **Tahap 0–3 selesai** (dokumen, skema, domain murni, temp
 | `CONTRACT_DIR` | Lokasi storage dokumen (default `storage/contracts`). |
 | `MEDIA_SIGNING_SECRET` | Rahasia HMAC signed URL (wajib diganti di produksi). |
 | `KYC_KEY` | Kunci AES-256-GCM kolom sensitif (wajib di produksi). |
-| `OFFLINE_KEY` | Opsional (≥ 32 karakter): bahan kunci segel content key & tanda tangan lisensi unduhan offline (ADR-0004). Kosong = diturunkan dari `KYC_KEY`. Jangan diganti setelah ada unduhan. |
+| `OFFLINE_KEY` | Opsional (≥ 32 karakter): bahan kunci segel content key & tanda tangan lisensi unduhan offline (ADR-0004). Tidak diset = diturunkan dari `KYC_KEY`; baris ada tetapi kosong/< 32 karakter/sama dengan secret lain = service menolak start di produksi. Jangan diganti setelah ada unduhan. |
 
 Env provider e-sign ditambahkan di Tahap 4 dan 8.
 

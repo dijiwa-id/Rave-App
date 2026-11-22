@@ -34,9 +34,24 @@ export function offlineDeny(code: OfflineDenyCode, extra?: Record<string, unknow
  * Bahan kunci induk offline: `OFFLINE_KEY` (opsional, ≥ 32 karakter) → `KYC_KEY` (wajib di produksi) → JWT secret (dev).
  * Dari sini diturunkan dua kunci terpisah: enkripsi CEK at-rest & seed Ed25519 penanda tangan lisensi.
  * Mengganti bahan kunci = semua artefak harus dibuat ulang & lisensi lama gagal verifikasi (lihat ADR-0004).
+ *
+ * Nilai kosong/spasi diperlakukan TIDAK diset (env_file `OFFLINE_KEY=` menghasilkan string kosong — kunci turunan dari
+ * string kosong bisa dihitung siapa pun). Di luar dev tidak pernah jatuh ke JWT secret: tanpa OFFLINE_KEY/KYC_KEY → galat.
  */
-const baseSecret = () => process.env.OFFLINE_KEY ?? process.env.KYC_KEY ?? `${config.jwtSecret}:dev-only-offline`;
-const cekAtRestKey = () => createHash('sha256').update(`${baseSecret()}:offline-cek:v1`).digest();
+export function offlineBaseSecret(): string {
+  const own = process.env.OFFLINE_KEY?.trim();
+  if (own) return own;
+  const kyc = process.env.KYC_KEY?.trim();
+  if (kyc) return kyc;
+  if (!config.isDev) throw new Error('OFFLINE_KEY/KYC_KEY wajib di-set di produksi (bahan kunci unduhan offline)');
+  return `${config.jwtSecret}:dev-only-offline`;
+}
+const cekAtRestKey = () => createHash('sha256').update(`${offlineBaseSecret()}:offline-cek:v1`).digest();
+/**
+ * Id kunci segel CEK (16 hex pertama SHA-256 kunci turunan) — disimpan per artefak (`offline_artifacts.key_id`) agar
+ * pergantian bahan kunci terdeteksi & artefak dibangun ulang, bukan 500 saat membuka CEK.
+ */
+export const cekKeyId = () => createHash('sha256').update(cekAtRestKey()).digest('hex').slice(0, 16);
 
 /** Enkripsi CEK (32 byte) untuk disimpan di DB: base64(iv12 ‖ tag16 ‖ ct). */
 export function sealCek(cek: Buffer): string {
@@ -58,7 +73,7 @@ const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'he
 let signer: { priv: KeyObject; pub: KeyObject; raw: Buffer; kid: string } | null = null;
 function licenseSigner() {
   if (signer) return signer;
-  const seed = createHash('sha256').update(`${baseSecret()}:offline-license:v1`).digest();
+  const seed = createHash('sha256').update(`${offlineBaseSecret()}:offline-license:v1`).digest();
   const priv = createPrivateKey({ key: Buffer.concat([ED25519_PKCS8_PREFIX, seed]), format: 'der', type: 'pkcs8' });
   const pub = createPublicKey(priv);
   const raw = (pub.export({ format: 'der', type: 'spki' }) as Buffer).subarray(-32);
