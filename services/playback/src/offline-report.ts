@@ -66,6 +66,25 @@ const REJECT_LABELS_EN: Record<OfflinePlayReject, string> = {
 };
 
 const short = (id: string) => `${id.slice(0, 8)}…`;
+
+/** Panjang maksimum pesan galat artefak yang ditampilkan ke Super Admin. */
+export const REPORT_ERROR_MAX = 160;
+/**
+ * Galat artefak dari catalog (mis. `ENOENT: no such file or directory, open '/srv/media/x.m4a'`) disanitasi sebelum
+ * ditampilkan: setiap token berisi pemisah path (`/` atau `\` — path absolut/relatif, nama berkas internal, URL
+ * objek/presigned termasuk query) diganti `…`; spasi/baris baru (stack trace) diringkas; dipotong ke `max` karakter.
+ * Kode & teks galat (ENOENT, ffmpeg exited 1, …) tetap terbaca untuk diagnosis.
+ */
+export function sanitizeArtifactError(err: string | null | undefined, max = REPORT_ERROR_MAX): string | null {
+  if (err == null) return null;
+  const out = String(err)
+    .replace(/[^\s'"`()<>\[\]{},;]*[\/\\][^\s'"`()<>\[\]{},;]*/g, '…')
+    .replace(/…(?:\s*…)+/g, '…')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!out) return null;
+  return out.length > max ? `${out.slice(0, max - 1).trimEnd()}…` : out;
+}
 const UNAVAILABLE = (svc: string) => L(`Data ${svc} tidak tersedia`, `${svc} data unavailable`);
 
 /** Susun laporan (dipisah dari route agar teruji tanpa HTTP). */
@@ -125,7 +144,7 @@ export async function buildDownloadsReport(db: Db, deps: OfflineReportDeps, log?
       )
     : undefined;
   const failedArtifacts = cat?.artifacts.failed ?? null;
-  const lastError = cat?.failed[0]?.error;
+  const lastError = sanitizeArtifactError(cat?.failed[0]?.error);
 
   const kpis: ReportKpi[] = [
     { label: L('Perangkat aktif', 'Active devices'), value: iam?.devices.active ?? null, format: 'num', hint: iam ? undefined : UNAVAILABLE('iam') },
@@ -197,7 +216,7 @@ export async function buildDownloadsReport(db: Db, deps: OfflineReportDeps, log?
           kind: kindLabel(f.content_kind === 'episode'),
           rendition: f.rendition,
           attempts: f.attempts,
-          error: f.error,
+          error: sanitizeArtifactError(f.error),
           updated_at: f.updated_at,
         })),
         empty: cat ? L('Tidak ada artefak gagal', 'No failed artifacts') : UNAVAILABLE('catalog'),

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { settings } from '@rave/service-kit';
 import { authAs, fakeDb, testApp } from '@rave/service-kit/testing';
 import { OFFLINE_REJECTED_PER_DEVICE_DAY, wibDate } from '@rave/domain/offline-plays';
-import { offlinePlayRoutes, offlinePlaysPurgeJob, type ContentMeta, type OfflinePlayDeps } from './offline-plays.js';
+import { offlinePlayRoutes, offlinePlaysPurgeJob, rejectedRetentionDays, type ContentMeta, type OfflinePlayDeps } from './offline-plays.js';
 import type { Entitlement } from './offline.js';
 
 const U1 = '0190a000-0000-7000-8000-0000000000e1';
@@ -80,12 +80,12 @@ function store() {
         .map((x) => ({ t: new Date(x) }));
       return p[1] == null ? rows : rows.slice(0, p[1]);
     }
-    if (sql.startsWith('SELECT played AS max_played_ms FROM (')) {
-      return plays
-        .filter((r) => r.user_id === p[0] && r.qualified_at && t(r.started_at_client) <= t(p[2]))
-        .sort((a, b) => t(b.started_at_client) - t(a.started_at_client))
-        .slice(0, p[1])
-        .map((r) => ({ max_played_ms: r.played_ms }));
+    if (sql.startsWith('SELECT t, played FROM (')) {
+      // N terdekat di tiap sisi ref (seperti 4 cabang UNION ALL; tanpa sesi online di store ini).
+      const q = plays.filter((r) => r.user_id === p[0] && r.status === 'ACCEPTED' && r.qualified_at);
+      const before = q.filter((r) => t(r.started_at_client) <= t(p[2])).sort((a, b) => t(b.started_at_client) - t(a.started_at_client)).slice(0, p[1]);
+      const after = q.filter((r) => t(r.started_at_client) > t(p[2])).sort((a, b) => t(a.started_at_client) - t(b.started_at_client)).slice(0, p[1]);
+      return [...before, ...after].map((r) => ({ t: r.started_at_client, played: r.played_ms }));
     }
     if (sql.startsWith('INSERT INTO offline_plays')) {
       if (plays.some((r) => r.device_id === p[2] && r.seq === p[6])) return [];
@@ -443,6 +443,30 @@ describe('playback: POST /v1/events/offline-plays', () => {
     expect(s.qs[5]).toMatchObject({ suspicious: true, fraud_reason: 'LOOP_31S' });
   });
 
+  it('N-1: pola loop dua arah — 7 putar 31 dtk dikirim satu per batch dengan urutan MENURUN → 2 LOOP_31S (sama dengan menaik)', async () => {
+    const a = await app();
+    const loop = Array.from({ length: 7 }, (_, i) => p(i + 1, NOW - 2 * DAY + i * MIN, 31_000));
+    for (const x of [...loop].reverse()) expect((await send(a, { device_id: D1, plays: [x] })).json().accepted).toBe(1);
+    expect(s.qs.filter((q) => q.suspicious).map((q) => q.fraud_reason)).toEqual(['LOOP_31S', 'LOOP_31S']);
+    // Yang ditandai = dua putar paling awal (pengganti putar ke-6/ke-7 yang sudah tercatat lebih dulu).
+    expect(s.qs.filter((q) => q.suspicious).map((q) => q.played_at.getTime()).sort()).toEqual([NOW - 2 * DAY, NOW - 2 * DAY + MIN]);
+  });
+
+  it('N-1: putar yang datang terlambat di TENGAH rangkaian — pendek → LOOP_31S; panjang → tidak (played_ms-nya ikut diperiksa)', async () => {
+    const a = await app();
+    // Rangkaian 0,1,_,3,4,5,6 menit (31 dtk), menaik: menit 6 punya 5 pendahulu pendek → LOOP (perilaku lama).
+    const mid = (base: number, seq0: number) => [0, 1, 3, 4, 5, 6].map((i) => p(seq0 + i, base + i * MIN, 31_000));
+    expect((await send(a, { device_id: D1, plays: mid(NOW - 3 * DAY, 1) })).json().qualified).toBe(5);
+    // Celah menit 2 diisi putar pendek: hanya 2 pendahulu (satu arah tidak menandai), tetapi rangkaian 0–4 pendek → ditandai.
+    expect((await send(a, { device_id: D1, plays: [p(100, NOW - 3 * DAY + 2 * MIN, 31_000)] })).json()).toMatchObject({ accepted: 1, qualified: 0 });
+    // Rangkaian lain (hari berbeda tidak memutus urutan → pemisah 5 putar 50 dtk; yang pertama tetap ditandai karena 5
+    // pendahulunya pendek, persis aturan online): celah diisi putar 50 dtk → sah.
+    expect((await send(a, { device_id: D1, plays: Array.from({ length: 5 }, (_, i) => p(200 + i, NOW - 2 * DAY + i * MIN, 50_000)) })).json().qualified).toBe(4);
+    expect((await send(a, { device_id: D1, plays: mid(NOW - DAY, 300) })).json().qualified).toBe(5);
+    expect((await send(a, { device_id: D1, plays: [p(400, NOW - DAY + 2 * MIN, 50_000)] })).json()).toMatchObject({ accepted: 1, qualified: 1 });
+    expect(s.qs.filter((q) => q.suspicious).length).toBe(4);
+  });
+
   it('episode diterima tetapi bukan stream royalti lagu; download.enabled mati tetap menerima laporan', async () => {
     settings.apply({ 'download.enabled': false });
     const a = await app();
@@ -591,7 +615,7 @@ describe('playback: POST /v1/events/offline-plays', () => {
     expect(s.plays.filter((x) => x.device_id === D4)).toHaveLength(1);
   });
 
-  it('T-4 retensi: job offline-plays-purge menghapus hanya REJECTED lebih tua dari report_max_age_days + 1, berbatch', async () => {
+  it('T-4 retensi: job offline-plays-purge menghapus hanya REJECTED lebih tua dari max(31, report_max_age_days + 1), berbatch', async () => {
     const seen: { sql: string; p: any[] }[] = [];
     const f = fakeDb((sql, params) => {
       if (sql.startsWith('DELETE FROM offline_plays')) {
@@ -606,5 +630,19 @@ describe('playback: POST /v1/events/offline-plays', () => {
     expect(seen[0]!.sql).toMatch(/status = 'REJECTED' AND received_at < now\(\) - make_interval\(days => \$1\) LIMIT \$2/);
     expect(seen[0]!.p).toEqual([36, 5000]);
     expect(log.info).toHaveBeenCalledWith({ purged: 5001 }, expect.any(String));
+  });
+
+  it('N-4a retensi REJECTED = max(31, report_max_age_days + 1) — tidak lebih pendek dari jendela laporan admin 30 hari', async () => {
+    expect([1, 7, 29, 30, 35, 90, 0, -5, 7.2, NaN].map(rejectedRetentionDays)).toEqual([31, 31, 31, 31, 36, 91, 31, 31, 31, 31]);
+    const seen: any[][] = [];
+    const f = fakeDb((sql, params) => (sql.startsWith('DELETE FROM offline_plays') ? (seen.push(params), []) : undefined));
+    const prev = settings.num('download.report_max_age_days');
+    settings.apply({ 'download.report_max_age_days': 7 });
+    try {
+      await offlinePlaysPurgeJob.run({ db: f.db, log: { info: vi.fn() } } as any);
+    } finally {
+      settings.apply({ 'download.report_max_age_days': prev });
+    }
+    expect(seen[0]).toEqual([31, 5000]);
   });
 });

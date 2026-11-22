@@ -147,6 +147,45 @@ export function rateWindowExceeded(points: readonly number[], ref: number, max: 
   return false;
 }
 
+/** Jumlah stream qualified berturut-turut yang diperiksa pola loop (sama dengan jalur online). */
+export const FRAUD_LOOP_WINDOW = 5;
+/** Stream qualified "pendek" pola loop: berhenti sebelum ambang ini (tepat setelah ambang qualified 30 dtk). */
+export const FRAUD_LOOP_MAX_PLAYED_MS = 35_000;
+
+/** Satu stream qualified: waktu (epoch ms) + lama putar. */
+export interface TimedPlay {
+  t: number;
+  played_ms: number;
+}
+
+/**
+ * LOOP_31S dua arah untuk putar yang dilaporkan belakangan (offline). Aturan online: stream X ditandai bila `window`
+ * stream qualified tepat sebelum X semuanya < `maxPlayedMs` (played_ms X sendiri tidak dilihat). Di sini `ref`
+ * disisipkan ke urutan waktu stream yang sudah tercatat; ditandai bila ADA rangkaian `window + 1` stream berurutan yang
+ * memuat `ref` dengan `window` stream pertamanya semua pendek:
+ * - `ref` di ujung rangkaian → persis aturan online (hanya masa lalu; untuk urutan menaik hasilnya identik);
+ * - `ref` di dalam rangkaian (tetangga sesudahnya sudah tercatat, putar dikirim dengan urutan waktu menurun) → played_ms
+ *   `ref` ikut diperiksa; stream di ujung yang "seharusnya" ditandai sudah tercatat, jadi `ref` yang ditandai sebagai
+ *   gantinya. Satu rangkaian pendek sepanjang N selalu menghasilkan N − `window` tanda, urutan kirim apa pun.
+ * Seri waktu sama dengan `ref` dianggap sebelum `ref` (seperti `<= ref` di jalur lama). `points` cukup memuat
+ * `window` stream terdekat di tiap sisi (urutan bebas).
+ */
+export function loopPatternExceeded(points: readonly TimedPlay[], ref: TimedPlay, window = FRAUD_LOOP_WINDOW, maxPlayedMs = FRAUD_LOOP_MAX_PLAYED_MS): boolean {
+  if (!(window > 0)) return false;
+  const sorted = [...points].sort((a, b) => a.t - b.t);
+  const before = sorted.filter((p) => p.t <= ref.t).slice(-window);
+  const after = sorted.filter((p) => p.t > ref.t).slice(0, window);
+  const seq = [...before, ref, ...after].map((p) => p.played_ms);
+  const k = before.length; // indeks ref
+  // Rangkaian [s, s + window]: memuat ref (s ≤ k ≤ s + window) dan berada di dalam seq.
+  for (let s = Math.max(0, k - window); s <= k && s + window < seq.length; s++) {
+    let short = true;
+    for (let i = s; i < s + window; i++) if (!(seq[i]! < maxPlayedMs)) short = false;
+    if (short) return true;
+  }
+  return false;
+}
+
 /** Tumpang tindih dengan putar lain akun yang sama: [start, start+played) beririsan melebihi toleransi. */
 export function overlapsAny(p: PlaySpan, accepted: readonly PlaySpan[], toleranceMs = OFFLINE_OVERLAP_TOLERANCE_MS): boolean {
   const a0 = p.start;

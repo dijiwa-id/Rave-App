@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ServiceReport } from '@rave/domain/reports';
 import { authAs, fakeDb, testApp } from '@rave/service-kit/testing';
-import { offlineReportRoutes, REPORT_TOP_LIMIT, type CatalogDownloadStats, type OfflineReportDeps } from './offline-report.js';
+import { offlineReportRoutes, REPORT_ERROR_MAX, REPORT_TOP_LIMIT, sanitizeArtifactError, type CatalogDownloadStats, type OfflineReportDeps } from './offline-report.js';
 
 const SA = '0190a000-0000-7000-8000-0000000000d1';
 const T1 = '0190a000-0000-7000-8000-0000000000a1';
@@ -131,5 +131,34 @@ describe('GET /v1/admin/reports/downloads — agregasi', () => {
     expect(kpi(r, 'Lisensi aktif')).toBe(7);
     // Judul tidak tersedia → id singkat.
     expect(r.table.rows[0]).toMatchObject({ content: `${T1.slice(0, 8)}…`, artifact: null });
+  });
+});
+
+describe('S5: galat artefak disanitasi sebelum tampil ke Super Admin', () => {
+  it('path absolut/nama berkas/URL internal → …; kode galat tetap; spasi diringkas; dibatasi panjang', () => {
+    expect(sanitizeArtifactError("ENOENT: no such file or directory, open '/var/lib/rave/media/0190a000/normal.m4a'")).toBe(
+      "ENOENT: no such file or directory, open '…'",
+    );
+    expect(sanitizeArtifactError('EACCES: permission denied, mkdir C:\\rave\\offline\\tmp')).toBe('EACCES: permission denied, mkdir …');
+    expect(sanitizeArtifactError('fetch failed http://minio:9000/rave-media/x.flac?X-Amz-Signature=abc (status 403)')).toBe('fetch failed … (status 403)');
+    expect(sanitizeArtifactError('ffmpeg exited 1')).toBe('ffmpeg exited 1');
+    expect(sanitizeArtifactError('Error: boom\n    at run (/app/services/catalog/dist/offline.js:10:5)\n    at x (node:internal/process:1:1)')).toBe('Error: boom at run (…) at x (…)');
+    expect(sanitizeArtifactError(null)).toBeNull();
+    expect(sanitizeArtifactError('   ')).toBeNull();
+    const long = sanitizeArtifactError('x'.repeat(500))!;
+    expect(long).toHaveLength(REPORT_ERROR_MAX);
+    expect(long.endsWith('…')).toBe(true);
+  });
+
+  it('tabel artefak gagal & petunjuk KPI memakai galat tersanitasi', async () => {
+    const raw = "ENOENT: no such file or directory, open '/srv/rave/offline/0190a000-secret/normal.m4a'";
+    const cat: CatalogDownloadStats = { ...catalogFull, failed: [{ ...catalogFull.failed[0]!, error: raw }] };
+    const { a } = await app(true, { catalogStats: async () => cat });
+    const r = (await get(a, await SUPER())).json() as ServiceReport;
+    const body = JSON.stringify(r);
+    expect(body).not.toContain('/srv/rave');
+    expect(body).not.toContain('normal.m4a');
+    expect(r.extra_tables?.[0]?.rows[0]?.error).toBe("ENOENT: no such file or directory, open '…'");
+    expect(r.kpis.find((k) => k.label.id === 'Artefak gagal')?.hint?.id).toBe("Terakhir: ENOENT: no such file or directory, open '…'");
   });
 });

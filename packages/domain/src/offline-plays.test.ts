@@ -4,6 +4,7 @@ import {
   exceedsDailyCap,
   licenseContent,
   licenseOwnership,
+  loopPatternExceeded,
   membershipWindow,
   OFFLINE_CLOCK_SKEW_MS,
   overlapsAny,
@@ -102,6 +103,52 @@ describe('putar offline: aturan murni (P-7 T6)', () => {
     expect(rateWindowExceeded(far, ref, 10)).toBe(false);
     expect(rateWindowExceeded([], ref, 0)).toBe(true); // batas 0 = semua ditandai (seperti online)
     expect(rateWindowExceeded([ref], ref, Infinity)).toBe(false);
+  });
+
+  it('LOOP_31S dua arah: rangkaian window+1 yang memuat ref; hanya masa lalu = aturan online', () => {
+    const M = 60_000;
+    const ref = NOW;
+    const at = (i: number, played_ms = 31_000) => ({ t: ref + i * M, played_ms });
+    const S = { t: ref, played_ms: 31_000 };
+    const L = { t: ref, played_ms: 60_000 };
+    // Hanya masa lalu: 5 pendahulu pendek → ditandai, played_ms ref sendiri tidak dilihat (seperti online).
+    expect(loopPatternExceeded([1, 2, 3, 4, 5].map((i) => at(-i)), L)).toBe(true);
+    expect(loopPatternExceeded([1, 2, 3, 4].map((i) => at(-i)), S)).toBe(false);
+    expect(loopPatternExceeded([at(-1), at(-2), at(-3, 40_000), at(-4), at(-5)], S)).toBe(false);
+    // Hanya masa depan (urutan menurun): ref + 4 sesudah pendek, tetangga ke-5 = ujung rangkaian → ditandai.
+    expect(loopPatternExceeded([1, 2, 3, 4, 5].map((i) => at(i)), S)).toBe(true);
+    expect(loopPatternExceeded([1, 2, 3, 4, 5].map((i) => at(i)), L)).toBe(false); // ref panjang di awal rangkaian
+    expect(loopPatternExceeded([1, 2, 3, 4].map((i) => at(i)), S)).toBe(false); // baru 5 putar, belum ada ujung
+    expect(loopPatternExceeded([1, 2, 3, 4, 5].map((i) => at(i, i === 5 ? 90_000 : 31_000)), S)).toBe(true); // ujung boleh panjang
+    expect(loopPatternExceeded([1, 2, 3, 4, 5].map((i) => at(i, i === 3 ? 90_000 : 31_000)), S)).toBe(false);
+    // Dua sisi: 2 sebelum + 3 sesudah.
+    expect(loopPatternExceeded([at(-2), at(-1), at(1), at(2), at(3)], S)).toBe(true);
+    expect(loopPatternExceeded([at(-2), at(-1), at(1), at(2), at(3)], L)).toBe(false);
+    // Waktu sama dengan ref dihitung sebelum ref (seperti `<= ref` di jalur lama).
+    expect(loopPatternExceeded([0, 0, 0, 0, 0].map(() => at(0)), L)).toBe(true);
+    // Titik jauh di luar N terdekat diabaikan; urutan input bebas.
+    expect(loopPatternExceeded([at(9), at(-1, 90_000), at(1), at(2), at(3), at(4), at(-9), at(-8), at(-7)], S)).toBe(true);
+    expect(loopPatternExceeded([], S)).toBe(false);
+    expect(loopPatternExceeded([at(-1)], S, 0)).toBe(false);
+  });
+
+  it('LOOP_31S: rangkaian N pendek menghasilkan N − 5 tanda untuk urutan kirim apa pun (menaik, menurun, acak)', () => {
+    const N = 12;
+    const all = Array.from({ length: N }, (_, i) => ({ t: NOW + i * 60_000, played_ms: 31_000 }));
+    const run = (order: number[]) => {
+      const done: typeof all = [];
+      let flagged = 0;
+      for (const i of order) {
+        if (loopPatternExceeded(done, all[i]!)) flagged++;
+        done.push(all[i]!);
+      }
+      return flagged;
+    };
+    const asc = [...all.keys()];
+    expect(run(asc)).toBe(N - 5);
+    expect(run([...asc].reverse())).toBe(N - 5);
+    expect(run([5, 0, 11, 3, 8, 1, 10, 6, 2, 9, 4, 7])).toBe(N - 5);
+    expect(run([6, 5, 7, 4, 8, 3, 9, 2, 10, 1, 11, 0])).toBe(N - 5);
   });
 
   it('masa keanggotaan: Premium tidak aktif & started_at ≥ member_until → after_membership', () => {

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { config, publish, settings, z, type Client, type ServiceContext } from '@rave/service-kit';
-import { FRAUD_RATE_WINDOW_MS, rateWindowExceeded } from '@rave/domain/offline-plays';
+import { FRAUD_LOOP_MAX_PLAYED_MS, FRAUD_LOOP_WINDOW, FRAUD_RATE_WINDOW_MS, loopPatternExceeded, rateWindowExceeded } from '@rave/domain/offline-plays';
 import { insertDeltas, type AggDelta, type ArtistCounter } from './aggregates.js';
 import { todayWib, UNKNOWN } from './util.js';
 
@@ -35,7 +35,7 @@ export const USER_STREAM_LOCK = `SELECT pg_advisory_xact_lock(hashtext('playback
 export const USER_STREAM_TRY_LOCK = `SELECT pg_try_advisory_xact_lock(hashtext('playback.offline-plays'), hashtext($1)) AS ok`;
 
 /** Aturan fraud sederhana (REQ-ADM-03). Produksi: model + fitur device/IP/ASN di pipeline streaming. */
-export const FRAUD = { loopWindow: 5, loopMaxPlayedMs: 35_000 };
+export const FRAUD = { loopWindow: FRAUD_LOOP_WINDOW, loopMaxPlayedMs: FRAUD_LOOP_MAX_PLAYED_MS };
 
 
 /**
@@ -46,10 +46,11 @@ export const FRAUD = { loopWindow: 5, loopMaxPlayedMs: 35_000 };
  *     ≥ batas (`rateWindowExceeded`). Putar offline datang tidak berurutan (batch per putar, waktu menurun); hitungan satu
  *     arah hanya melihat masa lalu sehingga putar yang lebih awal selalu lolos. Untuk urutan menaik hasilnya identik
  *     dengan hitungan satu arah, dan sinkronisasi ratusan putar lintas hari tetap tidak dianggap "N stream dalam 1 jam".
- * - LOOP_31S: N stream qualified terakhir berhenti tepat setelah ambang. Online (tanpa `ref`): sesi online saja (perilaku
- *   lama). Offline: sesi online + putar offline yang qualified, sebelum `ref`.
+ * - LOOP_31S: N stream qualified berturut-turut berhenti tepat setelah ambang. Online (tanpa `ref`): N sesi online terakhir
+ *   (perilaku lama). Offline: sesi online + putar offline qualified, DUA ARAH (`loopPatternExceeded`, `refPlayedMs` =
+ *   played_ms putar ini) — urutan kirim menurun terdeteksi sama dengan urutan menaik.
  */
-export async function fraudCheck(tx: Client, userId: string, ref?: Date): Promise<string | null> {
+export async function fraudCheck(tx: Client, userId: string, ref?: Date, refPlayedMs?: number): Promise<string | null> {
   const max = settings.num('streaming.fraud_max_streams_per_hour');
   const cap = Number.isFinite(max) ? Math.max(0, Math.ceil(max)) : null;
   if (!ref) {
@@ -73,23 +74,36 @@ export async function fraudCheck(tx: Client, userId: string, ref?: Date): Promis
     if ((lim != null && pts.rows.length >= lim) || rateWindowExceeded(pts.rows.map((r: any) => new Date(r.t).getTime()), ref.getTime(), max, FRAUD_RATE_WINDOW_MS))
       return 'RATE_LIMIT';
   }
-  // Pola loop "31 detik": sesi-sesi terakhir berhenti tepat setelah ambang qualified (indeks parsial sessions_user_qualified_idx).
-  const recent = ref
-    ? await tx.query(
-        `SELECT played AS max_played_ms FROM (
-           (SELECT max_played_ms AS played, created_at AS t FROM sessions
-             WHERE user_id = $1 AND qualified_at IS NOT NULL AND created_at <= $3 ORDER BY created_at DESC LIMIT $2)
-           UNION ALL
-           (SELECT played_ms, started_at_client FROM offline_plays
-             WHERE user_id = $1 AND qualified_at IS NOT NULL AND started_at_client <= $3 ORDER BY started_at_client DESC LIMIT $2)
-         ) x ORDER BY t DESC LIMIT $2`,
-        [userId, FRAUD.loopWindow, ref],
-      )
-    : await tx.query(`SELECT max_played_ms FROM sessions WHERE user_id = $1 AND qualified_at IS NOT NULL ORDER BY created_at DESC LIMIT $2`, [
-        userId,
-        FRAUD.loopWindow,
-      ]);
-  if (recent.rows.length === FRAUD.loopWindow && recent.rows.every((r: any) => r.max_played_ms < FRAUD.loopMaxPlayedMs)) return 'LOOP_31S';
+  // Pola loop "31 detik": sesi-sesi berhenti tepat setelah ambang qualified (indeks parsial sessions_user_qualified_idx).
+  if (!ref) {
+    // Online: tidak berubah — N sesi qualified terakhir pengguna.
+    const recent = await tx.query(`SELECT max_played_ms FROM sessions WHERE user_id = $1 AND qualified_at IS NOT NULL ORDER BY created_at DESC LIMIT $2`, [
+      userId,
+      FRAUD.loopWindow,
+    ]);
+    if (recent.rows.length === FRAUD.loopWindow && recent.rows.every((r: any) => r.max_played_ms < FRAUD.loopMaxPlayedMs)) return 'LOOP_31S';
+    return null;
+  }
+  // Offline: DUA ARAH — N stream terdekat di tiap sisi ref (sesi online + putar offline qualified; qualified ⇒ ACCEPTED,
+  // filter status memakai indeks parsial offline_plays_user_started_idx), lalu `loopPatternExceeded`.
+  const near = await tx.query(
+    `SELECT t, played FROM (
+       (SELECT created_at AS t, max_played_ms AS played FROM sessions
+         WHERE user_id = $1 AND qualified_at IS NOT NULL AND created_at <= $3 ORDER BY created_at DESC LIMIT $2)
+       UNION ALL
+       (SELECT started_at_client, played_ms FROM offline_plays
+         WHERE user_id = $1 AND status = 'ACCEPTED' AND qualified_at IS NOT NULL AND started_at_client <= $3 ORDER BY started_at_client DESC LIMIT $2)
+       UNION ALL
+       (SELECT created_at, max_played_ms FROM sessions
+         WHERE user_id = $1 AND qualified_at IS NOT NULL AND created_at > $3 ORDER BY created_at ASC LIMIT $2)
+       UNION ALL
+       (SELECT started_at_client, played_ms FROM offline_plays
+         WHERE user_id = $1 AND status = 'ACCEPTED' AND qualified_at IS NOT NULL AND started_at_client > $3 ORDER BY started_at_client ASC LIMIT $2)
+     ) x`,
+    [userId, FRAUD.loopWindow, ref],
+  );
+  const pts = near.rows.map((r: any) => ({ t: new Date(r.t).getTime(), played_ms: Number(r.played) }));
+  if (loopPatternExceeded(pts, { t: ref.getTime(), played_ms: refPlayedMs ?? Infinity }, FRAUD.loopWindow, FRAUD.loopMaxPlayedMs)) return 'LOOP_31S';
   return null;
 }
 

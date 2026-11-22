@@ -190,7 +190,7 @@ export async function offlinePlayRoutes(app: FastifyInstance, { db, name }: { db
           const qualifies = !reason && !!p.track_id && played >= thresholdMs;
           // fraudCheck SEBELUM putar ini tercatat (seperti jalur online: sesi ditandai qualified setelah pemeriksaan).
           const playedAt = new Date(p.start);
-          const fraud = qualifies ? await fraudCheck(tx, userId, playedAt) : null;
+          const fraud = qualifies ? await fraudCheck(tx, userId, playedAt, played) : null;
           const ins = await tx.query(
             `INSERT INTO offline_plays (id, user_id, device_id, license_id, track_id, episode_id, seq, started_at_client, played_ms, reported_played_ms, received_at, status, reject_reason, qualified_at)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (device_id, seq) DO NOTHING`,
@@ -247,16 +247,22 @@ export async function offlinePlayRoutes(app: FastifyInstance, { db, name }: { db
 /** Batas hapus per putaran job (indeks BRIN received_at + filter status); beberapa putaran per jalan. */
 const PURGE_BATCH = 5000;
 const PURGE_ROUNDS = 20;
+/** Retensi minimum baris REJECTED (hari): > jendela laporan Super Admin 30 hari (offline-report.ts) agar hitungan
+ * penolakan 30 hari lengkap dan jejak forensik tidak hilang walau `download.report_max_age_days` disetel kecil. */
+export const OFFLINE_REJECTED_MIN_RETENTION_DAYS = 31;
+/** Hari retensi REJECTED = max(31, report_max_age_days + 1). */
+export const rejectedRetentionDays = (reportMaxAgeDays: number) =>
+  Math.max(OFFLINE_REJECTED_MIN_RETENTION_DAYS, Math.max(1, Math.ceil(Number.isFinite(reportMaxAgeDays) ? reportMaxAgeDays : 0)) + 1);
 /**
  * Retensi: baris REJECTED (tidak pernah dibayar, tidak punya qualified stream) yang diterima lebih dari
- * `download.report_max_age_days` + 1 hari lalu dihapus berbatch. Seq yang terbebas tidak bisa dipakai untuk memasukkan
- * putar lama lagi: putar itu kini pasti `too_old`. Baris ACCEPTED (dasar royalti/audit) tidak pernah dihapus.
+ * max(31, `download.report_max_age_days` + 1) hari lalu dihapus berbatch. Seq yang terbebas tidak bisa dipakai untuk
+ * memasukkan putar lama lagi: putar itu kini pasti `too_old`. Baris ACCEPTED (dasar royalti/audit) tidak pernah dihapus.
  */
 export const offlinePlaysPurgeJob: Job = {
   name: 'offline-plays-purge',
   everyMs: 3600_000,
   async run({ db, log }) {
-    const days = Math.max(1, Math.ceil(settings.num('download.report_max_age_days'))) + 1;
+    const days = rejectedRetentionDays(settings.num('download.report_max_age_days'));
     let total = 0;
     for (let i = 0; i < PURGE_ROUNDS; i++) {
       const r = await db.query(

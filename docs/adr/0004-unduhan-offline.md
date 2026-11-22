@@ -125,8 +125,13 @@ Izin konten: `tracks.offline_allowed` / `episodes.offline_allowed` (default true
   (`rateWindowExceeded` di `@rave/domain/offline-plays`). Hitungan satu arah (1 jam sebelum `started_at`) bisa dilewati
   dengan mengirim putar berurutan waktu menurun; dua arah menjamin tidak ada jendela 1 jam berisi > batas stream
   non-fraud, apa pun urutan kedatangan. Untuk kiriman menaik hasilnya identik dengan hitungan satu arah. Kueri dibatasi
-  2 × batas baris (pigeonhole: sebanyak itu pasti melampaui). `LOOP_31S` melihat sesi online + putar offline qualified
-  sebelum `started_at`. Perubahan jalur online: hitungan `RATE_LIMIT` memakai `coalesce(played_at, at)` — identik untuk
+  2 × batas baris (pigeonhole: sebanyak itu pasti melampaui). `LOOP_31S` untuk putar offline juga **dua arah**
+  (`loopPatternExceeded`): sesi online + putar offline qualified, 5 terdekat di tiap sisi `started_at`; ditandai bila ada
+  rangkaian 6 stream berurutan waktu yang memuat putar ini dengan 5 stream pertamanya semua < 35 dtk. Putar di ujung
+  rangkaian = aturan online (played_ms-nya sendiri tidak dilihat); putar di dalam rangkaian (tetangga sesudahnya sudah
+  tercatat karena dikirim menurun) ikut diperiksa played_ms-nya dan ditandai sebagai pengganti stream ujung yang sudah
+  tercatat. Satu rangkaian pendek sepanjang N menghasilkan tepat N − 5 tanda untuk urutan kirim apa pun; untuk kiriman
+  menaik identik dengan sebelumnya. Jalur online tidak berubah (5 sesi online terakhir). Perubahan jalur online: hitungan `RATE_LIMIT` memakai `coalesce(played_at, at)` — identik untuk
   data online (played_at = at), dan sinkronisasi ratusan putar offline tidak lagi membuat stream online berikutnya
   dianggap fraud; serta kunci pengguna saat mencatat qualified (lihat Konkurensi) — hasil hitungan tidak berubah.
 - Konkurensi: seluruh batch dalam satu transaksi + outbox, diserialkan per pengguna dengan
@@ -143,8 +148,9 @@ Izin konten: `tracks.offline_allowed` / `episodes.offline_allowed` (default true
   4xx tak terpetakan → `502 upstream_error`).
 - Pertumbuhan tabel: paling banyak `OFFLINE_REJECTED_PER_DEVICE_DAY` (1000) baris REJECTED per perangkat per hari WIB
   (waktu diterima); lewat kuota putar tetap dijawab `rejected` tetapi tidak disimpan. Job `offline-plays-purge` (per jam,
-  berbatch 5000) menghapus baris REJECTED yang diterima > `download.report_max_age_days` + 1 hari lalu — seq yang
-  terbebas tidak bisa memasukkan putar lama lagi (pasti `too_old`). Baris ACCEPTED (dasar royalti) tidak pernah dihapus.
+  berbatch 5000) menghapus baris REJECTED yang diterima > max(31, `download.report_max_age_days` + 1) hari lalu — minimal
+  31 hari agar hitungan penolakan laporan Super Admin (jendela 30 hari) lengkap dan jejak forensik tidak hilang walau
+  `report_max_age_days` disetel kecil; seq yang terbebas tidak bisa memasukkan putar lama lagi (pasti `too_old`). Baris ACCEPTED (dasar royalti) tidak pernah dihapus.
   Migrasi playback `009_offline_plays_user_guards` (indeks per pengguna & kuota REJECTED).
 - **Masa Premium berakhir alami (iam, S1):** job iam `member-expiry` (tiap 10 menit) menerbitkan
   `iam.user.member_changed` sekali per masa untuk akun berbayar dengan `member_until <= now()` — payload sama dengan

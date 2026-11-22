@@ -59,7 +59,20 @@ describe.skipIf(!PG_URL)('playback offline-plays (Postgres asli)', () => {
   const D5B = uuidv7();
   const L5A = uuidv7();
   const L5B = uuidv7();
-  const devices: Record<string, { id: string; user_id: string }> = { [D1]: { id: D1, user_id: U1 }, [D2]: { id: D2, user_id: U2 }, [D5A]: { id: D5A, user_id: U5 }, [D5B]: { id: D5B, user_id: U5 } };
+  // Perangkat ketiga U5 khusus T-4 (kuota REJECTED per perangkat): test paralel dua perangkat bisa meninggalkan satu baris
+  // REJECTED hari ini di D5A ATAU D5B (tergantung pemenang) — perangkat terpisah membuat hitungan kuota deterministik (N-3).
+  const D5C = uuidv7();
+  const L5C = uuidv7();
+  // N-1 (pola loop dua arah): satu akun per skenario agar rangkaian tidak saling menyambung.
+  const LOOP = ['desc', 'asc', 'online'].map(() => ({ user: uuidv7(), device: uuidv7(), license: uuidv7() }));
+  const devices: Record<string, { id: string; user_id: string }> = {
+    [D1]: { id: D1, user_id: U1 },
+    [D2]: { id: D2, user_id: U2 },
+    [D5A]: { id: D5A, user_id: U5 },
+    [D5B]: { id: D5B, user_id: U5 },
+    [D5C]: { id: D5C, user_id: U5 },
+    ...Object.fromEntries(LOOP.map((l) => [l.device, { id: l.device, user_id: l.user }])),
+  };
   let suspended = false;
   const deps: OfflinePlayDeps = {
     entitlement: async (userId, deviceId) => ({
@@ -99,6 +112,8 @@ describe.skipIf(!PG_URL)('playback offline-plays (Postgres asli)', () => {
     await lic(L3, U2, D2, T2);
     await lic(L5A, U5, D5A, T1);
     await lic(L5B, U5, D5B, T1);
+    await lic(L5C, U5, D5C, T1);
+    for (const l of LOOP) await lic(l.license, l.user, l.device, T1);
     app = await testApp(async (a) => {
       await offlinePlayRoutes(a, { db, name: 'playback' }, deps);
       await analyticsRoutes(a, { db, name: 'playback' } as unknown as ServiceContext);
@@ -258,18 +273,18 @@ describe.skipIf(!PG_URL)('playback offline-plays (Postgres asli)', () => {
     await db.query(
       `INSERT INTO offline_plays (id, user_id, device_id, license_id, track_id, seq, started_at_client, played_ms, received_at, status, reject_reason)
        SELECT gen_random_uuid(), $1, $2, $3, $4, 100000 + g, now(), 0, now(), 'REJECTED', 'overlap' FROM generate_series(1, $5::int) g`,
-      [U5, D5A, L5A, T1, OFFLINE_REJECTED_PER_DEVICE_DAY - 5],
+      [U5, D5C, L5C, T1, OFFLINE_REJECTED_PER_DEVICE_DAY - 5],
     );
     const before = (await db.one(`SELECT count(*)::int AS n FROM offline_plays`)).n;
     for (let k = 0; k < 5; k++) {
-      const r = (await send(U5, u5(D5A, Array.from({ length: 200 }, (_, i) => pl(10_000 + k * 200 + i, L5A, t, 5000))))).json();
+      const r = (await send(U5, u5(D5C, Array.from({ length: 200 }, (_, i) => pl(10_000 + k * 200 + i, L5C, t, 5000))))).json();
       expect(r.rejected).toBe(200);
     }
     expect((await db.one(`SELECT count(*)::int AS n FROM offline_plays`)).n - before).toBe(5);
 
-    // Retensi: REJECTED diterima > report_max_age_days + 1 hari lalu dihapus; ACCEPTED lama & REJECTED baru tetap.
+    // Retensi: REJECTED diterima > max(31, report_max_age_days + 1) hari lalu dihapus; ACCEPTED lama & REJECTED baru tetap.
     const old = new Date(Date.now() - 40 * DAY);
-    await db.query(`UPDATE offline_plays SET received_at = $2 WHERE device_id = $1 AND status = 'REJECTED' AND seq BETWEEN 100001 AND 100010`, [D5A, old]);
+    await db.query(`UPDATE offline_plays SET received_at = $2 WHERE device_id = $1 AND status = 'REJECTED' AND seq BETWEEN 100001 AND 100010`, [D5C, old]);
     await db.query(`UPDATE offline_plays SET received_at = $2 WHERE device_id = $1 AND seq = 5000`, [D5A, old]); // ACCEPTED
     const n0 = await db.one(`SELECT count(*) FILTER (WHERE status = 'REJECTED')::int AS rej, count(*) FILTER (WHERE status = 'ACCEPTED')::int AS acc FROM offline_plays`);
     await offlinePlaysPurgeJob.run({ db, log: { info: () => {} } } as any);
@@ -278,6 +293,51 @@ describe.skipIf(!PG_URL)('playback offline-plays (Postgres asli)', () => {
     // Idempoten: jalan lagi tidak menghapus apa pun.
     await offlinePlaysPurgeJob.run({ db, log: { info: () => {} } } as any);
     expect(await db.one(`SELECT count(*) FILTER (WHERE status = 'REJECTED')::int AS rej, count(*) FILTER (WHERE status = 'ACCEPTED')::int AS acc FROM offline_plays`)).toEqual(n1);
+
+    // N-4a: report_max_age_days kecil (7) → retensi tetap 31 hari (jendela laporan admin 30 hari utuh).
+    const prevAge = settings.num('download.report_max_age_days');
+    settings.apply({ 'download.report_max_age_days': 7 });
+    try {
+      await db.query(`UPDATE offline_plays SET received_at = now() - interval '20 days' WHERE device_id = $1 AND status = 'REJECTED' AND seq BETWEEN 100011 AND 100013`, [D5C]);
+      await db.query(`UPDATE offline_plays SET received_at = now() - interval '32 days' WHERE device_id = $1 AND status = 'REJECTED' AND seq BETWEEN 100014 AND 100015`, [D5C]);
+      await offlinePlaysPurgeJob.run({ db, log: { info: () => {} } } as any);
+      const left = await db.query(`SELECT seq FROM offline_plays WHERE device_id = $1 AND seq BETWEEN 100011 AND 100015 ORDER BY seq`, [D5C]);
+      expect(left.map((r) => Number(r.seq))).toEqual([100011, 100012, 100013]);
+    } finally {
+      settings.apply({ 'download.report_max_age_days': prevAge });
+    }
+  });
+
+  it('N-1: pola loop 31 dtk dua arah — 7 putar dikirim satu per batch MENURUN ditandai sama banyak dengan MENAIK', async () => {
+    const [desc, asc, online] = LOOP as [(typeof LOOP)[0], (typeof LOOP)[0], (typeof LOOP)[0]];
+    const t0 = Date.now() - 3 * DAY;
+    const mk = (l: typeof desc, i: number) => ({ seq: i + 1, license_id: l.license, track_id: T1, started_at: iso(t0 + i * 60_000), played_ms: 31_000 });
+    const counts = (u: string) =>
+      db.one(`SELECT count(*) FILTER (WHERE NOT suspicious)::int AS ok, count(*) FILTER (WHERE fraud_reason = 'LOOP_31S')::int AS loop FROM qualified_streams WHERE user_id = $1`, [u]);
+    for (let i = 6; i >= 0; i--) expect((await send(desc.user, { device_id: desc.device, plays: [mk(desc, i)] })).json().accepted).toBe(1);
+    for (let i = 0; i <= 6; i++) expect((await send(asc.user, { device_id: asc.device, plays: [mk(asc, i)] })).json().accepted).toBe(1);
+    expect(await counts(desc.user)).toEqual({ ok: 5, loop: 2 });
+    expect(await counts(asc.user)).toEqual({ ok: 5, loop: 2 });
+    // Menurun: yang ditandai dua putar paling awal; menaik: dua paling akhir (jumlah sama).
+    const flagged = async (u: string) =>
+      (await db.query(`SELECT played_at FROM qualified_streams WHERE user_id = $1 AND suspicious ORDER BY played_at`, [u])).map((r) => new Date(r.played_at).getTime());
+    expect(await flagged(desc.user)).toEqual([t0, t0 + 60_000]);
+    expect(await flagged(asc.user)).toEqual([t0 + 5 * 60_000, t0 + 6 * 60_000]);
+    // Kirim ulang menaik setelah menurun → duplicate, tidak ada tanda baru.
+    expect((await send(desc.user, { device_id: desc.device, plays: Array.from({ length: 7 }, (_, i) => mk(desc, i)) })).json()).toMatchObject({ accepted: 0, duplicate: 7 });
+    expect(await counts(desc.user)).toEqual({ ok: 5, loop: 2 });
+
+    // Tetangga sesudah = sesi ONLINE qualified (cabang sessions > ref): 5 sesi 31 dtk setelah putar offline → ditandai.
+    for (let i = 1; i <= 5; i++)
+      await db.query(
+        `INSERT INTO sessions (id, user_id, track_id, artist_id, quality, codec_label, source, audio_url, duration_ms, created_at, expires_at, qualified_at, max_played_ms)
+         VALUES ($1,$2,$3,$4,'normal','AAC 160','search','/x',200000, $5, $5::timestamptz + interval '1 hour', $5, 31000)`,
+        [uuidv7(), online.user, T1, ART, new Date(t0 + i * 60_000)],
+      );
+    expect((await send(online.user, { device_id: online.device, plays: [mk(online, 0)] })).json()).toMatchObject({ accepted: 1, qualified: 0 });
+    expect(await counts(online.user)).toEqual({ ok: 0, loop: 1 });
+    // Putar offline PANJANG di awal rangkaian online pendek → sah (played_ms-nya ikut diperiksa).
+    expect((await send(online.user, { device_id: online.device, plays: [{ ...mk(online, 0), seq: 2, started_at: iso(t0 - 10 * 60_000), played_ms: 90_000 }] })).json()).toMatchObject({ accepted: 1, qualified: 1 });
   });
 
   it('T-2: kunci pengguna dipegang → 429 seketika (tanpa antre di kunci advisory); banjir batch paralel tidak menahan pool', async () => {
