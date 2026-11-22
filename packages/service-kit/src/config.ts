@@ -75,7 +75,7 @@ if (!config.isDev) {
   else if (!URL.canParse(pub)) bad.push('PUBLIC_WEB_URL (bukan URL valid)');
   // Kredensial DB bawaan dev (rave:rave) dan secret pendek tidak boleh dipakai di produksi.
   if (/\/\/rave:rave@/.test(config.databaseUrl)) bad.push('DATABASE_URL (masih memakai password dev rave:rave)');
-  for (const n of ['JWT_SECRET', 'INTERNAL_SERVICE_SECRET', 'MEDIA_SIGNING_SECRET', 'PG_WEBHOOK_SECRET', 'KYC_KEY']) {
+  for (const n of ['JWT_SECRET', 'INTERNAL_SERVICE_SECRET', 'MEDIA_SIGNING_SECRET', 'PG_WEBHOOK_SECRET', 'KYC_KEY', 'OFFLINE_KEY']) {
     const v = process.env[n];
     if (v && v.length < 32) bad.push(`${n} (minimal 32 karakter)`);
   }

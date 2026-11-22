@@ -14,7 +14,7 @@ Backend (gateway `/v1`, kontrak di `docs/API.md`) dipakai bersama; aplikasi klie
 | P-4 | **Versi minimum aplikasi** (pengaturan platform `apps.min_version_*` + header `X-App-Version` di gateway → 426 Upgrade Required) | Paksa update bila kontrak API berubah | P1 |
 | P-5 | **CORS/origin klien desktop** (`tauri://localhost`, `http://tauri.localhost`) di `CORS_ORIGINS` produksi | Tauri memuat UI dari origin lokal, API absolut | P1 |
 | P-6 | **Upload resumable / chunked** untuk master audio besar (saat ini satu `PUT` biner) | Studio desktop & mobile di jaringan tidak stabil | P2 |
-| P-7 | **Unduhan offline Premium** (lisensi per perangkat, batas 5 perangkat dari pengaturan, berkas terenkripsi, kedaluwarsa) — butuh keputusan DRM | Fitur Premium; rendisi Premium saat ini hanya URL bertanda tangan | P2 |
+| P-7 | **Unduhan offline Premium** (lisensi per perangkat, batas 5 perangkat dari pengaturan, berkas terenkripsi, kedaluwarsa) — **backend selesai (flag `download.enabled` mati)**: ADR-0004 (perlindungan lisensi, bukan DRM penuh), kontrak `docs/API.md` §12; klien & pelaporan putar offline (T6) menyusul | Fitur Premium; rendisi Premium saat ini hanya URL bertanda tangan | P2 |
 | P-8 | **Deep link & universal link** (`rave.id/app/...` ↔ `rave://`) + `assetlinks.json` / `apple-app-site-association` | Bagikan lagu/playlist/event, tautan e-ticket | P2 |
 
 Catatan entitlement yang sudah berlaku dan wajib dihormati klien: `POST /v1/playback/sessions` mengembalikan

@@ -43,16 +43,18 @@ Acuan: **BRD/TDD v2.0** (Bab 9–11). Dokumen ini mencatat bagaimana desain di T
 
 | Service | Tanggung jawab | Data | Event keluar |
 |---|---|---|---|
-| iam | Akun, OTP, sesi, org & peran, KYC, consent, waitlist | `iam` | `iam.user.*`, `iam.org.*`, `iam.kyc.verified`, `iam.waitlist.joined` |
-| catalog | Artis, rilis, lagu, split hak, lirik, podcast/fiksi, pencarian (pg_trgm), QC | `catalog` | `catalog.release.*`, `catalog.artist.upserted` |
+| iam | Akun, OTP, sesi, org & peran, KYC, consent, waitlist | `iam` | `iam.user.*`, `iam.org.*`, `iam.kyc.verified`, `iam.waitlist.joined`, `iam.device.revoked` |
+| catalog | Artis, rilis, lagu, split hak, lirik, podcast/fiksi, pencarian (pg_trgm), QC | `catalog` | `catalog.release.*`, `catalog.artist.upserted`, `catalog.offline.revoked` |
 | library | Like, follow, playlist (fractional index), riwayat | `library` | `library.*` |
-| playback | Entitlement, sesi & URL bertanda tangan, play events, qualified stream, fraud dasar, analitik agregat | `playback` | `playback.stream.qualified` |
+| playback | Entitlement, sesi & URL bertanda tangan, play events, qualified stream, fraud dasar, analitik agregat, lisensi unduhan offline (ADR-0004) | `playback` | `playback.stream.qualified` |
 | booking | EPK dinamis, rate card, kalender (exclusion constraint), inquiry/negosiasi, kontrak, rating, dispute | `booking` | `booking.*` |
 | finance | Invoice, webhook PG, ledger double-entry, escrow hold/release, wallet, payout, rekonsiliasi | `finance` (SERIALIZABLE) | `finance.*` |
 | ticketing | Event, inventori atomik, order + reservasi 10 mnt, e-ticket QR berputar, check-in | `ticketing` | `ticketing.*` |
 | notification | Inbox in-app, preferensi, antrean push/email/WA | `notify` | – |
 
-Komunikasi sinkron antar-service dibatasi (`callService`, token role `service`, endpoint `/internal/*` yang diblokir gateway): katalog → playback (entitlement), library → katalog (hidrasi), booking → playback (statistik EPK), ticketing → finance (invoice).
+Komunikasi sinkron antar-service dibatasi (`callService`, token role `service`, endpoint `/internal/*` yang diblokir gateway): katalog → playback (entitlement), library → katalog (hidrasi), booking → playback (statistik EPK), ticketing → finance (invoice), playback → iam & catalog (lisensi unduhan offline: member/perangkat, artefak & CEK terbungkus).
+
+Unduhan offline Premium (P-7): perangkat di iam, artefak terenkripsi `RAVEOFL1` di catalog (job `offline-artifacts`, konkurensi 1), lisensi Ed25519 di playback; pencabutan lewat `iam.user.member_changed`, `iam.device.revoked`, `catalog.offline.revoked` + recheck. Detail & batas keamanan: `docs/adr/0004-unduhan-offline.md`.
 
 ## 4. Saga booking (TDD §7.1, §10.6)
 

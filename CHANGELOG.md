@@ -5,6 +5,10 @@ Bagian rilis dibuat otomatis oleh `npm run release` (docs/VERSIONING.md); tulis 
 
 ## [Unreleased]
 
+### Fitur
+
+- **unduhan offline (P-7, backend):** fondasi unduhan offline Premium di balik saklar `download.enabled` (default **mati**) — pengaturan grup baru `download` (rollout per ID akun, paket, batas per perangkat, TTL lisensi 30 hari, cek ulang 72 jam, 60 lisensi baru/jam, podcast, kualitas AAC 160); perangkat `GET/POST/DELETE /v1/me/devices` (kunci publik ECDH P-256, batas `subscription.download_devices`); izin `offline_allowed` per lagu/episode di Studio; artefak AAC terenkripsi `RAVEOFL1` dibuat lazy oleh antrean konkurensi 1 di catalog; lisensi bertanda tangan Ed25519 `POST/GET/DELETE /v1/offline/licenses`, `POST /v1/offline/recheck`, `GET /v1/offline/pubkey`; pencabutan otomatis saat Premium berakhir, perangkat dicabut, atau rilis ditarik/izin dimatikan. Migrasi: iam `015_devices`, catalog `020_offline`, playback `005_offline`. Env opsional `OFFLINE_KEY` (default diturunkan dari `KYC_KEY`). Perlindungan lisensi, **bukan DRM penuh** — lihat docs/adr/0004-unduhan-offline.md & docs/API.md §12.
+
 ### Perbaikan
 
 - **booking:** Chromium untuk PDF kontrak di-recycle, ditutup saat idle/shutdown, dan render dibatasi konkurensinya (#4). Browser yang crash/terputus otomatis diganti. Env baru (opsional): `CONTRACT_PDF_MAX_RENDERS` (default 25), `CONTRACT_PDF_IDLE_MS` (default 60000), `CONTRACT_PDF_CONCURRENCY` (default 2) — lihat docs/generated-contract.md.

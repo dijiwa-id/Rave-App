@@ -19,7 +19,7 @@
 | `/v1/auth`, `/v1/me`, `/v1/orgs`, `/v1/waitlist`, `/v1/admin/iam` | iam | 4001 | `iam` |
 | `/v1/catalog`, `/v1/studio`, `/v1/admin/qc` | catalog | 4002 | `catalog` |
 | `/v1/library` | library | 4003 | `library` |
-| `/v1/playback`, `/v1/events/play`, `/v1/analytics` | playback | 4004 | `playback` |
+| `/v1/playback`, `/v1/events/play`, `/v1/analytics`, `/v1/offline` | playback | 4004 | `playback` |
 | `/v1/booking`, `/v1/admin/disputes` | booking | 4005 | `booking` |
 | `/v1/finance`, `/v1/webhooks/pg`, `/v1/admin/finance` | finance | 4006 | `finance` |
 | `/v1/ticketing` | ticketing | 4007 | `ticketing` |
@@ -56,6 +56,9 @@ Endpoint internal antar-service memakai prefix `/internal/...` (TIDAK diekspos g
 | `POST /v1/me/kyc` | ✓ | `{ level:"INDIVIDUAL"\|"BUSINESS", full_name, id_number, org_id?, business_name?, nib? }` | `KycSubmission` (status PENDING) |
 | `GET /v1/me/kyc` | ✓ | | `KycSubmission \| null` |
 | `POST /v1/orgs` | ✓ | `{ type: "ARTIST"\|"MANAGEMENT"\|"LABEL"\|"PROMOTOR", name, city?, genres? }` → ARTIST juga membuat profil artis (event `iam.org.created` → catalog) | `Org` (+ `artist_id` untuk ARTIST). **Klien wajib refresh token** agar `orgs` di JWT terbarui |
+| `GET /v1/me/devices` | ✓ | | `{ data: Device[], limit, active }` — perangkat unduhan offline aktif (§12) |
+| `POST /v1/me/devices` | ✓ | `{ platform: "desktop"\|"android"\|"ios"\|"web", name (1–80), public_key, app_version? }` | `201 Device` baru · `200 Device` kunci sama sudah terdaftar (upsert) · `403 offline_disabled` · `409 device_limit` `{ limit, devices: Device[] }` · `422 invalid_public_key` (§12) |
+| `DELETE /v1/me/devices/:id` | ✓ pemilik | | `Device` (dengan `revoked_at`; idempoten) — milik orang lain `404`. Semua lisensi offline perangkat dicabut |
 | `GET /v1/orgs/:id` | anggota | | `Org & { members: Member[] }` |
 | `POST /v1/orgs/:id/members` | OWNER/ADMIN | `{ email, role: "ADMIN"\|"FINANCE"\|"MEMBER"\|"VIEWER" }` | `Member` |
 | `POST /v1/orgs/:id/manage-artist` | MANAGEMENT OWNER | `{ artist_org_id }` | relasi manajemen↔artis |
@@ -661,6 +664,62 @@ Campaign = {
 
 Seed: 3 promosi internal (Premium, event, live), 2 kampanye berbayar fiktif disetujui (kategori `food_beverage`, `telco`), 1 kampanye `finance` menunggu tinjauan.
 
+
+## 12. Unduhan offline Premium (P-7, ADR-0004)
+
+Desain, skema kripto & batas keamanan: **`docs/adr/0004-unduhan-offline.md`** (perlindungan lisensi, bukan DRM penuh).
+Saklar & batas = pengaturan platform grup `download` (+ `subscription.download_devices`); `download.enabled` default **mati**.
+
+Galat berupa Problem Details dengan `code` (klien memetakan aksi; `detail` ID/EN mengikuti `Accept-Language`):
+
+| `code` | Status | Kapan |
+|---|---|---|
+| `offline_disabled` | 403 | `download.enabled` mati (daftar perangkat, terbit/daftar/recheck lisensi) |
+| `rollout_not_included` | 403 | `download.allow_user_ids` tidak kosong & akun tidak terdaftar |
+| `premium_required` | 403 | Gratis / Premium kedaluwarsa (+ `upgrade_url`) |
+| `tier_not_allowed` | 403 | paket tidak ada di `download.tiers` |
+| `account_suspended` | 403 | akun ditangguhkan/dihapus |
+| `podcast_disabled` | 403 | episode saat `download.podcast_enabled` mati |
+| `device_not_found` | 404 | perangkat tidak ada / milik akun lain |
+| `device_revoked` | 403 | perangkat sudah dicabut |
+| `device_limit` | 409 | perangkat aktif = batas (`limit`, `devices[]`) |
+| `device_full` | 409 | lisensi aktif perangkat = `download.max_tracks_per_device` (`limit`) |
+| `rate_limited` | 429 | lisensi baru > `download.rate_per_user_hour` (`retry_after_s`) |
+| `content_not_found` | 404 | lagu/episode tidak ada atau tidak tayang (rilis bukan LIVE) |
+| `content_not_allowed` | 403 | `offline_allowed = false` |
+| `content_unavailable` | 409 | tidak ada rendisi AAC (URL eksternal/embed/transcoding gagal) |
+
+| Method & Path | Auth | Body / Query | Respons |
+|---|---|---|---|
+| `GET /v1/offline/pubkey` | – | | `{ alg: "Ed25519", kid, public_key (base64url 32 byte), spki_pem }` (cache 1 jam) |
+| `POST /v1/offline/licenses` | ✓ | `{ device_id, track_id }` atau `{ device_id, episode_id }` | `201 OfflineLicense & { download }` baru · `200` lisensi aktif yang sama diperpanjang (idempoten, tidak dihitung rate) · `202 { status: "preparing", retry_after_s }` + header `Retry-After` (berkas terenkripsi sedang dibuat — ulangi) |
+| `GET /v1/offline/licenses` | ✓ | `?device_id=&status=ACTIVE\|REVOKED\|EXPIRED\|all (default ACTIVE)&cursor=&limit=` | `{ data: OfflineLicense[], next_cursor }` (hanya milik sendiri) |
+| `DELETE /v1/offline/licenses/:id` | ✓ pemilik | | `OfflineLicense` (`REVOKED`, `revoke_reason: "USER_REMOVED"`; idempoten; milik orang lain `404`; tetap dilayani saat fitur mati) |
+| `POST /v1/offline/recheck` | ✓ | `{ device_id, license_ids: uuid[] (≤ 2000) }` | `{ checked_at, next_recheck_at, renewed: { license_id, expires_at, recheck_at, license: SignedLicense }[], revoked: { license_id, reason }[], expired: uuid[], unknown: uuid[] }` |
+
+```ts
+Device = { id, platform, name, app_version: string|null, key_fingerprint /* sha256 hex titik publik */, created_at, last_seen_at, revoked_at: string|null }
+OfflineLicense = { id, status: "ACTIVE"|"REVOKED"|"EXPIRED", device_id, track_id: string|null, episode_id: string|null,
+  issued_at, expires_at, recheck_at, revoked_at: string|null,
+  revoke_reason: null|"MEMBERSHIP"|"DEVICE_REVOKED"|"CONTENT_WITHDRAWN"|"ACCOUNT_SUSPENDED"|"USER_REMOVED",
+  artifact: { id, version, size, sha256, codec_label },
+  license: SignedLicense | null /* hanya ACTIVE & belum kedaluwarsa */ }
+download = { url /* /v1/catalog/media/ofl-….rofl?exp&sig — Range didukung, berlaku 6 jam */, expires_at, size, sha256 }
+SignedLicense = { alg: "Ed25519", kid, payload /* base64url byte JSON */, sig /* base64url Ed25519(payload bytes) */ }
+LicensePayload = { v: 1, typ: "rave.offline.license", license_id, user_id, device_id, track_id|null, episode_id|null,
+  artifact: { id, version, format: "RAVEOFL1", rendition: "normal"|"low", codec_label, mime: "audio/mp4", size, plain_size, sha256 },
+  key: { alg: "ECDH-ES+HKDF-SHA256+A256GCM", epk, iv, ct }, issued_at, expires_at, recheck_at }
+```
+
+Alur klien: buat pasangan ECDH P-256 sekali per instalasi → `POST /v1/me/devices` → `POST /v1/offline/licenses` (ulangi
+selama 202) → unduh `download.url` (boleh `Range`/lanjut) → cek `sha256` → verifikasi lisensi dengan `GET /v1/offline/pubkey`
+→ buka `key` dengan kunci privat perangkat (AAD `rave-ofl1:<track|episode>:<id>`) → dekripsi potongan `RAVEOFL1` saat
+memutar. Setelah `recheck_at` dan online: `POST /v1/offline/recheck` dengan semua `license_id` perangkat; hapus berkas
+untuk `revoked`/`expired`/`unknown`. Jangan memutar setelah `expires_at`. Recheck tetap dilayani saat mode pemeliharaan.
+
+Studio: `offline_allowed` (bool) di Track (`PATCH /v1/studio/tracks/:id` — boleh pada rilis yang sudah tayang bila
+body hanya `{ offline_allowed }`) dan Episode (`PATCH /v1/studio/podcasts/:id/episodes/:episodeId`, tidak memicu tinjauan
+ulang). Mematikan → event `catalog.offline.revoked` → lisensi dicabut. Track publik kini memuat `offline_allowed` (aditif).
 
 ## Audio master & rendisi streaming (catalog + playback)
 
