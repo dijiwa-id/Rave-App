@@ -10,7 +10,9 @@ Menjawab dua kriteria go-live BRD §15.1: **"Monitoring uptime dan alert disk/da
 | `npm run monitor:prod` | sekali periksa stack produksi (`docker-compose.prod.yml` + `.env.production`, web `WEB_BIND`) |
 | `npm run monitor -- --watch 60` | periksa tiap 60 dtk (tmux/systemd); alert hanya saat status berubah |
 | `npm run monitor -- --json` | satu baris JSON per putaran (untuk pengumpul log) |
-| `npm run monitor -- --test-alert` | kirim pesan uji ke `ALERT_WEBHOOK_URL` |
+| `npm run monitor -- --test-alert` | kirim SATU alert uji ke semua kanal (email SMTP/Resend, webhook) |
+| `npm run monitor:channels` | tampilkan kanal alert aktif (tersamar), tanpa mengirim |
+| `sudo scripts/install-monitor.sh install\|test\|run\|status` | pasang & periksa systemd timer di VPS (§2.3) |
 | `npm run loadtest:playback -- --vus 10 --duration 30s` | uji beban pemutaran |
 | `npm run loadtest:checkout -- --vus 10 --duration 30s` | uji beban checkout tiket + verifikasi tidak oversell |
 | `npm run loadtest:browse -- --vus 10 --duration 30s` | uji beban baca (beranda, pencarian, rilis, event) |
@@ -59,60 +61,196 @@ Ambang backup mengikuti jadwal bawaan `storage.backup_interval_hours = 24` (liha
 sesuaikan bila interval diubah. Path lain: `MONITOR_STORAGE_DIR`, `MONITOR_BACKUP_DIR`, `MONITOR_PGDATA_DIR`,
 `MONITOR_ENV_FILE`.
 
-## 2. Alert
+## 2. Alert, penjadwalan & uptime eksternal
 
-`ALERT_WEBHOOK_URL` menerima `POST` JSON:
+Dua lapis yang saling menutup titik buta:
 
-```json
-{ "text": "🔴 RAVE prod CRITICAL (…)\n• [CRITICAL] disk.storage: /data …", "content": "…", "source": "rave-monitor",
-  "env": "prod", "level": "CRITICAL", "target": "http://…", "host": "…", "at": "…", "checks": [ … hanya WARN/CRITICAL … ] }
+| Lapis | Di mana | Apa | Bila lapis ini mati |
+| --- | --- | --- | --- |
+| `rave-monitor` (systemd timer, tiap 5 mnt) | di VPS | semua pemeriksaan §1 (status, DB, outbox, dead letter, disk, backup) → email/webhook | uptime eksternal tetap jalan |
+| Uptime eksternal (GitHub Actions, tiap ~10 mnt) | di luar VPS | `GET /v1/status` lewat Cloudflare → workflow merah → email GitHub (+ email/webhook opsional) | monitor VPS tetap jalan |
+
+Opsional: `MONITOR_HEARTBEAT_URL` (healthchecks.io / Better Stack heartbeat) memberi tahu bila **timer monitor sendiri** berhenti.
+
+### 2.1 Kanal alert
+
+Kanal utama = **email**; webhook boleh ditambahkan. Monitor mengirim **langsung** (bukan lewat service notification
+RAVE — alert justru dibutuhkan saat service mati). Semua kanal yang dikonfigurasi menerima pesan yang sama.
+
+| Env | Fungsi |
+| --- | --- |
+| `ALERT_EMAIL_TO` | penerima (pisah koma) — mengaktifkan kanal email |
+| `ALERT_EMAIL_FROM` | pengirim (default: user SMTP bila berupa alamat email, selain itu `EMAIL_FROM`). Gmail: alamat akun itu sendiri |
+| `ALERT_SMTP_URL` | `smtps://user:pass@host:465` (TLS langsung) atau `smtp://user:pass@host:587` (STARTTLS). User/pass di-URL-encode (`@`→`%40`, spasi→`%20`) |
+| `ALERT_SMTP_HOST/PORT/USER/PASS/SECURE` | alternatif tanpa URL-encode |
+| `ALERT_EMAIL_PROVIDER` | `auto` (default: SMTP bila ada, selain itu Resend) \| `smtp` \| `resend` |
+| `RESEND_API_KEY` / `ALERT_RESEND_API_KEY` | Resend HTTP API (dibaca juga dari `.env.production`) |
+| `ALERT_WEBHOOK_URL` (+ `ALERT_WEBHOOK_FORMAT`, `ALERT_TELEGRAM_CHAT_ID`) | webhook: Slack/Discord/Telegram dikenali dari host, lainnya JSON generik |
+
+**Penyedia email sebelum vendor platform siap (#28 / GO-LIVE-AUDIT D1).** Selama `EMAIL_PROVIDER=log` di produksi,
+Resend belum bisa dipakai (domain pengirim belum terverifikasi). Yang langsung jalan: **SMTP akun email biasa dengan
+App Password** — Gmail: aktifkan 2FA → <https://myaccount.google.com/apppasswords> → buat sandi aplikasi "RAVE
+monitor" (16 huruf) → `ALERT_SMTP_URL=smtps://akun%40gmail.com:<16hurufTanpaSpasi>@smtp.gmail.com:465`,
+`ALERT_EMAIL_FROM=akun@gmail.com`. Provider lain setara (Zoho `smtp.zoho.com:465`, Outlook `smtp.office365.com:587`
+— beberapa tenant mematikan SMTP AUTH). Setelah #28 selesai: ganti ke `ALERT_EMAIL_PROVIDER=resend` dengan
+`ALERT_EMAIL_FROM` dari domain terverifikasi.
+
+Keamanan: sertifikat server SMTP selalu diverifikasi; kredensial tidak pernah dikirim tanpa TLS (kecuali ke relay
+loopback, mis. postfix lokal); URL webhook, password SMTP & API key disamarkan dari semua keluaran (`***`), deskripsi
+kanal hanya menampilkan host & alamat tersamar (`d***@gmail.com`). Isi alert hanya nama pemeriksaan, level, dan detail
+§1 (tidak memuat env).
+
+Contoh email:
+
+```
+Subject: [RAVE ALERT] prod CRITICAL: http.status, svc.catalog (<host>)
+
+[RAVE ALERT] prod CRITICAL: http.status, svc.catalog (<host>)
+
+Ada masalah yang perlu ditindaklanjuti.
+
+- [CRITICAL] http.status: ok=false — service down: catalog
+- [CRITICAL] svc.catalog: readyz gagal (4 ms)
+- target http://127.0.0.1:8081
+
+Waktu   : 2026-11-23T02:40:31.093Z
+Dikirim : <host> (prod)
+Runbook : docs/OPERATIONS.md §2 "Menindaklanjuti alert"
 ```
 
-`text` langsung dipahami Slack Incoming Webhook / Mattermost / Google Chat; `content` untuk Discord; sisanya untuk
-penerima generik (n8n, Zapier, PagerDuty Events lewat relay, dsb.).
+Subjek: `[RAVE ALERT] …` (masalah), `[RAVE PULIH] …` (pulih), `[RAVE UJI] …` (uji). Buat filter email pada awalan
+`[RAVE ALERT]` agar tidak masuk Spam/Promosi. Webhook generik menerima `POST` JSON
+`{ text, content, subject, source: "rave-monitor", kind, env, level, target, host, at, checks: [WARN/CRITICAL] }`
+(`text` untuk Slack/Mattermost/Google Chat, `content` untuk Discord).
 
-- `ALERT_MIN_LEVEL` = `WARN` (default) atau `CRITICAL`.
-- Dedup: alert dikirim saat **daftar masalah berubah**, saat **pulih** (✅), dan pengingat tiap `ALERT_REPEAT_MIN`
-  (default 60) selama masalah sama masih ada. State disimpan di `MONITOR_STATE_FILE`
-  (default `$TMPDIR/rave-monitor-<env>.json`) sehingga dedup juga berlaku antar-eksekusi cron.
-- Webhook gagal → dicetak ke stderr dan dicoba lagi pada putaran berikutnya.
+### 2.2 Anti-spam
 
-### Contoh cron (host produksi)
+- Dikirim saat **daftar masalah berubah**, saat **pulih**, dan pengingat tiap `ALERT_REPEAT_MIN` (default 60) selama
+  masalah yang sama masih ada. State di `MONITOR_STATE_FILE` (unit: `/var/lib/rave-monitor/state.json`).
+- **WARN** baru dikirim setelah terlihat `ALERT_WARN_CONFIRM_RUNS` putaran berturut-turut (unit: 2 = ±10 mnt) —
+  meredam latensi yang naik-turun di VPS 2 GB. **CRITICAL selalu langsung**.
+- `ALERT_MIN_LEVEL=CRITICAL` mematikan alert WARN sama sekali.
+- Cukup satu kanal berhasil → dianggap terkirim (tidak mengulang ke kanal yang sudah menerima). Kanal yang gagal
+  dicatat di log (`! alert email gagal: …`). Bila semua kanal gagal, dicoba lagi pada putaran berikutnya.
 
-```cron
-# /etc/cron.d/rave-monitor — tiap menit; log ringkas JSON; alert lewat webhook
-SHELL=/bin/bash
-ALERT_WEBHOOK_URL=https://hooks.slack.com/services/XXX/YYY/ZZZ
-MONITOR_STATE_FILE=/var/lib/rave/monitor-prod.json
-* * * * * deploy cd /srv/rave && npm run -s monitor:prod -- --json >> /var/log/rave-monitor.log 2>&1
+Kode keluar tetap `0` OK/WARN, `2` CRITICAL → unit `rave-monitor.service` berstatus *failed* saat CRITICAL
+(terlihat di `systemctl --failed`); alert sudah dikirim oleh monitor sendiri.
+
+### 2.3 Penjadwalan di VPS (systemd timer)
+
+Berkas: `infra/systemd/rave-monitor.service` + `rave-monitor.timer` (templat), `infra/systemd/monitor.env.example`,
+dipasang oleh `scripts/install-monitor.sh` (idempoten; `--dry-run` mencetak unit hasil render & semua langkah tanpa
+menulis apa pun).
+
+| Aspek | Nilai |
+| --- | --- |
+| Jadwal | `OnCalendar=*:0/5`, `RandomizedDelaySec=30`, `Persistent=true` (putaran terlewat dijalankan saat boot) |
+| User | non-root, default pemilik direktori repo (`--user`), + `SupplementaryGroups=docker` untuk `docker compose exec` |
+| Env | `MONITOR_ENV_FILE=<repo>/.env.production` **dibaca** monitor (tidak disalin/diekspor); secret alert di `/etc/rave/monitor.env` (root:root 0600, dibaca systemd sebelum turun hak) |
+| Sumber daya | ±90 MB RSS, ±2 dtk per putaran; `MemoryHigh=192M`, `MemoryMax=256M`, `CPUQuota=50%`, `Nice=10`, IO idle, `--max-old-space-size=96` |
+| Pengerasan | `NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=full`, `ProtectKernel*`, `ProtectControlGroups` |
+| Log | journald (`journalctl -u rave-monitor`), rotasi oleh journald |
+
+Prasyarat host: Node ≥ 20.12 (disarankan 22) dan `node_modules` repo berisi `tsx` + `pg` (`npm ci` sekali; dampak
+disk ±beberapa ratus MB, RAM nol di luar putaran). Pemeriksaan prasyarat ada di skrip instalasi.
+
+```bash
+cd <repo>                                             # direktori repo di VPS (yang memuat .env.production)
+sudo scripts/install-monitor.sh install --dry-run     # lihat rencana: unit, path, user, berkas yang ditulis
+sudo scripts/install-monitor.sh install               # pasang + enable --now timer (aman diulang)
+sudoedit /etc/rave/monitor.env                        # isi ALERT_EMAIL_TO/FROM + ALERT_SMTP_URL
+sudo scripts/install-monitor.sh test                  # kirim SATU alert uji (env persis seperti unit)
+sudo scripts/install-monitor.sh run                   # satu putaran nyata sekarang + 40 baris log
+scripts/install-monitor.sh status                     # jadwal berikut, hasil terakhir, log 30 baris
+sudo scripts/install-monitor.sh uninstall             # lepas unit (monitor.env & state dibiarkan)
 ```
 
-Atau systemd timer:
+Padanan: `scripts/prod.sh monitor-install|monitor-test|monitor-run|monitor-status|monitor-uninstall`.
+Mengubah jadwal/batas: edit templat di repo → jalankan ulang `install` (hanya berkas yang berubah ditulis). Mengubah
+secret/ambang: edit `/etc/rave/monitor.env` — berlaku di putaran berikutnya tanpa reload.
 
-```ini
-# /etc/systemd/system/rave-monitor.service
-[Service]
-Type=oneshot
-User=deploy
-WorkingDirectory=/srv/rave
-EnvironmentFile=/etc/rave/monitor.env      # ALERT_WEBHOOK_URL=… ambang MONITOR_*
-ExecStart=/usr/bin/npm run -s monitor:prod -- --json
+**Tanpa systemd** (jarang di VPS): `install` keluar dengan kode 3 dan mencetak baris `/etc/cron.d/rave-monitor`
+pengganti (tiap 5 mnt, `nice`, log ke `~/rave-monitor.log`; `monitor.env` harus bisa dibaca user monitor).
 
-# /etc/systemd/system/rave-monitor.timer
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=1min
-[Install]
-WantedBy=timers.target
+### 2.4 Menindaklanjuti alert
+
+Langkah pertama untuk semua alert: `ssh <vps> 'sudo rave-deploy status'` dan `scripts/install-monitor.sh status`.
+Bila penyebabnya deploy terbaru → **rollback dulu** (`rave-deploy` / `scripts/prod.sh rollback <versi>`), diagnosa kemudian.
+
+| Pemeriksaan | Arti | Tindakan |
+| --- | --- | --- |
+| `http.healthz` / `http.web` CRITICAL | nginx web tidak menjawab di `WEB_BIND` | `rave-deploy status`; `rave-deploy logs web`; container restart loop → cek `docker inspect` OOMKilled, `free -m` |
+| `http.status` / `svc.<nama>` CRITICAL | gateway hidup tetapi service gagal `/readyz` | `rave-deploy logs <service>`; OOM (`docker stats --no-stream`, batas di override compose VPS); DB down → lihat `pg.connect` |
+| latensi WARN (`http.*`, `svc.*`, `pg.connect` ≥ 800 ms) | VPS tertekan | `free -m` (swap tinggi?), `docker stats --no-stream`, proses Danantrex; bila tidak membaik → kurangi beban / naikkan RAM |
+| `version.drift` WARN | deploy setengah jalan | selesaikan atau rollback deploy; jangan dibiarkan |
+| `pg.connect` CRITICAL | Postgres tidak bisa dihubungi | `rave-deploy logs postgres`; disk penuh? (`disk.pgdata`); restart postgres hanya setelah penyebab jelas |
+| `pg.connections` WARN/CRITICAL | koneksi mendekati `max_connections` | cari service yang bocor koneksi (`pg_stat_activity` per `application_name`); restart service itu |
+| `pg.long_tx` WARN | transaksi menggantung ≥ 5 mnt | `SELECT pid, application_name, state, now()-xact_start FROM pg_stat_activity …`; `pg_cancel_backend(pid)` bila jelas macet |
+| `bus.outbox` WARN/CRITICAL | event tidak terbit (pembayaran → PAID, notifikasi, dsb. tertahan) | log service pemilik schema di detail; restart service itu; pantau umur turun |
+| `bus.dead_letters` WARN | consumer gagal memproses event 24 jam terakhir | Super Admin → Dead letter: baca galat, perbaiki penyebab, *retry* |
+| `disk.storage` / `disk.pgdata` WARN/CRITICAL (bebas ≤ 20 % / ≤ 10 %) | disk hampir penuh | `df -h`, `docker system df`; aman: `docker image prune` (image lama, setelah deploy sukses), cache varian gambar `<UPLOAD_DIR>/variants`; **jangan** hapus volume/backup tanpa izin |
+| `backup.age` WARN/CRITICAL | backup terakhir > 26 / > 50 jam | `rave-deploy logs platform` (job backup), `scripts/prod.sh backup`; setelah pulih jalankan `npm run prod:backup-verify` |
+| `monitor` CRITICAL "monitor gagal" | skrip monitor sendiri galat | `journalctl -u rave-monitor -n 50`; biasanya `node_modules` hilang setelah `git clean` → `npm ci` |
+| uptime eksternal TURUN tetapi monitor VPS diam | host/Cloudflare/tunnel bermasalah, atau VPS mati | `systemctl status cloudflared`; dasbor Cloudflare; konsol penyedia VPS |
+
+Setelah insiden: catat kronologi & akar masalah (postmortem tanpa menyalahkan), tindakan pencegahan sebagai issue.
+
+### 2.5 Uji alert & pemecahan masalah
+
+- `npm run monitor:channels` / `scripts/monitor.ts --channels` — kanal aktif (tersamar), tanpa mengirim.
+- `sudo scripts/install-monitor.sh test` — satu alert uji `[RAVE UJI] prod uji alert dari <host>`; keluar ≠ 0 bila
+  ada kanal gagal, dengan alasan per kanal:
+
+| Pesan | Penyebab |
+| --- | --- |
+| `SMTP AUTH ditolak: 535 …` | password salah / bukan App Password / 2FA belum aktif |
+| `ETIMEDOUT` / `ECONNREFUSED` ke SMTP | penyedia VPS memblokir port SMTP keluar — coba 587 ↔ 465, atau minta buka blokir |
+| `server SMTP tidak menawarkan STARTTLS` | pakai `smtps://…:465` |
+| `email TIDAK AKTIF (…)` di `--channels` | `ALERT_EMAIL_FROM` atau penyedia (SMTP/Resend) belum di-set |
+| `Resend HTTP 403` | domain pengirim belum terverifikasi di Resend (#28) |
+| email tidak muncul padahal `SMTP 250` | cek Spam; buat filter `[RAVE ALERT]`/`[RAVE UJI]` → jangan pernah ke Spam |
+
+Uji jalur masalah → pulih tanpa menyentuh layanan (state terpisah agar tidak mengganggu dedup timer):
+
+```bash
+cd <repo>
+sudo -u <user> env MONITOR_STATE_FILE=/tmp/rave-mon-uji.json MONITOR_BACKUP_WARN_HOURS=0.01 \
+  ALERT_SMTP_URL='…' ALERT_EMAIL_TO='…' npm run -s monitor:prod     # → email [RAVE ALERT] prod WARN: backup.age
+sudo -u <user> env MONITOR_STATE_FILE=/tmp/rave-mon-uji.json \
+  ALERT_SMTP_URL='…' ALERT_EMAIL_TO='…' npm run -s monitor:prod     # → email [RAVE PULIH] …
 ```
 
-Monitor ini berjalan **di host yang sama** — bila host mati, tidak ada yang berteriak. Wajib ditambah uptime check
-**eksternal**:
+(Nilai `ALERT_*` di shell masuk riwayat shell — awali perintah dengan spasi atau hapus riwayatnya; cara normal adalah
+`sudo scripts/install-monitor.sh test`.)
 
-- UptimeRobot / Better Stack / Pingdom: monitor *HTTP(s) – Keyword* ke `https://<domain>/v1/status`, keyword
-  `"ok":true`, interval 1 menit, alert setelah 2 kegagalan berturut-turut. Tambahan opsional: keyword
-  `"version_drift":[]` (deploy setengah jalan). `/v1/status` di-cache 5 dtk di gateway sehingga aman di-poll sering.
-- Kedua: monitor HTTP ke `https://<domain>/` (SPA via nginx/Caddy) dan, bila memakai live, TCP port 1935.
+### 2.6 Uptime eksternal — GitHub Actions (`.github/workflows/uptime.yml`)
+
+Dipilih karena tanpa server/akun tambahan dan konfigurasinya ada di repo. Tiap ~10 mnt: `curl --max-time 15` ke
+`RAVE_STATUS_URL`, sehat = HTTP 200 **dan** `"ok": true`, 3 percobaan berjeda 20 dtk sebelum dinyatakan turun.
+
+- **Turun** → workflow **gagal** → GitHub mengirim email "Run failed: Uptime" (kanal utama, tanpa secret).
+- **Opsional**: email/webhook sendiri hanya saat status **berubah** (turun / pulih), ditentukan dari kesimpulan run
+  sebelumnya — butuh secret `ALERT_EMAIL_TO` + `ALERT_EMAIL_FROM` + `ALERT_SMTP_URL` (dan/atau `ALERT_WEBHOOK_URL`).
+- `workflow_dispatch`: `test_alert` (kirim satu alert uji), `simulate_down` (workflow merah tanpa menyentuh server →
+  menguji email GitHub; run terjadwal berikutnya yang sehat mengirim "pulih").
+
+Pengaturan (sekali): repo → Settings → Secrets and variables → Actions → **Variables**: `RAVE_STATUS_URL` =
+`https://<domain>/v1/status`; **Secrets** (opsional) seperti di atas. Notifikasi akun GitHub pemilik (dijiwa-id):
+<https://github.com/settings/notifications> → **Actions** → centang **Email** dan **Only notify for failed workflows**.
+Email kegagalan workflow terjadwal dikirim ke **pengguna yang terakhir mengubah baris `cron`** di workflow — pastikan itu
+akun yang dipantau.
+
+Batasan (diterima secara sadar):
+
+- Cron GitHub **tidak presisi**: run bisa telat 5–30 mnt atau sesekali terlewat saat beban tinggi → deteksi nyata
+  10–40 mnt. Untuk deteksi ≤ 1–5 mnt tambahkan UptimeRobot / Better Stack gratis (monitor *Keyword* ke
+  `https://<domain>/v1/status`, keyword `"ok":true`, interval 5 mnt, alert ke email).
+- Workflow terjadwal **dinonaktifkan otomatis setelah 60 hari tanpa aktivitas repo** (repo publik); GitHub mengirim
+  email peringatan sebelumnya. Aktifkan lagi di tab Actions → Uptime → *Enable workflow*.
+- Email GitHub dikirim **per run gagal** (±tiap 10 mnt selama gangguan); alert ALERT_* hanya saat berubah.
+- Memakai menit Actions (±1 mnt/run; repo publik gratis, privat ±4 300 mnt/bulan dari kuota).
+- Bila Cloudflare *Bot Fight Mode*/WAF menantang runner GitHub, run akan merah palsu (HTTP 403) → buat aturan WAF
+  *Skip* untuk path `/v1/status` (User-Agent `rave-uptime/1`).
 
 ## 3. Uji beban (`scripts/loadtest.ts`)
 
@@ -205,6 +343,7 @@ Lingkungan: laptop dev WSL2 (Kali), semua 12 service Node via `./rave start`, Po
 | dev (`npm run monitor`) | **CRITICAL** (exit 2), ±150–180 ms per putaran | semua service OK, `/v1/status` 38 ms, PG 95/300 koneksi, outbox & dead letter kosong, backup 21 jam; **`disk.storage` bebas 8,3 % (77 GB dari 931 GB) di drive D: (`/mnt/d`)** — temuan nyata, bukan bug skrip |
 | prod-lokal (`npm run monitor:prod`) | **OK** (exit 0), ±1,5–2 dtk (termasuk 2× `docker compose exec`) | 11 service + web OK, PG 44/250, volume storage & pgdata bebas 92,9 %, backup 20,7 jam |
 | alert | ✓ | `--test-alert`, alert CRITICAL, dedup putaran ke-2 (tidak terkirim ulang), alert pemulihan ✅ — diuji ke penerima webhook lokal |
+| alert email + timer (2026-11-23) | ✓ | gateway tiruan + server SMTP tiruan (STARTTLS :587-gaya & TLS :465, AUTH PLAIN, sertifikat diverifikasi) + mock Resend: uji → CRITICAL → dedup → WARN tertunda 1/2 → WARN terkirim → pulih → diam; password salah & sertifikat tak tepercaya ditolak tanpa membocorkan secret; unit dirender lolos `systemd-analyze verify`, dijalankan sebagai transient unit (`MemoryMax=256M`): ±90 MB RSS; langkah shell workflow uptime diuji (turun/diam/pulih/uji) |
 
 ### 4.2 Uji beban (dev, gateway :8080)
 

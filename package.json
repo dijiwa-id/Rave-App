@@ -44,6 +44,8 @@
     "version:show": "node -p \"require('./package.json').version\"",
     "monitor": "node --import tsx scripts/monitor.ts",
     "monitor:prod": "node --import tsx scripts/monitor.ts --prod",
+    "monitor:channels": "node --import tsx scripts/monitor.ts --prod --channels",
+    "prod:monitor-install-dry": "bash scripts/install-monitor.sh install --dry-run",
     "loadtest": "node --import tsx scripts/loadtest.ts",
     "loadtest:playback": "node --import tsx scripts/loadtest.ts --scenario playback",
     "loadtest:checkout": "node --import tsx scripts/loadtest.ts --scenario checkout",

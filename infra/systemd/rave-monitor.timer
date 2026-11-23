@@ -1,0 +1,14 @@
+# Jadwal RAVE monitor: tiap 5 menit (jitter ≤ 30 dtk agar tidak bertabrakan dengan job lain di menit bulat).
+[Unit]
+Description=Jalankan RAVE monitor tiap 5 menit
+
+[Timer]
+OnCalendar=*:0/5
+# Putaran yang terlewat saat host mati dijalankan sekali saat boot.
+Persistent=true
+RandomizedDelaySec=30
+AccuracySec=15s
+Unit=rave-monitor.service
+
+[Install]
+WantedBy=timers.target

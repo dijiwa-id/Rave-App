@@ -1,0 +1,45 @@
+# RAVE monitor — satu putaran `scripts/monitor.ts --prod` (dijalankan rave-monitor.timer).
+# TEMPLAT: placeholder (direktori repo, user, path node, file env) diisi oleh scripts/install-monitor.sh — jangan salin mentah.
+# Runbook: docs/OPERATIONS.md §2.
+[Unit]
+Description=RAVE monitor (status, outbox, dead letter, disk, umur backup) + alert email/webhook
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@RAVE_USER@
+# Grup docker: monitor memakai `docker compose exec` untuk disk volume & data Postgres.
+SupplementaryGroups=docker
+WorkingDirectory=@RAVE_DIR@
+# File env produksi DIBACA monitor langsung (POSTGRES_PASSWORD, WEB_BIND, ALERT_EMAIL_TO …), tidak disalin/diekspor.
+Environment=MONITOR_ENV=prod
+Environment="MONITOR_ENV_FILE=@ENV_FILE@"
+Environment=MONITOR_STATE_FILE=/var/lib/rave-monitor/state.json
+Environment=NODE_OPTIONS=--max-old-space-size=96
+Environment=ALERT_WARN_CONFIRM_RUNS=2
+# Secret kanal alert (ALERT_SMTP_URL, ALERT_WEBHOOK_URL, …) + override ambang: root:root 0600, dibaca systemd
+# sebelum turun hak — user monitor tidak perlu bisa membacanya. Opsional (awalan "-").
+EnvironmentFile=-/etc/rave/monitor.env
+ExecStart="@NODE_BIN@" --import tsx scripts/monitor.ts --prod
+# 0 = OK/WARN, 2 = CRITICAL → unit "failed" (terlihat di `systemctl --failed`); alert sudah dikirim monitor sendiri.
+StateDirectory=rave-monitor
+StateDirectoryMode=0700
+TimeoutStartSec=120
+# Ringan untuk VPS 2 GB yang dipakai bersama: ±90 MB RSS per putaran (node + tsx), ±2 dtk.
+MemoryHigh=192M
+MemoryMax=256M
+CPUQuota=50%
+Nice=10
+IOSchedulingClass=idle
+TasksMax=64
+# Pengerasan (docker CLI tetap perlu soket /run/docker.sock & ~/.docker baca-saja).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SyslogIdentifier=rave-monitor

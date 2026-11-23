@@ -73,7 +73,7 @@ Sisa terkait (masuk batch berikutnya): klaim "cair H+1 / split otomatis / escrow
 | D1 | Vendor email OTP (Q-01) & kontrak Midtrans (Q-02) | Adapter & dasbor Integrasi siap; tinggal isi kunci & uji |
 | D2 | Tujuan backup off-site + **sinkron volume `storage`** (master audio & PDF kontrak belum ikut); drill pemulihan bertimer (RTO nyata) | Sidecar siap; tujuan belum dipilih |
 | D3 | **MFA TOTP untuk Super Admin, Finance, penyetuju payout** (BRD REQ-IAM-06). Login pengguna tetap OTP-only sesuai keputusan PO | Belum ada; perlu konfirmasi PO karena menyentuh IAM |
-| D4 | Server produksi nyata (bukan Docker Desktop di WSL), TLS (Caddy), monitor terjadwal + uptime eksternal | Belum |
+| D4 | Server produksi nyata (bukan Docker Desktop di WSL), TLS (Caddy), monitor terjadwal + uptime eksternal | Sebagian: server VPS + Cloudflare Tunnel berjalan; monitor terjadwal (systemd timer) + alert email + uptime eksternal (GitHub Actions) **siap di repo** (#2) — menunggu dipasang di VPS & secret/variable GitHub diisi (docs/OPERATIONS.md §2) |
 | D5 | Kebersihan rilis: tag `v0.1.0`, image GHCR immutable, release.yml digating CI, pemindaian image | Belum (tag kosong; image `:0.1.0` ditimpa) |
 | D6 | Dependensi rentan: zod < 4.6.6 (DoS memori, 9 high), puppeteer-core 25; CSP + perbaikan header nginx; pentest eksternal | Belum |
 | D7 | Bisnis/legal: badan hukum, kode ISRC, domain & email dukungan, PSE, DPO, konfirmasi pajak, kanal pengaduan | Belum |

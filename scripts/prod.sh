@@ -9,6 +9,9 @@
 #   scripts/prod.sh down | status | logs [service] | smoke
 #   scripts/prod.sh backup             # salin dump DB ke off-site sekali (BACKUP_OFFSITE); keluar ≠ 0 bila gagal
 #   scripts/prod.sh backup-verify [..] # uji pemulihan dump terbaru ke DB sementara (scripts/backup-verify.sh)
+#   sudo scripts/prod.sh monitor-install [--dry-run]   # pasang systemd timer rave-monitor (scripts/install-monitor.sh)
+#   sudo scripts/prod.sh monitor-test                  # kirim SATU alert uji (email/webhook) dengan env unit
+#        scripts/prod.sh monitor-status                # timer, hasil terakhir, log
 #
 # Env: ENV_FILE (default .env.production), PROFILES="tls kafka" untuk mengaktifkan profil compose.
 set -euo pipefail
@@ -89,5 +92,10 @@ case "$cmd" in
   smoke) smoke ;;
   backup) dc run --rm --no-deps -T backup-offsite once ;;
   backup-verify) ENV_FILE="$ENV_FILE" bash scripts/backup-verify.sh --compose "$@" ;;
+  monitor-install) bash scripts/install-monitor.sh install --env-file "$ENV_FILE" "$@" ;;
+  monitor-uninstall) bash scripts/install-monitor.sh uninstall "$@" ;;
+  monitor-test) bash scripts/install-monitor.sh test ;;
+  monitor-run) bash scripts/install-monitor.sh run ;;
+  monitor-status) bash scripts/install-monitor.sh status ;;
   *) echo "perintah tidak dikenal: $cmd"; exit 1 ;;
 esac

@@ -4,7 +4,10 @@
 //   npm run monitor:prod                    # sekali jalan terhadap stack produksi lokal (docker-compose.prod.yml)
 //   npm run monitor -- --watch 60           # ulang tiap 60 dtk (systemd/tmux); alert hanya saat status berubah
 //   npm run monitor -- --json               # keluaran JSON (untuk dashboard / pengumpul log)
-//   npm run monitor -- --test-alert         # kirim pesan uji ke ALERT_WEBHOOK_URL lalu keluar
+//   npm run monitor -- --test-alert         # kirim SATU alert uji ke semua kanal (email/webhook) lalu keluar
+//   npm run monitor -- --channels           # tampilkan kanal alert yang aktif (tersamar), tanpa mengirim
+//
+// Dijadwalkan di VPS oleh systemd timer infra/systemd/rave-monitor.{service,timer} (scripts/install-monitor.sh).
 //
 // Kode keluar: 0 = OK/WARN, 1 = WARN dengan --strict, 2 = CRITICAL (cocok untuk cron, systemd OnFailure, Nagios).
 // Ambang & tujuan alert lewat env — lihat docs/OPERATIONS.md §2. Tidak pernah mencetak secret dari .env.production.
@@ -15,6 +18,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 import pg from 'pg';
+import { type AlertKind, type AlertMessage, type Getter, channels, describeChannels, sendAlert } from './alert-channels.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -26,11 +30,14 @@ const opt = (n: string) => {
   return i >= 0 ? argv[i + 1] : undefined;
 };
 if (flag('--help') || flag('-h')) {
-  console.log(`Pakai: node --import tsx scripts/monitor.ts [--prod] [--target URL] [--watch DETIK] [--json] [--strict] [--test-alert]
+  console.log(`Pakai: node --import tsx scripts/monitor.ts [--prod] [--target URL] [--watch DETIK] [--json] [--strict] [--test-alert] [--channels]
 Env ambang: MONITOR_LATENCY_WARN_MS (800) MONITOR_LATENCY_CRIT_MS (3000) MONITOR_DISK_WARN_PCT (20) MONITOR_DISK_CRIT_PCT (10)
             MONITOR_PG_CONN_WARN_PCT (70) MONITOR_PG_CONN_CRIT_PCT (90) MONITOR_BACKUP_WARN_HOURS (26) MONITOR_BACKUP_CRIT_HOURS (50, 0 = matikan)
             MONITOR_OUTBOX_WARN_SEC (120) MONITOR_OUTBOX_CRIT_SEC (900) MONITOR_TX_WARN_SEC (300)
-Env alert:  ALERT_WEBHOOK_URL ALERT_MIN_LEVEL (WARN|CRITICAL, default WARN) ALERT_REPEAT_MIN (60) MONITOR_STATE_FILE
+Env alert:  ALERT_EMAIL_TO ALERT_EMAIL_FROM ALERT_SMTP_URL (atau ALERT_SMTP_HOST/PORT/USER/PASS) ALERT_EMAIL_PROVIDER (auto|smtp|resend)
+            ALERT_WEBHOOK_URL ALERT_WEBHOOK_FORMAT ALERT_TELEGRAM_CHAT_ID
+            ALERT_MIN_LEVEL (WARN|CRITICAL, default WARN) ALERT_REPEAT_MIN (60) ALERT_WARN_CONFIRM_RUNS (1)
+            MONITOR_STATE_FILE MONITOR_HEARTBEAT_URL
 Env lain:   MONITOR_TARGET MONITOR_DATABASE_URL MONITOR_ENV_FILE MONITOR_STORAGE_DIR MONITOR_BACKUP_DIR MONITOR_PGDATA_DIR`);
   process.exit(0);
 }
@@ -375,16 +382,25 @@ function printReport(r: Report) {
   console.log(`  → status keseluruhan: ${paint(r.level, r.level)}`);
 }
 
-// ---------------- Alert (webhook generik; kompatibel Slack `text` & Discord `content`) ----------------
+// ---------------- Alert (webhook & email lewat scripts/alert-channels.ts) ----------------
 interface AlertState {
   level: Level;
   sentAt: number;
   sentLevel: Level | null;
   keys: string;
+  /** Debounce WARN: daftar masalah yang sedang dikonfirmasi & berapa putaran berturut-turut terlihat. */
+  pendingKeys?: string;
+  pendingRuns?: number;
 }
+// Kanal alert boleh diatur di env proses (mis. /etc/rave/monitor.env lewat systemd) ATAU di file env (.env.production);
+// env proses menang. Nilai secret tidak pernah dicetak — keluaran kanal disamarkan oleh alert-channels.redact().
+// Nilai kosong (`ALERT_EMAIL_TO=` di monitor.env) dianggap tidak di-set sehingga tidak menutupi nilai di file env.
+const alertGet: Getter = (k) => process.env[k] || fileEnv[k] || undefined;
 const STATE_FILE = process.env.MONITOR_STATE_FILE ?? join(tmpdir(), `rave-monitor-${ENV_NAME}.json`);
-const MIN_LEVEL: Level = (process.env.ALERT_MIN_LEVEL ?? 'WARN').toUpperCase() === 'CRITICAL' ? 'CRITICAL' : 'WARN';
+const MIN_LEVEL: Level = (alertGet('ALERT_MIN_LEVEL') ?? 'WARN').toUpperCase() === 'CRITICAL' ? 'CRITICAL' : 'WARN';
 const REPEAT_MS = num('ALERT_REPEAT_MIN', 60) * 60_000;
+/** WARN baru dikirim setelah terlihat N putaran berturut-turut (meredam latensi yang naik-turun); CRITICAL selalu langsung. */
+const CONFIRM_RUNS = Math.max(1, num('ALERT_WARN_CONFIRM_RUNS', 1));
 let memState: AlertState | null = null;
 
 function loadState(): AlertState {
@@ -399,35 +415,33 @@ function saveState(s: AlertState) {
   memState = s;
   try {
     writeFileSync(STATE_FILE, JSON.stringify(s), { mode: 0o600 });
-  } catch {
-    /* state hanya untuk dedup alert */
-  }
-}
-
-async function postWebhook(text: string, r: Report | null) {
-  const url = process.env.ALERT_WEBHOOK_URL;
-  if (!url) return false;
-  const payload = {
-    text,
-    content: text.slice(0, 1900), // Discord
-    source: 'rave-monitor',
-    ...(r ? { env: r.env, level: r.level, target: r.target, host: r.host, at: r.at, checks: r.checks.filter((c) => c.level === 'WARN' || c.level === 'CRITICAL') } : {}),
-  };
-  try {
-    const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000) });
-    if (!res.ok) console.error(`! webhook alert HTTP ${res.status}`);
-    return res.ok;
   } catch (e: any) {
-    console.error(`! webhook alert gagal: ${e?.cause?.code ?? e?.message ?? e}`);
-    return false;
+    console.error(`! state alert tidak tersimpan (${STATE_FILE}): ${e?.code ?? e} — dedup tidak berlaku antar-eksekusi`);
   }
 }
 
-function alertText(r: Report, recovered: boolean) {
-  const icon = recovered ? '✅' : r.level === 'CRITICAL' ? '🔴' : '🟠';
+function alertMessage(r: Report, kind: AlertKind): AlertMessage {
   const bad = r.checks.filter((c) => c.level === 'WARN' || c.level === 'CRITICAL');
-  const head = recovered ? `${icon} RAVE ${r.env} pulih — semua pemeriksaan OK` : `${icon} RAVE ${r.env} ${r.level}`;
-  return [head + ` (${r.target}, ${r.host})`, ...bad.map((c) => `• [${c.level}] ${c.name}: ${c.detail}`)].join('\n');
+  const names = bad.map((c) => c.name);
+  const title =
+    kind === 'recovered'
+      ? `${r.env} pulih — semua pemeriksaan OK (${r.host})`
+      : `${r.env} ${r.level}: ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` (+${names.length - 3})` : ''} (${r.host})`;
+  return {
+    kind,
+    env: r.env,
+    level: kind === 'recovered' ? 'OK' : r.level,
+    title,
+    lines: [...bad.map((c) => `[${c.level}] ${c.name}: ${c.detail}`), `target ${r.target}`],
+    data: { target: r.target, host: r.host, at: r.at, checks: bad },
+  };
+}
+
+async function deliver(m: AlertMessage): Promise<boolean> {
+  const res = await sendAlert(m, alertGet);
+  for (const x of res) if (!x.ok) console.error(`! alert ${x.channel} gagal: ${x.detail}`);
+  // Cukup satu kanal berhasil: mengulang kirim ke kanal yang sudah menerima justru menimbulkan spam.
+  return res.some((x) => x.ok);
 }
 
 /** Kirim saat level/daftar masalah berubah, saat pulih, atau pengingat tiap ALERT_REPEAT_MIN selama masih bermasalah. */
@@ -440,31 +454,61 @@ async function maybeAlert(r: Report) {
     .join(',');
   const alerting = RANK[r.level] >= RANK[MIN_LEVEL];
   const wasAlerting = st.sentLevel !== null && RANK[st.sentLevel] >= RANK[MIN_LEVEL];
-  let send: 'problem' | 'recovered' | null = null;
-  if (alerting && (keys !== st.keys || !wasAlerting || Date.now() - st.sentAt >= REPEAT_MS)) send = 'problem';
+  let send: AlertKind | null = null;
+  let pendingKeys: string | undefined;
+  let pendingRuns: number | undefined;
+  if (alerting && (keys !== st.keys || !wasAlerting)) {
+    // Masalah baru/berubah. WARN menunggu konfirmasi N putaran; CRITICAL langsung.
+    pendingRuns = st.pendingKeys === keys ? (st.pendingRuns ?? 0) + 1 : 1;
+    pendingKeys = keys;
+    if (r.level === 'CRITICAL' || pendingRuns >= CONFIRM_RUNS) send = 'problem';
+  } else if (alerting && Date.now() - st.sentAt >= REPEAT_MS) send = 'problem';
   else if (!alerting && wasAlerting) send = 'recovered';
-  if (send && process.env.ALERT_WEBHOOK_URL) {
-    const ok = await postWebhook(alertText(r, send === 'recovered'), r);
-    if (ok) {
-      saveState({ level: r.level, sentAt: Date.now(), sentLevel: send === 'recovered' ? null : r.level, keys: send === 'recovered' ? '' : keys });
-      if (!flag('--json')) console.log(`  → alert ${send === 'recovered' ? 'pemulihan' : r.level} terkirim ke ALERT_WEBHOOK_URL`);
-      return;
-    }
+
+  const channelsOn = channels(alertGet).length > 0;
+  if (send && channelsOn && (await deliver(alertMessage(r, send)))) {
+    saveState({ level: r.level, sentAt: Date.now(), sentLevel: send === 'recovered' ? null : r.level, keys: send === 'recovered' ? '' : keys });
+    if (!flag('--json')) console.log(`  → alert ${send === 'recovered' ? 'pemulihan' : r.level} terkirim (${describeChannels(alertGet).length} kanal)`);
+    return;
   }
-  saveState({ ...st, level: r.level });
+  if (send === 'problem' && !channelsOn && !flag('--json')) console.log('  → tidak ada kanal alert (ALERT_WEBHOOK_URL / ALERT_EMAIL_TO belum di-set)');
+  if (!send && pendingKeys && !flag('--json')) console.log(`  → WARN menunggu konfirmasi (${pendingRuns}/${CONFIRM_RUNS} putaran)`);
+  saveState({ ...st, level: r.level, pendingKeys: alerting ? pendingKeys ?? st.pendingKeys : undefined, pendingRuns: alerting ? pendingRuns ?? st.pendingRuns : undefined });
+}
+
+/** Dead man's switch opsional (healthchecks.io, Better Stack heartbeat, Uptime Kuma push): ping setiap putaran selesai,
+ *  `/fail` saat CRITICAL. Bila timer berhenti / host mati, layanan heartbeat yang berteriak. */
+async function heartbeat(r: Report) {
+  const url = alertGet('MONITOR_HEARTBEAT_URL');
+  if (!url) return;
+  const target = r.level === 'CRITICAL' && /hc-ping\.com|healthchecks/.test(url) ? url.replace(/\/$/, '') + '/fail' : url;
+  try {
+    await fetch(target, { method: 'GET', signal: AbortSignal.timeout(5_000), headers: { 'user-agent': 'rave-monitor' } });
+  } catch (e: any) {
+    console.error(`! heartbeat gagal: ${e?.cause?.code ?? e?.name ?? 'galat'}`);
+  }
 }
 
 // ---------------- Main ----------------
+if (flag('--channels')) {
+  const d = describeChannels(alertGet);
+  console.log(d.length ? d.map((x) => `  ${x}`).join('\n') : '  (tidak ada kanal alert — set ALERT_EMAIL_TO + SMTP, atau ALERT_WEBHOOK_URL)');
+  console.log(`  ALERT_MIN_LEVEL=${MIN_LEVEL} ALERT_REPEAT_MIN=${REPEAT_MS / 60_000} ALERT_WARN_CONFIRM_RUNS=${CONFIRM_RUNS} state=${STATE_FILE}`);
+  process.exit(0);
+}
 if (flag('--test-alert')) {
-  if (!process.env.ALERT_WEBHOOK_URL) {
-    console.error('✗ ALERT_WEBHOOK_URL belum di-set');
+  const d = describeChannels(alertGet);
+  if (!d.length) {
+    console.error('✗ tidak ada kanal alert — set ALERT_EMAIL_TO + ALERT_SMTP_URL (atau RESEND_API_KEY), dan/atau ALERT_WEBHOOK_URL');
     process.exit(1);
   }
-  const ok = await postWebhook(`🧪 RAVE monitor [${ENV_NAME}] uji alert dari ${hostname()} — webhook berfungsi.`, null);
-  console.log(ok ? '✓ pesan uji terkirim' : '✗ pesan uji gagal');
-  process.exit(ok ? 0 : 1);
+  const res = await sendAlert(
+    { kind: 'test', env: ENV_NAME, level: 'OK', title: `${ENV_NAME} uji alert dari ${hostname()}`, lines: [`target ${TARGET}`], data: { target: TARGET, host: hostname() } },
+    alertGet,
+  );
+  res.forEach((x, i) => console.log(`${x.ok ? '✓' : '✗'} ${d[i]}: ${x.detail}`));
+  process.exit(res.every((x) => x.ok) ? 0 : 1);
 }
-
 const exitCode = (l: Level) => (l === 'CRITICAL' ? 2 : l === 'WARN' && flag('--strict') ? 1 : 0);
 const watchSec = Number(opt('--watch') ?? 0);
 
@@ -478,6 +522,7 @@ async function tick() {
   if (flag('--json')) console.log(JSON.stringify(r));
   else printReport(r);
   await maybeAlert(r);
+  await heartbeat(r);
   return r;
 }
 

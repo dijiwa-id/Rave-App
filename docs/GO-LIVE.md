@@ -24,7 +24,10 @@ Jalankan `npm run prod:preflight` sebelum setiap deploy; blocker di bawah juga m
 - **Object storage** untuk upload & HLS (sekarang volume lokal; gateway menerima body s.d. 2 GB). Target: presigned URL ke S3/GCS.
 - **Monitoring & alert** — *alat siap*: `npm run monitor:prod` (status/versi, koneksi & ukuran Postgres, outbox,
   dead letter, disk volume `storage` & data Postgres, umur backup) dengan alert ke `ALERT_WEBHOOK_URL` (Slack/Discord,
-  de-duplikasi). Sisa: pasang cron/systemd timer + uptime check eksternal (docs/OPERATIONS.md); metrik
+  de-duplikasi). **Penjadwalan & alert email siap di repo (#2, 2026-11-23)**: systemd timer tiap 5 mnt
+  (`scripts/install-monitor.sh`, `infra/systemd/`), alert email SMTP/Resend + webhook dengan anti-spam & `--test-alert`,
+  uptime eksternal GitHub Actions (`.github/workflows/uptime.yml`). **Sisa (pengguna)**: pasang timer di VPS, isi
+  `/etc/rave/monitor.env`, set `RAVE_STATUS_URL`, terima satu alert uji (docs/OPERATIONS.md §2.3–2.6). Metrik
   Prometheus/OTel & agregasi log JSON masih belum.
 - **JWT RS256 + JWKS** (sekarang HS256 dengan satu secret bersama — docs/ARCHITECTURE.md).
 - **Rotasi secret** terdokumentasi (JWT/INTERNAL bisa dirotasi dengan restart; `KYC_KEY` tidak — data terenkripsi).

@@ -45,6 +45,12 @@ npm run prod:smoke               # /v1/version, /v1/status (semua service sehat 
 scripts/prod.sh rollback 0.1.0   # kembali ke image versi lama
 ```
 
+**Monitoring terjadwal** (sekali per host, docs/OPERATIONS.md §2): `sudo scripts/install-monitor.sh install --dry-run`
+→ `install` → isi `/etc/rave/monitor.env` (email alert) → `sudo scripts/install-monitor.sh test`. Timer
+`rave-monitor.timer` tidak ikut di-restart oleh deploy dan tidak perlu dipasang ulang kecuali templat
+`infra/systemd/*` berubah (jalankan ulang `install`; idempoten). Uptime eksternal: workflow `Uptime` +
+variable repo `RAVE_STATUS_URL`. Setelah `npm ci` dihapus/`git clean -x`, monitor gagal ("monitor gagal") → `npm ci`.
+
 ### Update versi (rolling di satu host)
 
 1. Di mesin rilis: `npm run release -- auto && git push --follow-tags` → CI mendorong image (docs/VERSIONING.md).

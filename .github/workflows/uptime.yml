@@ -1,0 +1,149 @@
+# Uptime check EKSTERNAL ke /v1/status produksi (melengkapi rave-monitor di VPS, yang diam bila host mati).
+# Runbook & batasan: docs/OPERATIONS.md §2.6.
+#
+# - Workflow GAGAL saat /v1/status tidak sehat → GitHub mengirim email "Run failed" (Settings → Notifications →
+#   Actions → "Only notify for failed workflows"). Itu kanal utama, tanpa secret apa pun.
+# - Opsional: email/webhook sendiri saat status BERUBAH (turun / pulih) bila secret ALERT_* diisi
+#   (dikirim oleh scripts/alert-channels.ts — Node bawaan, tanpa npm ci).
+# - Konfigurasi: variable repo RAVE_STATUS_URL (mis. https://rave.danantrex.my.id/v1/status). Kosong → dilewati.
+name: Uptime
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # GitHub tidak presisi: bisa telat 5–30 mnt saat beban tinggi
+  workflow_dispatch:
+    inputs:
+      test_alert:
+        description: Kirim satu alert uji ke kanal ALERT_* (email/webhook)
+        type: boolean
+        default: false
+      simulate_down:
+        description: Uji — anggap /v1/status gagal (workflow merah → email GitHub + alert "turun")
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read   # membaca kesimpulan run sebelumnya (deteksi perubahan status)
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      RAVE_STATUS_URL: ${{ vars.RAVE_STATUS_URL }}
+      SIMULATE_DOWN: ${{ inputs.simulate_down && 'true' || 'false' }}
+    steps:
+      - name: Periksa /v1/status (3 percobaan)
+        id: check
+        run: |
+          if [ -z "$RAVE_STATUS_URL" ]; then
+            echo "::warning::variable repo RAVE_STATUS_URL belum di-set — uptime check dilewati (docs/OPERATIONS.md §2.6)"
+            echo "state=unconfigured" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          up=false reason="" version=""
+          for i in 1 2 3; do
+            if [ "$SIMULATE_DOWN" = true ]; then reason="simulasi (workflow_dispatch simulate_down)"; break; fi
+            start=$(date +%s%3N)
+            code=$(curl -sS -o body.json -w '%{http_code}' --max-time 15 --retry 0 \
+                   -A 'rave-uptime/1 (GitHub Actions)' -H 'cache-control: no-cache' "$RAVE_STATUS_URL" 2>curl.err) || code=000
+            ms=$(( $(date +%s%3N) - start ))
+            if [ "$code" = 200 ] && jq -e '.ok == true' body.json >/dev/null 2>&1; then
+              up=true version=$(jq -r '.version // "?"' body.json)
+              drift=$(jq -r '(.version_drift // []) | join(", ")' body.json)
+              [ -z "$drift" ] || echo "::warning::versi tidak seragam: $drift"
+              echo "OK $code dalam ${ms} ms, versi $version"
+              break
+            fi
+            if [ "$code" = 000 ]; then reason="tidak terjangkau ($(tail -c 160 curl.err | tr -d '\n'))"
+            elif [ "$code" != 200 ]; then reason="HTTP $code"
+            else reason="ok=false — service down: $(jq -r '[.services[]? | select(.ok | not) | .service] | join(", ")' body.json 2>/dev/null)"
+            fi
+            echo "percobaan $i: $reason (${ms} ms)"
+            [ "$i" = 3 ] || sleep 20
+          done
+          echo "state=$([ "$up" = true ] && echo up || echo down)" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Status run sebelumnya
+        id: prev
+        if: steps.check.outputs.state != 'unconfigured'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/uptime.yml/runs?status=completed&per_page=10" \
+                 --jq "[.workflow_runs[] | select(.id != $GITHUB_RUN_ID) | select(.conclusion == \"success\" or .conclusion == \"failure\")][0].conclusion // \"success\"" \
+                 2>/dev/null || echo unknown)
+          echo "sebelumnya: $prev"
+          echo "conclusion=$prev" >> "$GITHUB_OUTPUT"
+
+      - name: Tentukan alert
+        id: decide
+        if: steps.check.outputs.state != 'unconfigured' || inputs.test_alert
+        env:
+          STATE: ${{ steps.check.outputs.state }}
+          PREV: ${{ steps.prev.outputs.conclusion }}
+          TEST: ${{ inputs.test_alert && 'true' || 'false' }}
+          HAS_CHANNEL: ${{ (secrets.ALERT_EMAIL_TO != '' || secrets.ALERT_WEBHOOK_URL != '') && 'true' || 'false' }}
+        run: |
+          kind=""
+          if [ "$TEST" = true ]; then kind=test
+          elif [ "$STATE" = down ] && [ "$PREV" != failure ]; then kind=problem
+          elif [ "$STATE" = up ] && [ "$PREV" = failure ]; then kind=recovered
+          fi
+          if [ -n "$kind" ] && [ "$HAS_CHANNEL" != true ]; then
+            echo "::notice::tidak ada secret ALERT_EMAIL_TO/ALERT_WEBHOOK_URL — hanya email kegagalan bawaan GitHub"
+            kind=""
+          fi
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+          echo "alert: ${kind:-tidak ada (status tidak berubah)}"
+
+      - uses: actions/checkout@v4
+        if: steps.decide.outputs.kind != ''
+        with:
+          sparse-checkout: scripts/alert-channels.ts
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@v4
+        if: steps.decide.outputs.kind != ''
+        with:
+          node-version: 22   # ≥ 22.18: menjalankan .ts langsung (type stripping), tanpa npm ci
+
+      - name: Kirim alert (${{ steps.decide.outputs.kind }})
+        if: steps.decide.outputs.kind != ''
+        continue-on-error: true   # kanal alert bermasalah tidak boleh mengubah kesimpulan uptime
+        env:
+          KIND: ${{ steps.decide.outputs.kind }}
+          REASON: ${{ steps.check.outputs.reason }}
+          VERSION: ${{ steps.check.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+          ALERT_SMTP_URL: ${{ secrets.ALERT_SMTP_URL }}
+          ALERT_EMAIL_PROVIDER: ${{ secrets.ALERT_EMAIL_PROVIDER }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_TELEGRAM_CHAT_ID: ${{ secrets.ALERT_TELEGRAM_CHAT_ID }}
+        run: |
+          host=$(printf '%s' "$RAVE_STATUS_URL" | sed -E 's#^[a-z]+://([^/]+).*#\1#')
+          case "$KIND" in
+            problem)   title="uptime TURUN: $host/v1/status"; lines=(--line "$REASON" --line "dicek dari GitHub Actions setelah 3 percobaan") ;;
+            recovered) title="uptime pulih: $host/v1/status (versi ${VERSION:-?})"; lines=() ;;
+            *)         title="uptime uji alert dari GitHub Actions ($host)"; lines=() ;;
+          esac
+          node scripts/alert-channels.ts --kind "$KIND" --env uptime --level "$([ "$KIND" = problem ] && echo DOWN || echo OK)" \
+            --title "$title" "${lines[@]}" --line "run: $RUN_URL"
+
+      - name: Gagal bila /v1/status tidak sehat (memicu email GitHub)
+        if: steps.check.outputs.state == 'down'
+        env:
+          REASON: ${{ steps.check.outputs.reason }}
+        run: |
+          echo "::error::/v1/status tidak sehat: $REASON"
+          exit 1
