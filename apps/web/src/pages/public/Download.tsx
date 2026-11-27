@@ -81,9 +81,9 @@ function AppCard(p: {
       {p.primary ? (
         <>
           <p className="mt-5 font-label text-[11px] font-bold tracking-[0.1em] text-rave-primary-text uppercase">
-            {p.version && d.version(p.version)} · {fmtSize(p.primary.size)}
+            {[p.version && d.version(p.version), fmtSize(p.primary.size)].filter(Boolean).join(' · ')}
           </p>
-          <a href={p.primary.url} download={p.primary.file} className={cx(BTN_PRIMARY, 'mt-3 justify-center')}>
+          <a href={p.primary.url} download={p.primary.file || undefined} className={cx(BTN_PRIMARY, 'mt-3 justify-center')}>
             <DownloadIcon className="size-4" /> {p.primaryLabel}
           </a>
           {p.secondary && (
@@ -97,9 +97,11 @@ function AppCard(p: {
               <li key={s}>{s}</li>
             ))}
           </ol>
-          <p className="mt-auto pt-6 font-mono text-[10px] break-all text-white/35" title={d.checksum}>
-            {d.checksum}: {p.primary.sha256}
-          </p>
+          {p.primary.sha256 && (
+            <p className="mt-auto pt-6 font-mono text-[10px] break-all text-white/35" title={d.checksum}>
+              {d.checksum}: {p.primary.sha256}
+            </p>
+          )}
         </>
       ) : (
         <p className="mt-5 text-sm text-white/55">{p.loading ? '…' : d.unavailable}</p>
