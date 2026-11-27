@@ -80,7 +80,8 @@ function DownloadMenu() {
                     <span className="block">{a.download} {name}</span>
                     <span className="block text-xs font-normal opacity-70">
                       {version && `v${version} · `}
-                      {fmtSize(asset.size)} · {hint}
+                      {asset.size > 0 && `${fmtSize(asset.size)} · `}
+                      {hint}
                     </span>
                   </span>
                 </a>

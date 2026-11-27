@@ -5,8 +5,7 @@
  *
  * Sumber (repo saudara, bisa ditimpa env):
  * - Desktop : $RAVE_DESKTOP_DIR (../RAVE-Desktop-apps) → installers/RAVE_<versi package.json>_x64-setup.exe & .msi
- * - Android : $RAVE_MOBILE_DIR  (../RAVE-mobile-apps)  → build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
- *             (versi dari pubspec.yaml), disalin sebagai RAVE_<versi>_android-arm64.apk
+ * - Android : TIDAK diterbitkan di sini — web membaca GitHub Release terbaru dijiwa-id/RAVE-Mobile-Apps.
  * Hanya versi terbaru yang disimpan per platform (berkas lama dihapus). Platform yang tidak ditemukan dilewati
  * (manifest tetap ditulis tanpa platform itu → web menampilkan "segera").
  */
@@ -17,7 +16,6 @@ import { join, resolve } from 'node:path';
 const ROOT = resolve(import.meta.dirname, '..');
 const OUT = join(ROOT, 'downloads');
 const DESKTOP = resolve(process.env.RAVE_DESKTOP_DIR ?? join(ROOT, '..', 'RAVE-Desktop-apps'));
-const MOBILE = resolve(process.env.RAVE_MOBILE_DIR ?? join(ROOT, '..', 'RAVE-mobile-apps'));
 
 interface Asset {
   file: string;
@@ -39,7 +37,6 @@ function publish(dir: 'desktop' | 'mobile', src: string, name: string): Asset {
 const manifest: {
   generated_at: string;
   desktop?: { platform: 'windows'; version: string; installer: Asset; msi?: Asset };
-  android?: { version: string; build: string | null; apk: Asset; min_android: string };
 } = { generated_at: new Date().toISOString() };
 
 // ---- Desktop (Windows) ----
@@ -60,16 +57,9 @@ try {
 }
 
 // ---- Android ----
-try {
-  const m = /^version:\s*([\d.]+)(?:\+(\d+))?/m.exec(readFileSync(join(MOBILE, 'pubspec.yaml'), 'utf8'));
-  if (!m) throw new Error('versi pubspec.yaml tidak terbaca');
-  const apk = join(MOBILE, 'build', 'app', 'outputs', 'flutter-apk', 'app-arm64-v8a-release.apk');
-  if (!existsSync(apk)) throw new Error(`${apk} belum ada — build dulu (build-apk.bat)`);
-  manifest.android = { version: m[1], build: m[2] ?? null, apk: publish('mobile', apk, `RAVE_${m[1]}_android-arm64.apk`), min_android: '7.0' };
-  console.log(`✓ android ${m[1]}${m[2] ? `+${m[2]}` : ''}`);
-} catch (e) {
-  console.warn(`! android dilewati: ${(e as Error).message}`);
-}
+// Tidak lagi disalin ke sini: web mengambil APK langsung dari GitHub Release terbaru dijiwa-id/RAVE-Mobile-Apps
+// (lihat apps/web/src/lib/appDownloads.ts). APK lama di downloads/mobile dibersihkan agar tak ada versi basi.
+for (const old of readdirSync(join(OUT, 'mobile'))) if (old.endsWith('.apk')) rmSync(join(OUT, 'mobile', old));
 
 writeFileSync(join(OUT, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 console.log(`✓ ${join(OUT, 'manifest.json')}`);
